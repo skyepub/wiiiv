@@ -138,8 +138,9 @@ wiiiv/
 - [x] DbExecutor 구현 (데이터베이스 쿼리, ConnectionProvider 추상화)
 - [x] WebSocketExecutor 구현 (SEND/RECEIVE/SEND_RECEIVE, 타임아웃)
 - [x] MessageQueueExecutor 구현 (PUBLISH/CONSUME/REQUEST_REPLY, Provider 추상화)
+- [x] GrpcExecutor 구현 (UNARY/SERVER_STREAMING/CLIENT_STREAMING/BIDIRECTIONAL_STREAMING, Provider 추상화)
 
-**테스트 현황: 303개 통과**
+**테스트 현황: 322개 통과**
 
 | 테스트 | 개수 |
 |--------|------|
@@ -152,6 +153,7 @@ wiiiv/
 | DbExecutorTest | 26 |
 | WebSocketExecutorTest | 12 |
 | MessageQueueExecutorTest | 19 |
+| GrpcExecutorTest | 19 |
 | BlueprintTest | 9 |
 | GovernorTest | 12 |
 | GateTest | 29 |

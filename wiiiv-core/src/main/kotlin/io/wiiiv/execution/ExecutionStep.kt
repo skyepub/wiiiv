@@ -64,7 +64,12 @@ enum class StepType {
     /**
      * 메시지 큐 (Kafka, RabbitMQ 등)
      */
-    MESSAGE_QUEUE
+    MESSAGE_QUEUE,
+
+    /**
+     * gRPC 호출
+     */
+    GRPC
 }
 
 /**
@@ -229,6 +234,26 @@ sealed class ExecutionStep {
     }
 
     /**
+     * gRPC Step
+     *
+     * gRPC 서비스 호출
+     */
+    @Serializable
+    data class GrpcStep(
+        override val stepId: String,
+        val action: GrpcAction,
+        val target: String,
+        val service: String,
+        val method: String,
+        val request: String? = null,
+        val metadata: Map<String, String> = emptyMap(),
+        val timeoutMs: Long = 30_000,
+        override val params: Map<String, String> = emptyMap()
+    ) : ExecutionStep() {
+        override val type: StepType = StepType.GRPC
+    }
+
+    /**
      * Noop Step - 테스트/검증용
      */
     @Serializable
@@ -290,4 +315,18 @@ enum class MessageQueueAction {
     CONSUME,
     /** 메시지 발행 후 응답 대기 */
     REQUEST_REPLY
+}
+
+/**
+ * gRPC Action
+ */
+enum class GrpcAction {
+    /** 단항 호출 (Unary) */
+    UNARY,
+    /** 서버 스트리밍 */
+    SERVER_STREAMING,
+    /** 클라이언트 스트리밍 */
+    CLIENT_STREAMING,
+    /** 양방향 스트리밍 */
+    BIDIRECTIONAL_STREAMING
 }

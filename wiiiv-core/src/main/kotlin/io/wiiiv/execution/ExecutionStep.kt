@@ -186,12 +186,18 @@ sealed class ExecutionStep {
 
     /**
      * Multimodal Step
+     *
+     * 이미지, 문서, 오디오 등 멀티모달 데이터 처리
      */
     @Serializable
     data class MultimodalStep(
         override val stepId: String,
+        val action: MultimodalAction,
         val inputPath: String,
-        val schemaId: String,
+        val prompt: String? = null,
+        val outputFormat: String? = null,
+        val providerId: String? = null,
+        val timeoutMs: Long = 60_000,
         override val params: Map<String, String> = emptyMap()
     ) : ExecutionStep() {
         override val type: StepType = StepType.MULTIMODAL
@@ -329,4 +335,20 @@ enum class GrpcAction {
     CLIENT_STREAMING,
     /** 양방향 스트리밍 */
     BIDIRECTIONAL_STREAMING
+}
+
+/**
+ * Multimodal Action
+ */
+enum class MultimodalAction {
+    /** 이미지 분석 (설명, 객체 탐지) */
+    ANALYZE_IMAGE,
+    /** 이미지에서 텍스트 추출 (OCR) */
+    EXTRACT_TEXT,
+    /** 문서 파싱 (PDF, DOCX 등) */
+    PARSE_DOCUMENT,
+    /** 오디오 전사 */
+    TRANSCRIBE_AUDIO,
+    /** 비전 기반 질의응답 */
+    VISION_QA
 }

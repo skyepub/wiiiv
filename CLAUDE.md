@@ -139,8 +139,10 @@ wiiiv/
 - [x] WebSocketExecutor 구현 (SEND/RECEIVE/SEND_RECEIVE, 타임아웃)
 - [x] MessageQueueExecutor 구현 (PUBLISH/CONSUME/REQUEST_REPLY, Provider 추상화)
 - [x] GrpcExecutor 구현 (UNARY/SERVER_STREAMING/CLIENT_STREAMING/BIDIRECTIONAL_STREAMING, Provider 추상화)
+- [x] MultimodalExecutor 구현 (ANALYZE_IMAGE/EXTRACT_TEXT/PARSE_DOCUMENT/TRANSCRIBE_AUDIO/VISION_QA)
+- [x] 실제 Provider 구현 (OpenAIVisionProvider, AnthropicVisionProvider, KafkaProvider)
 
-**테스트 현황: 322개 통과**
+**테스트 현황: 363개 통과**
 
 | 테스트 | 개수 |
 |--------|------|
@@ -154,6 +156,8 @@ wiiiv/
 | WebSocketExecutorTest | 12 |
 | MessageQueueExecutorTest | 19 |
 | GrpcExecutorTest | 19 |
+| MultimodalExecutorTest | 22 |
+| VisionProviderTest | 19 |
 | BlueprintTest | 9 |
 | GovernorTest | 12 |
 | GateTest | 29 |

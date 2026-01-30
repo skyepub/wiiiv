@@ -136,8 +136,10 @@ wiiiv/
 - [x] LLM 기반 페르소나 구현 (LlmArchitect/LlmReviewer/LlmAdversary)
 - [x] 실제 LLM API 연동 (OpenAIProvider, AnthropicProvider)
 - [x] DbExecutor 구현 (데이터베이스 쿼리, ConnectionProvider 추상화)
+- [x] WebSocketExecutor 구현 (SEND/RECEIVE/SEND_RECEIVE, 타임아웃)
+- [x] MessageQueueExecutor 구현 (PUBLISH/CONSUME/REQUEST_REPLY, Provider 추상화)
 
-**테스트 현황: 272개 통과**
+**테스트 현황: 303개 통과**
 
 | 테스트 | 개수 |
 |--------|------|
@@ -148,6 +150,8 @@ wiiiv/
 | LlmExecutorTest | 23 |
 | LlmProviderTest | 16 |
 | DbExecutorTest | 26 |
+| WebSocketExecutorTest | 12 |
+| MessageQueueExecutorTest | 19 |
 | BlueprintTest | 9 |
 | GovernorTest | 12 |
 | GateTest | 29 |

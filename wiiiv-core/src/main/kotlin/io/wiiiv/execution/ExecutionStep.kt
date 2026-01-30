@@ -54,7 +54,17 @@ enum class StepType {
     /**
      * 멀티모달 처리 (이미지, 문서)
      */
-    MULTIMODAL
+    MULTIMODAL,
+
+    /**
+     * WebSocket 통신
+     */
+    WEBSOCKET,
+
+    /**
+     * 메시지 큐 (Kafka, RabbitMQ 등)
+     */
+    MESSAGE_QUEUE
 }
 
 /**
@@ -183,6 +193,42 @@ sealed class ExecutionStep {
     }
 
     /**
+     * WebSocket Step
+     *
+     * WebSocket 연결 및 메시지 송수신
+     */
+    @Serializable
+    data class WebSocketStep(
+        override val stepId: String,
+        val action: WebSocketAction,
+        val url: String,
+        val message: String? = null,
+        val timeoutMs: Long = 30_000,
+        val headers: Map<String, String> = emptyMap(),
+        override val params: Map<String, String> = emptyMap()
+    ) : ExecutionStep() {
+        override val type: StepType = StepType.WEBSOCKET
+    }
+
+    /**
+     * Message Queue Step
+     *
+     * 메시지 큐 송수신 (Kafka, RabbitMQ 등)
+     */
+    @Serializable
+    data class MessageQueueStep(
+        override val stepId: String,
+        val action: MessageQueueAction,
+        val topic: String,
+        val message: String? = null,
+        val brokerId: String? = null,
+        val timeoutMs: Long = 30_000,
+        override val params: Map<String, String> = emptyMap()
+    ) : ExecutionStep() {
+        override val type: StepType = StepType.MESSAGE_QUEUE
+    }
+
+    /**
      * Noop Step - 테스트/검증용
      */
     @Serializable
@@ -220,4 +266,28 @@ enum class DbMode {
  */
 enum class HttpMethod {
     GET, POST, PUT, DELETE, PATCH
+}
+
+/**
+ * WebSocket Action
+ */
+enum class WebSocketAction {
+    /** 연결 후 메시지 송신 */
+    SEND,
+    /** 연결 후 메시지 수신 대기 */
+    RECEIVE,
+    /** 연결 후 메시지 송신하고 응답 수신 */
+    SEND_RECEIVE
+}
+
+/**
+ * Message Queue Action
+ */
+enum class MessageQueueAction {
+    /** 메시지 발행 */
+    PUBLISH,
+    /** 메시지 구독 (단일) */
+    CONSUME,
+    /** 메시지 발행 후 응답 대기 */
+    REQUEST_REPLY
 }

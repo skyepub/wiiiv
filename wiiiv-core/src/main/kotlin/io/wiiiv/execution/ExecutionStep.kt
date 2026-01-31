@@ -69,7 +69,14 @@ enum class StepType {
     /**
      * gRPC 호출
      */
-    GRPC
+    GRPC,
+
+    /**
+     * RAG (Retrieval-Augmented Generation)
+     *
+     * 문서 수집, 임베딩, 벡터 검색
+     */
+    RAG
 }
 
 /**
@@ -269,6 +276,29 @@ sealed class ExecutionStep {
     ) : ExecutionStep() {
         override val type: StepType = StepType.CODE_GENERATION  // 임시
     }
+
+    /**
+     * RAG Step
+     *
+     * RAG (Retrieval-Augmented Generation) 작업
+     * - INGEST: 문서 수집 및 임베딩
+     * - SEARCH: 유사도 검색
+     * - DELETE: 문서 삭제
+     */
+    @Serializable
+    data class RagStep(
+        override val stepId: String,
+        val action: RagAction,
+        val content: String? = null,
+        val query: String? = null,
+        val documentId: String? = null,
+        val title: String? = null,
+        val topK: Int = 5,
+        val minScore: Float = 0.0f,
+        override val params: Map<String, String> = emptyMap()
+    ) : ExecutionStep() {
+        override val type: StepType = StepType.RAG
+    }
 }
 
 /**
@@ -351,4 +381,20 @@ enum class MultimodalAction {
     TRANSCRIBE_AUDIO,
     /** 비전 기반 질의응답 */
     VISION_QA
+}
+
+/**
+ * RAG Action
+ */
+enum class RagAction {
+    /** 문서 수집 및 임베딩 */
+    INGEST,
+    /** 유사도 검색 */
+    SEARCH,
+    /** 문서 삭제 */
+    DELETE,
+    /** 벡터 저장소 초기화 */
+    CLEAR,
+    /** 저장소 크기 조회 */
+    SIZE
 }

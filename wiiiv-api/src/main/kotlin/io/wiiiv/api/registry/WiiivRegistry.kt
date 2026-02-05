@@ -30,11 +30,25 @@ object WiiivRegistry {
 
     val executorRunner = ExecutionRunner.create(compositeExecutor)
 
+    // === LLM Provider ===
+    val llmProvider: LlmProvider? = run {
+        val key = System.getenv("OPENAI_API_KEY") ?: ""
+        if (key.isNotBlank()) OpenAIProvider.fromEnv(model = "gpt-4o-mini") else null
+    }
+
     // === DACS ===
-    val dacs: DACS = SimpleDACS.DEFAULT
+    val dacs: DACS = if (llmProvider != null) {
+        HybridDACS(llmProvider, "gpt-4o-mini")
+    } else {
+        SimpleDACS.DEFAULT  // Degraded Mode (개발 모드 - 느슨한 허용)
+    }
 
     // === Governor ===
-    val governor: Governor = SimpleGovernor.DEFAULT
+    val governor: Governor = LlmGovernor.create(
+        dacs = dacs,
+        llmProvider = llmProvider,
+        model = if (llmProvider != null) "gpt-4o-mini" else null
+    )
 
     // === Gates ===
     val gateLogger = InMemoryGateLogger()
@@ -47,10 +61,16 @@ object WiiivRegistry {
     val gateChain = GateChain.standard(gateLogger)
 
     // === RAG ===
-    val ragPipeline = RagPipeline(
-        embeddingProvider = MockEmbeddingProvider(),
-        vectorStore = InMemoryVectorStore("wiiiv-rag-store")
-    )
+    // TODO: MockEmbeddingProvider를 실제 Provider(OpenAI Embedding 등)로 교체 필요
+    val ragPipeline = run {
+        if (llmProvider != null) {
+            System.err.println("[WARN] WiiivRegistry: RAG는 아직 MockEmbeddingProvider 사용 중 (향후 교체 필요)")
+        }
+        RagPipeline(
+            embeddingProvider = MockEmbeddingProvider(),
+            vectorStore = InMemoryVectorStore("wiiiv-rag-store")
+        )
+    }
 
     // === Storage (In-Memory for now) ===
     private val blueprintStore = ConcurrentHashMap<String, Blueprint>()
@@ -117,11 +137,14 @@ object WiiivRegistry {
     )
 
     // === Persona Info ===
-    fun getPersonaInfos(): List<PersonaInfo> = listOf(
-        PersonaInfo("architect", "Architect", "Technical feasibility", "rule-based"),
-        PersonaInfo("reviewer", "Reviewer", "Requirements validation", "rule-based"),
-        PersonaInfo("adversary", "Adversary", "Security analysis", "rule-based")
-    )
+    fun getPersonaInfos(): List<PersonaInfo> {
+        val providerType = if (llmProvider != null) "hybrid" else "rule-based"
+        return listOf(
+            PersonaInfo("architect", "Architect", "Technical feasibility", providerType),
+            PersonaInfo("reviewer", "Reviewer", "Requirements validation", providerType),
+            PersonaInfo("adversary", "Adversary", "Security analysis", providerType)
+        )
+    }
 }
 
 // === Data Classes ===

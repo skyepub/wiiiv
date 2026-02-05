@@ -76,6 +76,11 @@ data class GovernorRequest(
     val content: String? = null,
 
     /**
+     * 자연어 의도 (LlmGovernor에서 사용)
+     */
+    val intent: String? = null,
+
+    /**
      * 추가 파라미터
      */
     val params: Map<String, String> = emptyMap()
@@ -122,6 +127,11 @@ data class Spec(
      * Spec 설명
      */
     val description: String = "",
+
+    /**
+     * 자연어 의도 (LlmGovernor가 Spec 보강에 사용)
+     */
+    val intent: String = "",
 
     /**
      * 허용된 작업 목록

@@ -306,7 +306,7 @@ wiiiv rag size                   # 저장소 크기
 - [x] RAG API 엔드포인트 구현 (/api/v2/rag/*)
 - [x] RAG CLI 명령어 구현 (wiiiv rag *)
 
-**테스트 현황: 456개 통과**
+**테스트 현황: 521+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -324,6 +324,7 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | VisionProviderTest | 19 |
 | wiiiv-core | BlueprintTest | 9 |
 | wiiiv-core | GovernorTest | 12 |
+| wiiiv-core | LlmGovernorTest | 12 |
 | wiiiv-core | GateTest | 29 |
 | wiiiv-core | DACSTest | 28 |
 | wiiiv-core | LlmPersonaTest | 24 |
@@ -341,6 +342,8 @@ wiiiv rag size                   # 저장소 크기
 | **wiiiv-cli** | **AuthCommandTest** | **7** |
 | **wiiiv-cli** | **SystemCommandTest** | **11** |
 | **wiiiv-cli** | **WiiivClientTest** | **11** |
+| wiiiv-core | LlmGovernorE2ETest | 2 |
+| **wiiiv-api** | **WiringVerificationTest** | **3** |
 | **wiiiv-cli** | **E2EIntegrationTest** | **8** |
 
 ---
@@ -375,6 +378,13 @@ DACS는 Gate가 아니다:
 - [x] CLI 구현 (wiiiv-cli)
 - [x] CLI 테스트 작성 (47개 테스트 - Auth, System, RAG, Client, E2E)
 - [x] 통합 E2E 테스트 (CLI → API → Core)
+- [x] LlmGovernor 구현 (Governor → DACS → LLM pipeline)
+- [x] HybridDACS 연동 (Rule-based + LLM 페르소나 합의)
+- [x] Spec enrichment (intent → allowedOperations/allowedPaths 추론)
+- [x] FAIL-CLOSED 설계 (LLM 없으면 REVISION/거부)
+- [x] DecisionRoutes 하드코딩 제거 (intent 기반 동적 step 생성)
+- [x] MockEmbedding → RealEmbedding 스위치 (OpenAIEmbeddingProvider)
+- [x] LlmGovernor E2E 테스트 (성공 + 거부 시나리오)
 - [ ] 배포 자동화 (Docker, CI/CD)
 
 ---

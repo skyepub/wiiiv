@@ -48,9 +48,9 @@ class LlmGovernor(
 ) : Governor {
 
     override suspend fun createBlueprint(request: GovernorRequest, spec: Spec): GovernorResult {
-        // 1. 요청 유효성 검사
-        if (request.type == RequestType.CUSTOM) {
-            return GovernorResult.Failed("CUSTOM type requires explicit step definition")
+        // 1. 요청 유효성 검사 (CUSTOM은 intent가 있으면 허용)
+        if (request.type == RequestType.CUSTOM && request.intent.isNullOrBlank()) {
+            return GovernorResult.Failed("CUSTOM type requires intent or explicit step definition")
         }
 
         // 2. Spec 보강 (intent가 있고 allowedOperations가 비어있을 때)
@@ -76,8 +76,10 @@ class LlmGovernor(
         // 4. 결과 분기
         return when (dacsResult.consensus) {
             Consensus.YES -> {
-                val step = createStep(request)
-                    ?: return GovernorResult.Failed("Failed to create step for request type: ${request.type}")
+                val steps = createStepsFromSpec(enrichedSpec, request)
+                if (steps.isEmpty()) {
+                    return GovernorResult.Failed("Failed to create steps for request")
+                }
 
                 val now = Instant.now().toString()
                 val blueprint = Blueprint(
@@ -90,12 +92,12 @@ class LlmGovernor(
                         governorId = id,
                         dacsResult = "YES"
                     ),
-                    steps = listOf(step),
+                    steps = steps,
                     metadata = BlueprintMetadata(
                         createdAt = now,
                         createdBy = id,
-                        description = "Blueprint for ${request.type} operation",
-                        tags = listOf("llm-governor", request.type.name.lowercase())
+                        description = "Blueprint for: ${spec.intent.take(80).ifBlank { request.type.name }}",
+                        tags = listOf("llm-governor") + steps.map { it.type.name.lowercase() }.distinct()
                     )
                 )
 
@@ -173,7 +175,64 @@ class LlmGovernor(
     }
 
     /**
-     * 요청을 BlueprintStep으로 변환
+     * enriched Spec 기반 BlueprintStep 생성
+     *
+     * 1. enrichedSpec.allowedOperations가 있으면 → Spec 기반 step 생성
+     * 2. 없고 request.type != CUSTOM → request 기반 fallback
+     * 3. CUSTOM + no enrichment → NOOP step (intent 기록)
+     */
+    private fun createStepsFromSpec(spec: Spec, request: GovernorRequest): List<BlueprintStep> {
+        // 1. enriched Spec에 operations가 있으면 사용
+        if (spec.allowedOperations.isNotEmpty()) {
+            val paths = spec.allowedPaths
+            val steps = spec.allowedOperations.mapIndexedNotNull { index, op ->
+                val stepId = "step-${UUID.randomUUID().toString().take(8)}"
+                val path = paths.getOrElse(index) { paths.firstOrNull() }
+
+                when (op) {
+                    RequestType.FILE_READ -> path?.let {
+                        BlueprintStep(stepId, BlueprintStepType.FILE_READ, mapOf("path" to it))
+                    }
+                    RequestType.FILE_WRITE -> path?.let {
+                        BlueprintStep(stepId, BlueprintStepType.FILE_WRITE, mapOf("path" to it, "content" to (request.content ?: "")))
+                    }
+                    RequestType.FILE_COPY -> if (paths.size >= 2) {
+                        BlueprintStep(stepId, BlueprintStepType.FILE_COPY, mapOf("source" to paths[0], "target" to paths[1]))
+                    } else null
+                    RequestType.FILE_MOVE -> if (paths.size >= 2) {
+                        BlueprintStep(stepId, BlueprintStepType.FILE_MOVE, mapOf("source" to paths[0], "target" to paths[1]))
+                    } else null
+                    RequestType.FILE_DELETE -> path?.let {
+                        BlueprintStep(stepId, BlueprintStepType.FILE_DELETE, mapOf("path" to it))
+                    }
+                    RequestType.FILE_MKDIR -> path?.let {
+                        BlueprintStep(stepId, BlueprintStepType.FILE_MKDIR, mapOf("path" to it))
+                    }
+                    RequestType.COMMAND -> null
+                    RequestType.CUSTOM -> null
+                }
+            }
+            if (steps.isNotEmpty()) return steps
+        }
+
+        // 2. Fallback: request.type 기반 step 생성
+        if (request.type != RequestType.CUSTOM) {
+            val step = createStep(request) ?: return emptyList()
+            return listOf(step)
+        }
+
+        // 3. CUSTOM + no enrichment → NOOP (intent 기록)
+        return listOf(
+            BlueprintStep(
+                stepId = "step-${UUID.randomUUID().toString().take(8)}",
+                type = BlueprintStepType.NOOP,
+                params = mapOf("reason" to (request.intent ?: "No concrete operation determined"))
+            )
+        )
+    }
+
+    /**
+     * 요청을 BlueprintStep으로 변환 (legacy fallback)
      *
      * SimpleGovernor의 createBlueprintStep() 로직 재사용
      */
@@ -286,9 +345,9 @@ class LlmGovernor(
      * createBlueprint와 동일하지만, DACS 결과도 함께 반환
      */
     suspend fun createBlueprintWithDacsResult(request: GovernorRequest, spec: Spec): Pair<GovernorResult, DACSResult?> {
-        // 1. 요청 유효성 검사
-        if (request.type == RequestType.CUSTOM) {
-            return GovernorResult.Failed("CUSTOM type requires explicit step definition") to null
+        // 1. 요청 유효성 검사 (CUSTOM은 intent가 있으면 허용)
+        if (request.type == RequestType.CUSTOM && request.intent.isNullOrBlank()) {
+            return GovernorResult.Failed("CUSTOM type requires intent or explicit step definition") to null
         }
 
         // 2. Spec 보강
@@ -316,8 +375,10 @@ class LlmGovernor(
         // 4. 결과 분기
         val govResult = when (dacsResult.consensus) {
             Consensus.YES -> {
-                val step = createStep(request)
-                    ?: return GovernorResult.Failed("Failed to create step for request type: ${request.type}") to dacsResult
+                val steps = createStepsFromSpec(enrichedSpec, request)
+                if (steps.isEmpty()) {
+                    return GovernorResult.Failed("Failed to create steps for request") to dacsResult
+                }
 
                 val now = Instant.now().toString()
                 val blueprint = Blueprint(
@@ -330,12 +391,12 @@ class LlmGovernor(
                         governorId = id,
                         dacsResult = "YES"
                     ),
-                    steps = listOf(step),
+                    steps = steps,
                     metadata = BlueprintMetadata(
                         createdAt = now,
                         createdBy = id,
-                        description = "Blueprint for ${request.type} operation",
-                        tags = listOf("llm-governor", request.type.name.lowercase())
+                        description = "Blueprint for: ${spec.intent.take(80).ifBlank { request.type.name }}",
+                        tags = listOf("llm-governor") + steps.map { it.type.name.lowercase() }.distinct()
                     )
                 )
 

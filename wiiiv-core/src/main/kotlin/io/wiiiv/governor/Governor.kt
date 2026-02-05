@@ -61,9 +61,9 @@ data class GovernorRequest(
     val requestId: String = UUID.randomUUID().toString(),
 
     /**
-     * 요청 유형
+     * 요청 유형 (CUSTOM = intent에서 추론)
      */
-    val type: RequestType,
+    val type: RequestType = RequestType.CUSTOM,
 
     /**
      * 요청 대상 경로 (파일 경로 등)

@@ -8,6 +8,7 @@ import io.wiiiv.gate.*
 import io.wiiiv.governor.*
 import io.wiiiv.rag.RagPipeline
 import io.wiiiv.rag.embedding.MockEmbeddingProvider
+import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
 import java.util.concurrent.ConcurrentHashMap
@@ -61,13 +62,18 @@ object WiiivRegistry {
     val gateChain = GateChain.standard(gateLogger)
 
     // === RAG ===
-    // TODO: MockEmbeddingProvider를 실제 Provider(OpenAI Embedding 등)로 교체 필요
     val ragPipeline = run {
-        if (llmProvider != null) {
-            System.err.println("[WARN] WiiivRegistry: RAG는 아직 MockEmbeddingProvider 사용 중 (향후 교체 필요)")
+        val embeddingProvider = if (llmProvider != null) {
+            try {
+                OpenAIEmbeddingProvider.fromEnv()
+            } catch (_: Exception) {
+                MockEmbeddingProvider()
+            }
+        } else {
+            MockEmbeddingProvider() // 테스트/개발 모드
         }
         RagPipeline(
-            embeddingProvider = MockEmbeddingProvider(),
+            embeddingProvider = embeddingProvider,
             vectorStore = InMemoryVectorStore("wiiiv-rag-store")
         )
     }

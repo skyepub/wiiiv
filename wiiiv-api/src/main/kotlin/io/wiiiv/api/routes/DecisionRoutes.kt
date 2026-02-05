@@ -17,7 +17,6 @@ import io.wiiiv.dacs.*
 import io.wiiiv.governor.GovernorRequest
 import io.wiiiv.governor.GovernorResult
 import io.wiiiv.governor.LlmGovernor
-import io.wiiiv.governor.RequestType
 import io.wiiiv.governor.Spec
 import java.time.Instant
 import java.util.*
@@ -49,11 +48,9 @@ fun Route.decisionRoutes() {
                     constraints = request.spec.constraints?.associateWith { "required" } ?: emptyMap()
                 )
 
-                // 2. GovernorRequest 생성
+                // 2. GovernorRequest 생성 (type/targetPath는 LlmGovernor가 intent에서 추론)
                 val govRequest = GovernorRequest(
                     requestId = decisionId,
-                    type = RequestType.FILE_READ,
-                    targetPath = "/tmp/wiiiv-workspace",
                     intent = request.spec.intent
                 )
 

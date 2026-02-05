@@ -16,6 +16,9 @@ import kotlin.test.*
  */
 class BlueprintTest {
 
+    /** Escape backslashes for safe JSON string interpolation (Windows paths) */
+    private fun String.jsonEscape() = replace("\\", "\\\\")
+
     private lateinit var testDir: File
 
     @BeforeTest
@@ -182,21 +185,21 @@ class BlueprintTest {
                         "stepId": "step-read",
                         "type": "file_read",
                         "params": {
-                            "path": "${sourceFile.absolutePath}"
+                            "path": "${sourceFile.absolutePath.jsonEscape()}"
                         }
                     },
                     {
                         "stepId": "step-mkdir",
                         "type": "file_mkdir",
                         "params": {
-                            "path": "${testDir.absolutePath}/output"
+                            "path": "${testDir.absolutePath.jsonEscape()}/output"
                         }
                     },
                     {
                         "stepId": "step-write",
                         "type": "file_write",
                         "params": {
-                            "path": "${testDir.absolutePath}/output/result.txt",
+                            "path": "${testDir.absolutePath.jsonEscape()}/output/result.txt",
                             "content": "Processed by wiiiv v2.0"
                         }
                     }
@@ -242,7 +245,7 @@ class BlueprintTest {
                         "stepId": "step-read-missing",
                         "type": "file_read",
                         "params": {
-                            "path": "${testDir.absolutePath}/nonexistent.txt"
+                            "path": "${testDir.absolutePath.jsonEscape()}/nonexistent.txt"
                         }
                     }
                 ]
@@ -277,14 +280,14 @@ class BlueprintTest {
                         "stepId": "step-1-fail",
                         "type": "file_read",
                         "params": {
-                            "path": "${testDir.absolutePath}/missing.txt"
+                            "path": "${testDir.absolutePath.jsonEscape()}/missing.txt"
                         }
                     },
                     {
                         "stepId": "step-2-never-executed",
                         "type": "file_mkdir",
                         "params": {
-                            "path": "${testDir.absolutePath}/never-created"
+                            "path": "${testDir.absolutePath.jsonEscape()}/never-created"
                         }
                     }
                 ]
@@ -354,29 +357,29 @@ class BlueprintTest {
                         "stepId": "step-1-read-original",
                         "type": "file_read",
                         "params": {
-                            "path": "${originalFile.absolutePath}"
+                            "path": "${originalFile.absolutePath.jsonEscape()}"
                         }
                     },
                     {
                         "stepId": "step-2-create-backup-dir",
                         "type": "file_mkdir",
                         "params": {
-                            "path": "${testDir.absolutePath}/backup"
+                            "path": "${testDir.absolutePath.jsonEscape()}/backup"
                         }
                     },
                     {
                         "stepId": "step-3-copy-to-backup",
                         "type": "file_copy",
                         "params": {
-                            "source": "${originalFile.absolutePath}",
-                            "target": "${testDir.absolutePath}/backup/original.txt.bak"
+                            "source": "${originalFile.absolutePath.jsonEscape()}",
+                            "target": "${testDir.absolutePath.jsonEscape()}/backup/original.txt.bak"
                         }
                     },
                     {
                         "stepId": "step-4-write-log",
                         "type": "file_write",
                         "params": {
-                            "path": "${testDir.absolutePath}/backup/backup.log",
+                            "path": "${testDir.absolutePath.jsonEscape()}/backup/backup.log",
                             "content": "Backup completed successfully"
                         }
                     },
@@ -384,7 +387,7 @@ class BlueprintTest {
                         "stepId": "step-5-verify-backup",
                         "type": "file_read",
                         "params": {
-                            "path": "${testDir.absolutePath}/backup/original.txt.bak"
+                            "path": "${testDir.absolutePath.jsonEscape()}/backup/original.txt.bak"
                         }
                     }
                 ],

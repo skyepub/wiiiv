@@ -254,11 +254,11 @@ class SystemRoutesTest {
         val createResponse = client.post("/api/v2/decisions") {
             header(HttpHeaders.Authorization, "Bearer $token")
             contentType(ContentType.Application.Json)
-            setBody("""{"spec": {"intent": "Gate log test"}}""")
+            setBody("""{"spec": {"intent": "Read the text file /tmp/test.txt for gate log testing"}}""")
         }
 
         val createBody = json.parseToJsonElement(createResponse.bodyAsText()).jsonObject
-        val blueprintId = createBody["data"]?.jsonObject?.get("blueprintId")?.jsonPrimitive?.content
+        val blueprintId = createBody["data"]?.jsonObject?.get("blueprintId")?.jsonPrimitive?.contentOrNull
 
         if (blueprintId != null) {
             // Try to execute (will fail at gate)

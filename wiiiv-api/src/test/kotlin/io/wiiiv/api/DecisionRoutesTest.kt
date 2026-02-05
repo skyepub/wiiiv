@@ -78,10 +78,10 @@ class DecisionRoutesTest {
         val outcome = consensus["outcome"]?.jsonPrimitive?.content
         assertTrue(outcome in listOf("YES", "NO", "REVISION"))
 
-        // Votes (3 personas)
+        // Votes (3 personas for SimpleDACS, 6 for HybridDACS)
         val votes = consensus["votes"]?.jsonArray
         assertNotNull(votes)
-        assertTrue(votes.size == 3) // architect, reviewer, adversary
+        assertTrue(votes.size >= 3) // architect, reviewer, adversary (+ LLM personas if API key present)
 
         // If approved, should have blueprintId
         if (status == "APPROVED") {

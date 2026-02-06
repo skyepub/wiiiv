@@ -85,10 +85,10 @@ fun main() = runBlocking {
     println("─".repeat(60))
     println()
 
-    val reader = BufferedReader(InputStreamReader(System.`in`))
+    val reader = BufferedReader(InputStreamReader(System.`in`, StandardCharsets.UTF_8))
 
     while (true) {
-        print("You > ")
+        print("> ")
         System.out.flush()
 
         val input = reader.readLine()?.trim()
@@ -96,6 +96,9 @@ fun main() = runBlocking {
         if (input.isNullOrBlank()) {
             continue
         }
+
+        // 사용자 입력을 로그에 표시 (파이프 입력 시에도 보이도록)
+        println(input)
 
         if (input.lowercase() in listOf("exit", "quit", "q", "종료")) {
             println()
@@ -106,53 +109,51 @@ fun main() = runBlocking {
         try {
             val response = governor.chat(session.sessionId, input)
 
-            println()
-            print("Governor [${response.action}] > ")
+            print("wiiiv> ")
             println(response.message)
 
             // 추가 정보 출력
             when (response.action) {
                 ActionType.ASK -> {
                     response.askingFor?.let {
-                        println("  (다음 정보 필요: $it)")
+                        println("      (필요: $it)")
                     }
                 }
                 ActionType.CONFIRM -> {
                     response.confirmationSummary?.let {
                         println()
-                        println("─── 확인 요약 ───")
-                        println(it)
-                        println("─".repeat(20))
+                        println("      ─── 확인 요약 ───")
+                        it.lines().forEach { line -> println("      $line") }
+                        println("      " + "─".repeat(20))
                     }
                 }
                 ActionType.EXECUTE -> {
                     response.blueprint?.let { bp ->
                         println()
-                        println("─── Blueprint ───")
-                        println("ID: ${bp.id}")
-                        println("Steps: ${bp.steps.size}개")
+                        println("      ─── Blueprint ───")
+                        println("      ID: ${bp.id}")
+                        println("      Steps: ${bp.steps.size}개")
                         bp.steps.forEachIndexed { i, step ->
-                            println("  ${i + 1}. ${step.type}: ${step.params}")
+                            println("        ${i + 1}. ${step.type}: ${step.params}")
                         }
-                        println("─".repeat(20))
+                        println("      " + "─".repeat(20))
                     }
                     response.executionResult?.let { result ->
                         println()
-                        println("─── 실행 결과 ───")
-                        println("성공: ${result.isSuccess}")
-                        println("성공 step: ${result.successCount}개")
+                        println("      ─── 실행 결과 ───")
+                        println("      성공: ${result.isSuccess}")
+                        println("      성공 step: ${result.successCount}개")
                         if (result.failureCount > 0) {
-                            println("실패 step: ${result.failureCount}개")
+                            println("      실패 step: ${result.failureCount}개")
                         }
-                        println("─".repeat(20))
+                        println("      " + "─".repeat(20))
                     }
                 }
                 ActionType.CANCEL -> {
-                    println("  (세션이 리셋되었습니다)")
+                    println("      (세션 리셋)")
                 }
                 else -> {}
             }
-
             println()
         } catch (e: Exception) {
             println()

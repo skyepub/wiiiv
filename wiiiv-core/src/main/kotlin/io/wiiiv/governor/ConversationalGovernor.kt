@@ -308,6 +308,12 @@ class ConversationalGovernor(
                     )
                 }
                 Consensus.REVISION -> {
+                    // DACS 피드백을 히스토리에 SYSTEM 메시지로 기록
+                    // → 다음 턴에서 LLM이 이 context를 참고하여 재질문 가능
+                    session.history.add(ConversationMessage(
+                        MessageRole.SYSTEM,
+                        "DACS 추가 확인 필요: ${dacsResult.reason}"
+                    ))
                     return ConversationResponse(
                         action = ActionType.ASK,
                         message = "추가 확인이 필요합니다: ${dacsResult.reason}",

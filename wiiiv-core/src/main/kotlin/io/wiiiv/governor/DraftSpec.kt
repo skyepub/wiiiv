@@ -116,12 +116,16 @@ data class DraftSpec(
         TaskType.COMMAND -> true
         TaskType.PROJECT_CREATE -> true
         else -> {
-            // 특정 경로 패턴도 위험
+            // 특정 경로 패턴만 위험 (시스템 경로)
             targetPath?.let { path ->
                 path.contains("/etc") ||
                 path.contains("/system") ||
+                path.contains("/root") ||
+                path.contains("/usr") ||
                 path.contains("/**") ||
-                path.startsWith("/")
+                path.contains("C:\\Windows") ||
+                path.contains("C:\\Program")
+                // /tmp, /var/tmp, 상대 경로 등은 안전
             } ?: false
         }
     }

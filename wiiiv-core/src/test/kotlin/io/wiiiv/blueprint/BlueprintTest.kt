@@ -305,6 +305,142 @@ class BlueprintTest {
         assertFalse(File("${testDir.absolutePath}/never-created").exists())
     }
 
+    // ==================== Command Args Splitting Tests ====================
+
+    @Test
+    fun `COMMAND step should keep sh -c args as single string`() {
+        // Given: sh -c with a compound command (Phase 3 project generation pattern)
+        val step = BlueprintStep(
+            stepId = "step-build",
+            type = BlueprintStepType.COMMAND,
+            params = mapOf(
+                "command" to "sh",
+                "args" to "-c ./gradlew build",
+                "workingDir" to "/tmp/test-project",
+                "timeoutMs" to "300000"
+            )
+        )
+
+        // When
+        val executionStep = step.toExecutionStep()
+
+        // Then
+        assertTrue(executionStep is ExecutionStep.CommandStep)
+        val cmdStep = executionStep as ExecutionStep.CommandStep
+        assertEquals("sh", cmdStep.command)
+        assertEquals(listOf("-c", "./gradlew build"), cmdStep.args)
+        assertEquals("/tmp/test-project", cmdStep.workingDir)
+        assertEquals(300_000L, cmdStep.timeoutMs)
+    }
+
+    @Test
+    fun `COMMAND step should keep bash -c args as single string`() {
+        val step = BlueprintStep(
+            stepId = "step-test",
+            type = BlueprintStepType.COMMAND,
+            params = mapOf(
+                "command" to "bash",
+                "args" to "-c python3 -m unittest discover -s tests"
+            )
+        )
+
+        val executionStep = step.toExecutionStep() as ExecutionStep.CommandStep
+        assertEquals("bash", executionStep.command)
+        assertEquals(listOf("-c", "python3 -m unittest discover -s tests"), executionStep.args)
+    }
+
+    @Test
+    fun `COMMAND step should split non-shell args normally`() {
+        val step = BlueprintStep(
+            stepId = "step-echo",
+            type = BlueprintStepType.COMMAND,
+            params = mapOf(
+                "command" to "echo",
+                "args" to "hello world"
+            )
+        )
+
+        val executionStep = step.toExecutionStep() as ExecutionStep.CommandStep
+        assertEquals("echo", executionStep.command)
+        assertEquals(listOf("hello", "world"), executionStep.args)
+    }
+
+    // ==================== API_CALL Step Tests ====================
+
+    @Test
+    fun `API_CALL step should convert to ApiCallStep correctly`() {
+        val step = BlueprintStep(
+            stepId = "step-api",
+            type = BlueprintStepType.API_CALL,
+            params = mapOf(
+                "method" to "POST",
+                "url" to "http://localhost:8080/api/users",
+                "header:Content-Type" to "application/json",
+                "header:Authorization" to "Bearer token123",
+                "body" to """{"name":"test"}""",
+                "timeoutMs" to "5000"
+            )
+        )
+
+        val executionStep = step.toExecutionStep()
+
+        assertTrue(executionStep is ExecutionStep.ApiCallStep)
+        val apiStep = executionStep as ExecutionStep.ApiCallStep
+        assertEquals("step-api", apiStep.stepId)
+        assertEquals(io.wiiiv.execution.HttpMethod.POST, apiStep.method)
+        assertEquals("http://localhost:8080/api/users", apiStep.url)
+        assertEquals("application/json", apiStep.headers["Content-Type"])
+        assertEquals("Bearer token123", apiStep.headers["Authorization"])
+        assertEquals("""{"name":"test"}""", apiStep.body)
+        assertEquals(5000L, apiStep.timeoutMs)
+    }
+
+    @Test
+    fun `API_CALL step should default to GET with 30s timeout`() {
+        val step = BlueprintStep(
+            stepId = "step-api-default",
+            type = BlueprintStepType.API_CALL,
+            params = mapOf("url" to "http://localhost:8080/api/health")
+        )
+
+        val executionStep = step.toExecutionStep() as ExecutionStep.ApiCallStep
+        assertEquals(io.wiiiv.execution.HttpMethod.GET, executionStep.method)
+        assertEquals(30_000L, executionStep.timeoutMs)
+        assertNull(executionStep.body)
+        assertTrue(executionStep.headers.isEmpty())
+    }
+
+    @Test
+    fun `API_CALL step should parse from JSON`() {
+        val json = """
+            {
+                "id": "bp-api",
+                "specSnapshot": {
+                    "specId": "spec-api",
+                    "snapshotAt": "2024-01-15T10:00:00Z",
+                    "governorId": "gov-test"
+                },
+                "steps": [
+                    {
+                        "stepId": "s1",
+                        "type": "api_call",
+                        "params": {
+                            "method": "GET",
+                            "url": "http://localhost/api/users"
+                        }
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val blueprint = Blueprint.fromJson(json)
+        assertEquals(1, blueprint.steps.size)
+        assertEquals(BlueprintStepType.API_CALL, blueprint.steps[0].type)
+
+        val executionStep = blueprint.steps[0].toExecutionStep()
+        assertTrue(executionStep is ExecutionStep.ApiCallStep)
+    }
+
     // ==================== Blueprint Immutability Tests ====================
 
     @Test

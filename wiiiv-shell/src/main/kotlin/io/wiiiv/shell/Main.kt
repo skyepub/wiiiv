@@ -12,6 +12,7 @@ import io.wiiiv.execution.impl.NoopExecutor
 import io.wiiiv.execution.impl.OpenAIProvider
 import io.wiiiv.governor.ActionType
 import io.wiiiv.governor.ConversationalGovernor
+import io.wiiiv.governor.NextAction
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -107,54 +108,67 @@ fun main() = runBlocking {
         }
 
         try {
-            val response = governor.chat(session.sessionId, input)
+            var response = governor.chat(session.sessionId, input)
+            var continuations = 0
 
-            print("wiiiv> ")
-            println(response.message)
+            // auto-continue loop: nextAction이 CONTINUE_EXECUTION이면 자동 계속
+            do {
+                print("wiiiv> ")
+                println(response.message)
 
-            // 추가 정보 출력
-            when (response.action) {
-                ActionType.ASK -> {
-                    response.askingFor?.let {
-                        println("      (필요: $it)")
-                    }
-                }
-                ActionType.CONFIRM -> {
-                    response.confirmationSummary?.let {
-                        println()
-                        println("      ─── 확인 요약 ───")
-                        it.lines().forEach { line -> println("      $line") }
-                        println("      " + "─".repeat(20))
-                    }
-                }
-                ActionType.EXECUTE -> {
-                    response.blueprint?.let { bp ->
-                        println()
-                        println("      ─── Blueprint ───")
-                        println("      ID: ${bp.id}")
-                        println("      Steps: ${bp.steps.size}개")
-                        bp.steps.forEachIndexed { i, step ->
-                            println("        ${i + 1}. ${step.type}: ${step.params}")
+                // 추가 정보 출력
+                when (response.action) {
+                    ActionType.ASK -> {
+                        response.askingFor?.let {
+                            println("      (필요: $it)")
                         }
-                        println("      " + "─".repeat(20))
                     }
-                    response.executionResult?.let { result ->
-                        println()
-                        println("      ─── 실행 결과 ───")
-                        println("      성공: ${result.isSuccess}")
-                        println("      성공 step: ${result.successCount}개")
-                        if (result.failureCount > 0) {
-                            println("      실패 step: ${result.failureCount}개")
+                    ActionType.CONFIRM -> {
+                        response.confirmationSummary?.let {
+                            println()
+                            println("      ─── 확인 요약 ───")
+                            it.lines().forEach { line -> println("      $line") }
+                            println("      " + "─".repeat(20))
                         }
-                        println("      " + "─".repeat(20))
                     }
+                    ActionType.EXECUTE -> {
+                        response.blueprint?.let { bp ->
+                            println()
+                            println("      ─── Blueprint ───")
+                            println("      ID: ${bp.id}")
+                            println("      Steps: ${bp.steps.size}개")
+                            bp.steps.forEachIndexed { i, step ->
+                                println("        ${i + 1}. ${step.type}: ${step.params}")
+                            }
+                            println("      " + "─".repeat(20))
+                        }
+                        response.executionResult?.let { result ->
+                            println()
+                            println("      ─── 실행 결과 ───")
+                            println("      성공: ${result.isSuccess}")
+                            println("      성공 step: ${result.successCount}개")
+                            if (result.failureCount > 0) {
+                                println("      실패 step: ${result.failureCount}개")
+                            }
+                            println("      " + "─".repeat(20))
+                        }
+                    }
+                    ActionType.CANCEL -> {
+                        println("      (세션 리셋)")
+                    }
+                    else -> {}
                 }
-                ActionType.CANCEL -> {
-                    println("      (세션 리셋)")
+                println()
+
+                // auto-continue: nextAction == CONTINUE_EXECUTION이면 "계속" 메시지로 다음 턴 실행
+                if (response.nextAction == NextAction.CONTINUE_EXECUTION && continuations < 10) {
+                    continuations++
+                    println("      (계속 실행 중... $continuations/10)")
+                    response = governor.chat(session.sessionId, "계속")
+                } else {
+                    break
                 }
-                else -> {}
-            }
-            println()
+            } while (true)
         } catch (e: Exception) {
             println()
             println("[ERROR] ${e.message}")

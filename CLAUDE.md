@@ -305,8 +305,16 @@ wiiiv rag size                   # 저장소 크기
 - [x] RagExecutor 구현 (INGEST/SEARCH/DELETE/CLEAR/SIZE)
 - [x] RAG API 엔드포인트 구현 (/api/v2/rag/*)
 - [x] RAG CLI 명령어 구현 (wiiiv rag *)
+- [x] Phase 4: API Workflow Orchestration
+  - [x] API_CALL BlueprintStepType (Blueprint → ApiCallStep 변환)
+  - [x] API_WORKFLOW TaskType (DraftSpec 슬롯: intent, domain)
+  - [x] GovernorPrompt API_WORKFLOW 템플릿 (반복적 API 결정 프롬프트)
+  - [x] ConversationalGovernor.executeApiWorkflow() (반복 실행 루프, 최대 10회)
+  - [x] RAG 통합 (ragPipeline으로 API 스펙 검색)
+  - [x] MockApiServer (임베디드 Ktor Netty, E2E 테스트용)
+  - [x] ApiWorkflowE2ETest (6개 시나리오: 단일호출, 2단계, 다단계쓰기, 에러복구, 중복방지, 단일완료)
 
-**테스트 현황: 521+ 통과**
+**테스트 현황: 541+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -322,7 +330,7 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | GrpcExecutorTest | 19 |
 | wiiiv-core | MultimodalExecutorTest | 22 |
 | wiiiv-core | VisionProviderTest | 19 |
-| wiiiv-core | BlueprintTest | 9 |
+| wiiiv-core | BlueprintTest | 12 |
 | wiiiv-core | GovernorTest | 12 |
 | wiiiv-core | LlmGovernorTest | 12 |
 | wiiiv-core | GateTest | 29 |

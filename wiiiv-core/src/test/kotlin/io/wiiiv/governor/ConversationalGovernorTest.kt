@@ -248,6 +248,52 @@ class ConversationalGovernorTest {
             assertNull(session.draftSpec.taskType)
             assertFalse(session.confirmed)
         }
+
+        @Test
+        fun `session resetSpec clears spec but preserves context`() {
+            val session = ConversationSession()
+            session.draftSpec = DraftSpec(intent = "test", taskType = TaskType.COMMAND)
+            session.confirmed = true
+            session.integrateResult(null, null, "test result")
+
+            session.resetSpec()
+
+            assertNull(session.draftSpec.intent)
+            assertNull(session.draftSpec.taskType)
+            assertFalse(session.confirmed)
+            assertEquals(1, session.context.executionHistory.size)
+        }
+
+        @Test
+        fun `session resetAll clears spec and context`() {
+            val session = ConversationSession()
+            session.draftSpec = DraftSpec(intent = "test", taskType = TaskType.COMMAND)
+            session.confirmed = true
+            session.integrateResult(null, null, "test result")
+            session.context.artifacts["key"] = "value"
+
+            session.resetAll()
+
+            assertNull(session.draftSpec.intent)
+            assertNull(session.draftSpec.taskType)
+            assertFalse(session.confirmed)
+            assertTrue(session.context.executionHistory.isEmpty())
+            assertTrue(session.context.artifacts.isEmpty())
+        }
+
+        @Test
+        fun `session integrateResult adds to execution history`() {
+            val session = ConversationSession()
+
+            session.integrateResult(null, null, "first result")
+            session.integrateResult(null, null, "second result")
+
+            assertEquals(2, session.context.executionHistory.size)
+            assertEquals(1, session.context.executionHistory[0].turnIndex)
+            assertEquals(2, session.context.executionHistory[1].turnIndex)
+            assertEquals("first result", session.context.executionHistory[0].summary)
+            assertEquals("second result", session.context.executionHistory[1].summary)
+        }
     }
 
     @Nested
@@ -370,6 +416,66 @@ class ConversationalGovernorTest {
 
             assertTrue(prompt.contains("파일 읽어줘"))
             assertTrue(prompt.contains("어떤 파일을 읽을까요"))
+        }
+
+        @Test
+        fun `DEFAULT prompt contains task switching rules`() {
+            val prompt = GovernorPrompt.DEFAULT
+
+            assertTrue(prompt.contains("작업 전환"))
+            assertTrue(prompt.contains("taskSwitch"))
+        }
+
+        @Test
+        fun `withContext includes task list`() {
+            val taskList = listOf(
+                TaskSlot(id = "task-1", label = "파일 읽기", status = TaskStatus.ACTIVE),
+                TaskSlot(id = "task-2", label = "명령 실행", status = TaskStatus.SUSPENDED)
+            )
+
+            val prompt = GovernorPrompt.withContext(
+                DraftSpec.empty(), emptyList(), emptyList(), taskList
+            )
+
+            assertTrue(prompt.contains("작업 목록"))
+            assertTrue(prompt.contains("task-1"))
+            assertTrue(prompt.contains("파일 읽기"))
+            assertTrue(prompt.contains("ACTIVE"))
+            assertTrue(prompt.contains("task-2"))
+            assertTrue(prompt.contains("SUSPENDED"))
+        }
+
+        @Test
+        fun `withContext without task list omits task section`() {
+            val prompt = GovernorPrompt.withContext(DraftSpec.empty(), emptyList())
+
+            assertFalse(prompt.contains("### 작업 목록"))
+        }
+    }
+
+    @Nested
+    @DisplayName("GovernorAction (Phase 6)")
+    inner class GovernorActionTests {
+
+        @Test
+        fun `GovernorAction with taskSwitch`() {
+            val action = GovernorAction(
+                action = ActionType.ASK,
+                message = "이전 작업으로 돌아갑니다",
+                taskSwitch = "파일 읽기"
+            )
+
+            assertEquals("파일 읽기", action.taskSwitch)
+        }
+
+        @Test
+        fun `GovernorAction without taskSwitch defaults to null`() {
+            val action = GovernorAction(
+                action = ActionType.REPLY,
+                message = "test"
+            )
+
+            assertNull(action.taskSwitch)
         }
     }
 

@@ -2,6 +2,7 @@ package io.wiiiv.blueprint
 
 import io.wiiiv.execution.ExecutionStep
 import io.wiiiv.execution.FileAction
+import io.wiiiv.execution.HttpMethod
 import io.wiiiv.runner.StepRetryPolicy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -226,13 +227,38 @@ data class BlueprintStep(
                 action = FileAction.MKDIR,
                 path = params["path"] ?: error("FILE_MKDIR requires 'path' param")
             )
-            BlueprintStepType.COMMAND -> ExecutionStep.CommandStep(
-                stepId = stepId,
-                command = params["command"] ?: error("COMMAND requires 'command' param"),
-                args = params["args"]?.split(" ") ?: emptyList(),
-                workingDir = params["workingDir"],
-                timeoutMs = params["timeoutMs"]?.toLongOrNull() ?: 60_000
-            )
+            BlueprintStepType.COMMAND -> {
+                val command = params["command"] ?: error("COMMAND requires 'command' param")
+                val argsStr = params["args"]
+                val args = when {
+                    argsStr.isNullOrBlank() -> emptyList()
+                    // sh -c / bash -c 패턴: "-c" 이후 전체를 단일 인자로 유지
+                    command in listOf("sh", "bash", "/bin/sh", "/bin/bash")
+                        && argsStr.startsWith("-c ") ->
+                        listOf("-c", argsStr.removePrefix("-c "))
+                    else -> argsStr.split(" ")
+                }
+                ExecutionStep.CommandStep(
+                    stepId = stepId,
+                    command = command,
+                    args = args,
+                    workingDir = params["workingDir"],
+                    timeoutMs = params["timeoutMs"]?.toLongOrNull() ?: 60_000
+                )
+            }
+            BlueprintStepType.API_CALL -> {
+                val method = try { HttpMethod.valueOf((params["method"] ?: "GET").uppercase()) }
+                             catch (_: Exception) { HttpMethod.GET }
+                ExecutionStep.ApiCallStep(
+                    stepId = stepId,
+                    method = method,
+                    url = params["url"] ?: error("API_CALL requires 'url' param"),
+                    headers = params.filterKeys { it.startsWith("header:") }
+                        .mapKeys { it.key.removePrefix("header:") },
+                    body = params["body"],
+                    timeoutMs = params["timeoutMs"]?.toLongOrNull() ?: 30_000
+                )
+            }
             BlueprintStepType.NOOP -> ExecutionStep.NoopStep(
                 stepId = stepId,
                 params = params
@@ -268,6 +294,9 @@ enum class BlueprintStepType {
 
     @SerialName("command")
     COMMAND,
+
+    @SerialName("api_call")
+    API_CALL,
 
     @SerialName("noop")
     NOOP

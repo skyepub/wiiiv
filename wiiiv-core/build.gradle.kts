@@ -20,4 +20,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("io.mockk:mockk:1.13.8")
     testImplementation("com.h2database:h2:2.2.224")
+
+    // Ktor Server (for MockApiServer in tests)
+    testImplementation("io.ktor:ktor-server-core:2.3.7")
+    testImplementation("io.ktor:ktor-server-netty:2.3.7")
+    testImplementation("io.ktor:ktor-server-content-negotiation:2.3.7")
 }

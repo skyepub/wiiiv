@@ -5,9 +5,11 @@ import io.wiiiv.dacs.DACS
 import io.wiiiv.dacs.DACSRequest
 import io.wiiiv.dacs.DACSResult
 import io.wiiiv.dacs.Consensus
+import io.wiiiv.execution.HttpMethod
 import io.wiiiv.execution.LlmAction
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
+import io.wiiiv.rag.RagPipeline
 import kotlinx.serialization.json.*
 import java.time.Instant
 import java.util.UUID
@@ -47,7 +49,8 @@ class ConversationalGovernor(
     private val dacs: DACS,
     private val llmProvider: LlmProvider? = null,
     private val model: String? = null,
-    private val blueprintRunner: BlueprintRunner? = null
+    private val blueprintRunner: BlueprintRunner? = null,
+    private val ragPipeline: RagPipeline? = null
 ) : Governor {
 
     private val sessions = ConcurrentHashMap<String, ConversationSession>()
@@ -107,9 +110,19 @@ class ConversationalGovernor(
             )
         }
 
+        // 작업 전환 처리
+        governorAction.taskSwitch?.let { switchSignal ->
+            handleTaskSwitch(session, switchSignal)
+        }
+
         // specUpdates 적용
         governorAction.specUpdates?.let { updates ->
             session.updateSpec(updates)
+        }
+
+        // EXECUTE/CONFIRM 시 활성 작업 확정
+        if (governorAction.action in listOf(ActionType.EXECUTE, ActionType.CONFIRM)) {
+            session.ensureActiveTask()
         }
 
         // 행동 처리
@@ -127,7 +140,9 @@ class ConversationalGovernor(
     private suspend fun decideAction(session: ConversationSession, userMessage: String): GovernorAction {
         val systemPrompt = GovernorPrompt.withContext(
             draftSpec = session.draftSpec,
-            recentHistory = session.getRecentHistory(10)
+            recentHistory = session.getRecentHistory(10),
+            executionHistory = session.context.executionHistory,
+            taskList = session.context.tasks.values.toList()
         )
 
         // System prompt + 사용자 메시지를 하나의 프롬프트로 결합
@@ -173,12 +188,14 @@ class ConversationalGovernor(
             }
 
             val askingFor = jsonElement["askingFor"]?.jsonPrimitive?.contentOrNull
+            val taskSwitch = jsonElement["taskSwitch"]?.jsonPrimitive?.contentOrNull
 
             GovernorAction(
                 action = action,
                 message = message,
                 specUpdates = specUpdates,
-                askingFor = askingFor
+                askingFor = askingFor,
+                taskSwitch = taskSwitch
             )
         } catch (e: Exception) {
             // 파싱 실패 시 원본 텍스트를 REPLY로 반환
@@ -226,11 +243,11 @@ class ConversationalGovernor(
             }
 
             ActionType.EXECUTE -> {
-                executeWithDraftSpec(session)
+                executeTurn(session)
             }
 
             ActionType.CANCEL -> {
-                session.reset()
+                session.resetAll()
                 ConversationResponse(
                     action = ActionType.CANCEL,
                     message = action.message.ifBlank { "알겠습니다. 언제든 새로 시작할 수 있어요." },
@@ -241,9 +258,16 @@ class ConversationalGovernor(
     }
 
     /**
-     * DraftSpec 기반 실행
+     * 통합 턴 실행 - 모든 TaskType이 동일한 턴 모델 사용
+     *
+     * 1. 검증 (requiresExecution, isComplete)
+     * 2. Spec 변환
+     * 3. DACS (risky이고 첫 실행일 때만)
+     * 4. needsLlmDecision() 판단:
+     *    - true → executeLlmDecidedTurn() (API_WORKFLOW 등)
+     *    - false → executeDirectTurn() (FILE_READ, COMMAND 등)
      */
-    private suspend fun executeWithDraftSpec(session: ConversationSession): ConversationResponse {
+    private suspend fun executeTurn(session: ConversationSession): ConversationResponse {
         val draftSpec = session.draftSpec
 
         // 1. 실행이 필요하지 않은 타입 (CONVERSATION, INFORMATION)
@@ -278,78 +302,116 @@ class ConversationalGovernor(
             )
         }
 
-        // 4. 위험한 작업이면 DACS 호출
-        if (draftSpec.isRisky()) {
-            val dacsResult = try {
-                dacs.evaluate(
-                    DACSRequest(
-                        requestId = session.sessionId,
-                        spec = spec,
-                        context = draftSpec.intent
-                    )
-                )
-            } catch (e: Exception) {
-                return ConversationResponse(
-                    action = ActionType.REPLY,
-                    message = "보안 검토 중 오류 발생: ${e.message}",
-                    sessionId = session.sessionId,
-                    error = e.message
-                )
-            }
-
-            when (dacsResult.consensus) {
-                Consensus.NO -> {
-                    session.reset()
-                    return ConversationResponse(
-                        action = ActionType.CANCEL,
-                        message = "보안상 이 요청을 실행할 수 없습니다: ${dacsResult.reason}",
-                        sessionId = session.sessionId,
-                        dacsResult = dacsResult
-                    )
-                }
-                Consensus.REVISION -> {
-                    // DACS 피드백을 히스토리에 SYSTEM 메시지로 기록
-                    // → 다음 턴에서 LLM이 이 context를 참고하여 재질문 가능
-                    session.history.add(ConversationMessage(
-                        MessageRole.SYSTEM,
-                        "DACS 추가 확인 필요: ${dacsResult.reason}"
-                    ))
-                    return ConversationResponse(
-                        action = ActionType.ASK,
-                        message = "추가 확인이 필요합니다: ${dacsResult.reason}",
-                        sessionId = session.sessionId,
-                        dacsResult = dacsResult
-                    )
-                }
-                Consensus.YES -> {
-                    // 계속 진행
-                }
-            }
+        // 4. DACS (risky이고 첫 실행일 때만)
+        if (draftSpec.isRisky() && session.context.executionHistory.isEmpty()) {
+            val dacsResponse = evaluateDACS(session, spec, draftSpec)
+            if (dacsResponse != null) return dacsResponse
         }
 
-        // 5. Blueprint 생성
+        // 5. LLM 결정이 필요한 작업인지 판단
+        return if (needsLlmDecision(draftSpec)) {
+            executeLlmDecidedTurn(session, draftSpec, spec)
+        } else {
+            executeDirectTurn(session, draftSpec, spec)
+        }
+    }
+
+    /**
+     * LLM 결정이 필요한 TaskType인지 판단
+     */
+    private fun needsLlmDecision(draftSpec: DraftSpec): Boolean = when (draftSpec.taskType) {
+        TaskType.API_WORKFLOW -> true
+        else -> false
+    }
+
+    /**
+     * DACS 평가 헬퍼 - 공통 DACS 로직 추출
+     *
+     * @return null이면 계속 진행, non-null이면 즉시 반환할 응답
+     */
+    private suspend fun evaluateDACS(
+        session: ConversationSession,
+        spec: Spec,
+        draftSpec: DraftSpec
+    ): ConversationResponse? {
+        val dacsResult = try {
+            dacs.evaluate(
+                DACSRequest(
+                    requestId = session.sessionId,
+                    spec = spec,
+                    context = draftSpec.intent
+                )
+            )
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "보안 검토 중 오류 발생: ${e.message}",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        return when (dacsResult.consensus) {
+            Consensus.NO -> {
+                ConversationResponse(
+                    action = ActionType.CANCEL,
+                    message = "보안상 이 요청을 실행할 수 없습니다: ${dacsResult.reason}",
+                    sessionId = session.sessionId,
+                    dacsResult = dacsResult
+                )
+            }
+            Consensus.REVISION -> {
+                session.history.add(ConversationMessage(
+                    MessageRole.SYSTEM,
+                    "DACS 추가 확인 필요: ${dacsResult.reason}"
+                ))
+                ConversationResponse(
+                    action = ActionType.ASK,
+                    message = "추가 확인이 필요합니다: ${dacsResult.reason}",
+                    sessionId = session.sessionId,
+                    dacsResult = dacsResult
+                )
+            }
+            Consensus.YES -> null // 계속 진행
+        }
+    }
+
+    /**
+     * 단순 작업 실행 (FILE_READ, FILE_WRITE, COMMAND, PROJECT_CREATE 등)
+     *
+     * Blueprint 생성 → 실행 → 결과 적재 (세션 리셋 없음)
+     */
+    private suspend fun executeDirectTurn(
+        session: ConversationSession,
+        draftSpec: DraftSpec,
+        spec: Spec
+    ): ConversationResponse {
+        // Blueprint 생성
         val blueprint = createBlueprintFromDraftSpec(draftSpec, spec)
 
-        // 6. 실행
+        // 실행
         val executionResult = if (blueprintRunner != null) {
             try {
                 blueprintRunner.execute(blueprint)
             } catch (e: Exception) {
-                null // 실행 실패
+                null
             }
         } else {
-            // BlueprintRunner가 없으면 Blueprint만 반환
             null
         }
 
-        // 7. 세션 리셋 (성공 시)
-        if (executionResult?.isSuccess != false) {
-            session.reset()
-        }
+        // 결과를 session context에 적재
+        val summary = formatExecutionResult(executionResult)
+        session.integrateResult(blueprint, executionResult, summary)
+
+        // 작업 완료: Spec 초기화 + 작업 상태 전이
+        session.resetSpec()
+        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+        session.context.activeTaskId = null
 
         return ConversationResponse(
             action = ActionType.EXECUTE,
-            message = formatExecutionResult(executionResult),
+            message = summary,
             sessionId = session.sessionId,
             blueprint = blueprint,
             executionResult = executionResult
@@ -357,9 +419,123 @@ class ConversationalGovernor(
     }
 
     /**
+     * LLM 결정 작업 실행 (API_WORKFLOW 등)
+     *
+     * 1회 배치만 수행하고 nextAction 힌트로 caller에게 제어 반환.
+     */
+    private suspend fun executeLlmDecidedTurn(
+        session: ConversationSession,
+        draftSpec: DraftSpec,
+        spec: Spec
+    ): ConversationResponse {
+        // LLM이 없으면 실행 불가
+        if (llmProvider == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "LLM이 연결되어 있지 않아 API 워크플로우를 실행할 수 없습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        // LLM에게 다음 API 호출 결정 요청
+        val decision = try {
+            decideNextApiCall(draftSpec, session.context.executionHistory, session)
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "API 워크플로우 결정 중 오류: ${e.message}\n\n" +
+                    formatTurnExecutionSummary(session.context.executionHistory),
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 완료 확인
+        if (decision.isComplete) {
+            val summary = decision.summary.ifBlank { "API 워크플로우 완료" } + "\n\n" +
+                formatTurnExecutionSummary(session.context.executionHistory)
+            session.integrateResult(null, null, "완료: ${decision.summary}")
+            session.resetSpec()
+            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+            session.context.activeTaskId = null
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = summary,
+                sessionId = session.sessionId
+            )
+        }
+
+        // 중단 확인
+        if (decision.isAbort) {
+            val summary = "API 워크플로우 중단: ${decision.summary}\n\n" +
+                formatTurnExecutionSummary(session.context.executionHistory)
+            session.resetSpec()
+            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+            session.context.activeTaskId = null
+            return ConversationResponse(
+                action = ActionType.CANCEL,
+                message = summary,
+                sessionId = session.sessionId
+            )
+        }
+
+        // API 호출이 비어있으면 완료로 간주
+        if (decision.calls.isEmpty()) {
+            val summary = decision.summary.ifBlank { "API 워크플로우 완료 (호출 없음)" } + "\n\n" +
+                formatTurnExecutionSummary(session.context.executionHistory)
+            session.integrateResult(null, null, "완료 (호출 없음)")
+            session.resetSpec()
+            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+            session.context.activeTaskId = null
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = summary,
+                sessionId = session.sessionId
+            )
+        }
+
+        // Blueprint 생성 및 실행
+        val iterationIndex = session.context.executionHistory.size + 1
+        val blueprint = createApiCallBlueprint(decision, spec, iterationIndex)
+        val executionResult = if (blueprintRunner != null) {
+            try {
+                blueprintRunner.execute(blueprint)
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+
+        // 결과를 session context에 적재
+        val resultSummary = formatBlueprintExecutionResult(executionResult)
+        session.integrateResult(blueprint, executionResult, resultSummary)
+
+        // 세션 히스토리에도 SYSTEM 메시지로 기록 (LLM이 다음 턴에서 참조)
+        session.history.add(ConversationMessage(
+            MessageRole.SYSTEM,
+            "API Workflow Turn $iterationIndex:\n" +
+                "Calls: ${decision.calls.map { "${it.method} ${it.url}" }}\n" +
+                "Result: $resultSummary"
+        ))
+
+        // nextAction = CONTINUE_EXECUTION → caller가 자동 계속
+        return ConversationResponse(
+            action = ActionType.EXECUTE,
+            message = "API 실행 중 (Turn $iterationIndex)...\n" +
+                "호출: ${decision.calls.map { "${it.method} ${it.url}" }}\n" +
+                "결과: $resultSummary",
+            sessionId = session.sessionId,
+            blueprint = blueprint,
+            executionResult = executionResult,
+            nextAction = NextAction.CONTINUE_EXECUTION
+        )
+    }
+
+    /**
      * DraftSpec에서 Blueprint 생성
      */
-    private fun createBlueprintFromDraftSpec(draftSpec: DraftSpec, spec: Spec): Blueprint {
+    private suspend fun createBlueprintFromDraftSpec(draftSpec: DraftSpec, spec: Spec): Blueprint {
         val now = Instant.now().toString()
         val steps = createSteps(draftSpec)
 
@@ -386,7 +562,7 @@ class ConversationalGovernor(
     /**
      * DraftSpec에서 BlueprintStep 생성
      */
-    private fun createSteps(draftSpec: DraftSpec): List<BlueprintStep> {
+    private suspend fun createSteps(draftSpec: DraftSpec): List<BlueprintStep> {
         val stepId = "step-${UUID.randomUUID().toString().take(8)}"
 
         return when (draftSpec.taskType) {
@@ -439,21 +615,28 @@ class ConversationalGovernor(
             }
 
             TaskType.PROJECT_CREATE -> {
-                // 복잡한 프로젝트 생성은 여러 스텝으로 분해
                 val basePath = draftSpec.targetPath ?: "/tmp/wiiiv-project"
+                // LLM이 있으면 실제 프로젝트 파일 생성 시도
+                if (llmProvider != null) {
+                    try {
+                        generateProjectBlueprint(draftSpec, basePath)
+                    } catch (e: Exception) {
+                        // fallback: 기존 mkdir + README
+                        println("[WARN] generateProjectBlueprint failed: ${e::class.simpleName}: ${e.message}")
+                        createFallbackProjectSteps(draftSpec, basePath)
+                    }
+                } else {
+                    createFallbackProjectSteps(draftSpec, basePath)
+                }
+            }
+
+            TaskType.API_WORKFLOW -> {
+                // API_WORKFLOW는 executeApiWorkflow()에서 동적으로 Blueprint 생성
                 listOf(
                     BlueprintStep(
-                        stepId = "step-mkdir-${UUID.randomUUID().toString().take(4)}",
-                        type = BlueprintStepType.FILE_MKDIR,
-                        params = mapOf("path" to basePath)
-                    ),
-                    BlueprintStep(
-                        stepId = "step-write-${UUID.randomUUID().toString().take(4)}",
-                        type = BlueprintStepType.FILE_WRITE,
-                        params = mapOf(
-                            "path" to "$basePath/README.md",
-                            "content" to buildProjectReadme(draftSpec)
-                        )
+                        stepId = stepId,
+                        type = BlueprintStepType.NOOP,
+                        params = mapOf("reason" to "API_WORKFLOW handled by iterative loop")
                     )
                 )
             }
@@ -469,6 +652,125 @@ class ConversationalGovernor(
                 )
             }
         }
+    }
+
+    /**
+     * LLM을 사용하여 프로젝트 파일 구조를 생성하고 BlueprintStep 목록으로 변환
+     */
+    private suspend fun generateProjectBlueprint(draftSpec: DraftSpec, basePath: String): List<BlueprintStep> {
+        val prompt = GovernorPrompt.projectGenerationPrompt(draftSpec)
+
+        val response = llmProvider!!.call(
+            LlmRequest(
+                action = LlmAction.COMPLETE,
+                prompt = prompt,
+                model = model ?: llmProvider.defaultModel,
+                maxTokens = 4096
+            )
+        )
+
+        // JSON 파싱
+        val jsonStr = extractJson(response.content)
+        val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
+
+        val filesArray = jsonElement["files"]?.jsonArray
+            ?: throw IllegalStateException("LLM response missing 'files' array")
+
+        val steps = mutableListOf<BlueprintStep>()
+
+        // 1. 루트 디렉토리 생성
+        steps.add(BlueprintStep(
+            stepId = "step-mkdir-root-${UUID.randomUUID().toString().take(4)}",
+            type = BlueprintStepType.FILE_MKDIR,
+            params = mapOf("path" to basePath)
+        ))
+
+        // 2. 필요한 디렉토리 수집 및 생성
+        val dirs = mutableSetOf<String>()
+        for (fileElement in filesArray) {
+            val fileObj = fileElement.jsonObject
+            val relativePath = fileObj["path"]?.jsonPrimitive?.contentOrNull ?: continue
+            val fullPath = "$basePath/$relativePath"
+            val parentDir = java.io.File(fullPath).parent
+            if (parentDir != null && parentDir != basePath) {
+                dirs.add(parentDir)
+            }
+        }
+
+        for (dir in dirs.sorted()) {
+            steps.add(BlueprintStep(
+                stepId = "step-mkdir-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.FILE_MKDIR,
+                params = mapOf("path" to dir)
+            ))
+        }
+
+        // 3. 파일 쓰기
+        for (fileElement in filesArray) {
+            val fileObj = fileElement.jsonObject
+            val relativePath = fileObj["path"]?.jsonPrimitive?.contentOrNull ?: continue
+            val content = fileObj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+            val fullPath = "$basePath/$relativePath"
+
+            steps.add(BlueprintStep(
+                stepId = "step-write-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.FILE_WRITE,
+                params = mapOf("path" to fullPath, "content" to content)
+            ))
+        }
+
+        // 4. 빌드 명령어 (있으면)
+        val buildCommand = jsonElement["buildCommand"]?.jsonPrimitive?.contentOrNull
+        if (!buildCommand.isNullOrBlank() && buildCommand != "null") {
+            steps.add(BlueprintStep(
+                stepId = "step-build-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.COMMAND,
+                params = mapOf(
+                    "command" to "sh",
+                    "args" to "-c $buildCommand",
+                    "workingDir" to basePath,
+                    "timeoutMs" to "300000"
+                )
+            ))
+        }
+
+        // 5. 테스트 명령어 (있으면)
+        val testCommand = jsonElement["testCommand"]?.jsonPrimitive?.contentOrNull
+        if (!testCommand.isNullOrBlank() && testCommand != "null") {
+            steps.add(BlueprintStep(
+                stepId = "step-test-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.COMMAND,
+                params = mapOf(
+                    "command" to "sh",
+                    "args" to "-c $testCommand",
+                    "workingDir" to basePath,
+                    "timeoutMs" to "300000"
+                )
+            ))
+        }
+
+        return steps
+    }
+
+    /**
+     * LLM 실패 시 fallback: 기존 mkdir + README 생성
+     */
+    private fun createFallbackProjectSteps(draftSpec: DraftSpec, basePath: String): List<BlueprintStep> {
+        return listOf(
+            BlueprintStep(
+                stepId = "step-mkdir-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.FILE_MKDIR,
+                params = mapOf("path" to basePath)
+            ),
+            BlueprintStep(
+                stepId = "step-write-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.FILE_WRITE,
+                params = mapOf(
+                    "path" to "$basePath/README.md",
+                    "content" to buildProjectReadme(draftSpec)
+                )
+            )
+        )
     }
 
     /**
@@ -539,7 +841,7 @@ class ConversationalGovernor(
             }
 
             lower.contains("취소") || lower.contains("됐어") || lower.contains("그만") -> {
-                session.reset()
+                session.resetAll()
                 session.addGovernorMessage("알겠습니다. 언제든 새로 시작할 수 있어요.")
                 ConversationResponse(
                     action = ActionType.CANCEL,
@@ -579,6 +881,232 @@ class ConversationalGovernor(
         }
 
         return response.trim()
+    }
+
+    /**
+     * 작업 전환 처리
+     *
+     * 현재 활성 작업을 SUSPENDED로 변경하고, 대상 작업을 찾아 ACTIVE로 복원한다.
+     * 대상을 찾지 못하면 activeTaskId를 null로 설정 (새 작업 생성 대기).
+     */
+    private fun handleTaskSwitch(session: ConversationSession, switchSignal: String) {
+        // 현재 활성 작업 일시 중단
+        session.context.activeTask?.let { task ->
+            task.status = TaskStatus.SUSPENDED
+        }
+
+        // 대상 작업 검색 (ID 또는 라벨 매칭)
+        val targetTask = session.context.tasks.values.find { task ->
+            task.status == TaskStatus.SUSPENDED &&
+            (task.id == switchSignal || task.label.contains(switchSignal, ignoreCase = true))
+        }
+
+        if (targetTask != null) {
+            targetTask.status = TaskStatus.ACTIVE
+            session.context.activeTaskId = targetTask.id
+        } else {
+            // 매칭 없음 → activeTaskId null → ensureActiveTask에서 새 작업 생성
+            session.context.activeTaskId = null
+        }
+    }
+
+    /**
+     * LLM에게 다음 API 호출 결정 요청
+     */
+    private suspend fun decideNextApiCall(
+        draftSpec: DraftSpec,
+        history: List<TurnExecution>,
+        session: ConversationSession
+    ): ApiWorkflowDecision {
+        // RAG 컨텍스트 조회
+        val ragContext = consultRagForApiKnowledge(draftSpec)
+
+        // 실행 히스토리 포맷 (TurnExecution → 문자열)
+        val executionHistory = history.map { turn ->
+            buildString {
+                appendLine("Turn ${turn.turnIndex}: ${turn.summary}")
+            }
+        }
+
+        // 프롬프트 생성
+        val prompt = GovernorPrompt.apiWorkflowPrompt(
+            intent = draftSpec.intent ?: "",
+            domain = draftSpec.domain,
+            ragContext = ragContext,
+            executionHistory = executionHistory,
+            recentHistory = session.getRecentHistory(5)
+        )
+
+        // LLM 호출
+        val response = llmProvider!!.call(
+            LlmRequest(
+                action = LlmAction.COMPLETE,
+                prompt = prompt,
+                model = model ?: llmProvider.defaultModel,
+                maxTokens = 2000
+            )
+        )
+
+        return parseApiWorkflowDecision(response.content)
+    }
+
+    /**
+     * RAG를 통해 API 지식 검색
+     */
+    private suspend fun consultRagForApiKnowledge(draftSpec: DraftSpec): String? {
+        if (ragPipeline == null) return null
+
+        val query = buildString {
+            draftSpec.intent?.let { append(it) }
+            draftSpec.domain?.let { append(" $it") }
+        }.trim()
+
+        if (query.isBlank()) return null
+
+        return try {
+            val result = ragPipeline.search(query, topK = 5)
+            if (result.isEmpty()) null else result.toNumberedContext()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * LLM 응답을 ApiWorkflowDecision으로 파싱
+     */
+    private fun parseApiWorkflowDecision(response: String): ApiWorkflowDecision {
+        val jsonStr = extractJson(response)
+
+        return try {
+            val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
+
+            val isComplete = jsonElement["isComplete"]?.jsonPrimitive?.booleanOrNull ?: false
+            val isAbort = jsonElement["isAbort"]?.jsonPrimitive?.booleanOrNull ?: false
+            val reasoning = jsonElement["reasoning"]?.jsonPrimitive?.contentOrNull ?: ""
+            val summary = jsonElement["summary"]?.jsonPrimitive?.contentOrNull ?: ""
+
+            val calls = jsonElement["calls"]?.jsonArray?.mapNotNull { callElement ->
+                try {
+                    val callObj = callElement.jsonObject
+                    ApiCallDecision(
+                        method = callObj["method"]?.jsonPrimitive?.contentOrNull ?: "GET",
+                        url = callObj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                        headers = callObj["headers"]?.jsonObject?.entries?.associate {
+                            it.key to (it.value.jsonPrimitive.contentOrNull ?: "")
+                        } ?: emptyMap(),
+                        body = callObj["body"]?.let {
+                            if (it is JsonNull) null
+                            else it.jsonPrimitive.contentOrNull
+                        }
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            } ?: emptyList()
+
+            ApiWorkflowDecision(
+                isComplete = isComplete,
+                isAbort = isAbort,
+                reasoning = reasoning,
+                summary = summary,
+                calls = calls
+            )
+        } catch (e: Exception) {
+            // 파싱 실패 시 abort
+            ApiWorkflowDecision(
+                isComplete = false,
+                isAbort = true,
+                reasoning = "Failed to parse LLM response: ${e.message}",
+                summary = "파싱 실패로 워크플로우 중단",
+                calls = emptyList()
+            )
+        }
+    }
+
+    /**
+     * ApiWorkflowDecision을 Blueprint로 변환
+     */
+    private fun createApiCallBlueprint(
+        decision: ApiWorkflowDecision,
+        spec: Spec,
+        iteration: Int
+    ): Blueprint {
+        val now = Instant.now().toString()
+
+        val steps = decision.calls.mapIndexed { idx, call ->
+            val method = try { HttpMethod.valueOf(call.method.uppercase()) }
+                         catch (_: Exception) { HttpMethod.GET }
+
+            val params = mutableMapOf(
+                "method" to method.name,
+                "url" to call.url,
+                "timeoutMs" to "30000"
+            )
+            call.headers.forEach { (k, v) -> params["header:$k"] = v }
+            call.body?.let { params["body"] = it }
+
+            BlueprintStep(
+                stepId = "step-api-iter${iteration}-${idx}",
+                type = BlueprintStepType.API_CALL,
+                params = params
+            )
+        }
+
+        return Blueprint(
+            id = "bp-workflow-iter${iteration}-${UUID.randomUUID().toString().take(8)}",
+            version = "1.0",
+            specSnapshot = SpecSnapshot(
+                specId = spec.id,
+                specVersion = spec.version,
+                snapshotAt = now,
+                governorId = id,
+                dacsResult = "YES"
+            ),
+            steps = steps,
+            metadata = BlueprintMetadata(
+                createdAt = now,
+                createdBy = id,
+                description = "API Workflow iteration $iteration: ${decision.reasoning.take(80)}",
+                tags = listOf("api-workflow", "iteration-$iteration")
+            )
+        )
+    }
+
+    /**
+     * Blueprint 실행 결과 포맷팅
+     */
+    private fun formatBlueprintExecutionResult(result: BlueprintExecutionResult?): String {
+        if (result == null) return "실행기 미연결"
+
+        return buildString {
+            if (result.isSuccess) {
+                append("성공 (${result.successCount} steps)")
+                // Step 출력 수집
+                result.runnerResult.results.forEach { stepResult ->
+                    val stepId = stepResult.meta.stepId
+                    val output = result.context.getStepOutput(stepId)
+                    if (output != null) {
+                        val statusCode = output.json["statusCode"]?.jsonPrimitive?.contentOrNull
+                        val body = output.json["body"]?.jsonPrimitive?.contentOrNull
+                        append("\n  [$stepId] HTTP $statusCode: ${body?.take(500) ?: "empty"}")
+                    }
+                }
+            } else {
+                append("실패 (성공: ${result.successCount}, 실패: ${result.failureCount})")
+            }
+        }
+    }
+
+    /**
+     * 턴 실행 히스토리 전체 요약 포맷팅
+     */
+    private fun formatTurnExecutionSummary(turns: List<TurnExecution>): String = buildString {
+        appendLine("=== API Workflow Summary ===")
+        appendLine("Total iterations: ${turns.size}")
+        for (turn in turns) {
+            appendLine("  [Iteration ${turn.turnIndex}]")
+            appendLine("    Result: ${turn.summary.take(200)}")
+        }
     }
 
     // === Governor interface 구현 (하위 호환) ===
@@ -678,9 +1206,10 @@ class ConversationalGovernor(
             dacs: DACS,
             llmProvider: LlmProvider? = null,
             model: String? = null,
-            blueprintRunner: BlueprintRunner? = null
+            blueprintRunner: BlueprintRunner? = null,
+            ragPipeline: RagPipeline? = null
         ): ConversationalGovernor {
-            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner)
+            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline)
         }
     }
 }
@@ -737,5 +1266,38 @@ data class ConversationResponse(
     /**
      * 오류 메시지
      */
-    val error: String? = null
+    val error: String? = null,
+
+    /**
+     * 다음 행동 힌트 (턴 기반 실행 모델)
+     * null이면 단일 턴 완료, CONTINUE_EXECUTION이면 caller가 자동 계속
+     */
+    val nextAction: NextAction? = null
 )
+
+/**
+ * API 워크플로우 결정 - LLM이 반환하는 다음 API 호출 결정
+ */
+data class ApiWorkflowDecision(
+    /** 작업 완료 여부 */
+    val isComplete: Boolean,
+    /** 작업 중단 여부 */
+    val isAbort: Boolean,
+    /** 다음 호출 이유 */
+    val reasoning: String,
+    /** 현재까지 진행 요약 */
+    val summary: String,
+    /** 호출할 API 목록 */
+    val calls: List<ApiCallDecision>
+)
+
+/**
+ * 단일 API 호출 결정
+ */
+data class ApiCallDecision(
+    val method: String,
+    val url: String,
+    val headers: Map<String, String> = emptyMap(),
+    val body: String? = null
+)
+

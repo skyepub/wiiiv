@@ -1,5 +1,7 @@
 package io.wiiiv.governor
 
+import io.wiiiv.blueprint.Blueprint
+import io.wiiiv.blueprint.BlueprintExecutionResult
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import java.util.UUID
@@ -73,6 +75,7 @@ data class DraftSpec(
         TaskType.PROJECT_CREATE -> setOf("domain", "techStack")
         TaskType.INFORMATION -> emptySet() // 정보 질문은 필수 없음
         TaskType.CONVERSATION -> emptySet() // 일반 대화는 필수 없음
+        TaskType.API_WORKFLOW -> setOf("intent", "domain") // API 워크플로우
         null -> setOf("intent", "taskType") // 아직 유형 미정
     }
 
@@ -105,7 +108,7 @@ data class DraftSpec(
      */
     fun requiresExecution(): Boolean = when (taskType) {
         TaskType.CONVERSATION, TaskType.INFORMATION, null -> false
-        else -> true
+        else -> true // FILE_*, COMMAND, PROJECT_CREATE, API_WORKFLOW
     }
 
     /**
@@ -115,6 +118,7 @@ data class DraftSpec(
         TaskType.FILE_DELETE -> true
         TaskType.COMMAND -> true
         TaskType.PROJECT_CREATE -> true
+        TaskType.API_WORKFLOW -> true
         else -> {
             // 특정 경로 패턴만 위험 (시스템 경로)
             targetPath?.let { path ->
@@ -145,6 +149,7 @@ data class DraftSpec(
                 RequestType.FILE_MKDIR,
                 RequestType.FILE_WRITE
             )
+            TaskType.API_WORKFLOW -> listOf(RequestType.CUSTOM)
             else -> emptyList()
         }
 
@@ -221,7 +226,10 @@ enum class TaskType(val displayName: String) {
     INFORMATION("정보 조회"),
 
     /** 일반 대화 (실행 불필요) */
-    CONVERSATION("일반 대화")
+    CONVERSATION("일반 대화"),
+
+    /** API 워크플로우 (반복적 API 호출) */
+    API_WORKFLOW("API 워크플로우")
 }
 
 /**
@@ -247,7 +255,12 @@ data class GovernorAction(
     /**
      * 다음에 물어볼 슬롯 (ASK 시)
      */
-    val askingFor: String? = null
+    val askingFor: String? = null,
+
+    /**
+     * 작업 전환 신호 (이전 작업의 라벨/ID)
+     */
+    val taskSwitch: String? = null
 )
 
 /**
@@ -289,15 +302,154 @@ enum class MessageRole {
 }
 
 /**
- * 대화 세션
+ * Task ID 타입 별칭
  */
-data class ConversationSession(
+typealias TaskId = String
+
+/**
+ * 작업 상태
+ */
+enum class TaskStatus {
+    /** 현재 활성 작업 */
+    ACTIVE,
+    /** 일시 중단된 작업 */
+    SUSPENDED,
+    /** 완료된 작업 */
+    COMPLETED
+}
+
+/**
+ * 작업별 컨텍스트 - 하나의 TaskSlot이 보유하는 실행 이력 및 아티팩트
+ */
+data class TaskContext(
+    val executionHistory: MutableList<TurnExecution> = mutableListOf(),
+    val artifacts: MutableMap<String, String> = mutableMapOf(),
+    val facts: MutableMap<String, String> = mutableMapOf()
+) {
+    fun clear() {
+        executionHistory.clear()
+        artifacts.clear()
+        facts.clear()
+    }
+}
+
+/**
+ * TaskSlot - 하나의 작업을 담는 슬롯 ("책상 위의 폴더")
+ *
+ * 각 작업은 자신의 DraftSpec, 실행 이력, 아티팩트를 보유한다.
+ */
+data class TaskSlot(
+    val id: TaskId,
+    var label: String,
+    var draftSpec: DraftSpec = DraftSpec.empty(),
+    val context: TaskContext = TaskContext(),
+    var status: TaskStatus = TaskStatus.ACTIVE,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+/**
+ * 세션 컨텍스트 - 턴 간 실행 결과와 아티팩트를 보존
+ *
+ * Phase 6: 프록시 패턴 - executionHistory는 activeTask가 있으면 해당 task의 history에 위임,
+ * 없으면 _fallbackHistory에 저장. Phase 5의 모든 호출 지점이 수정 없이 동작한다.
+ */
+class SessionContext(
+    val tasks: MutableMap<TaskId, TaskSlot> = mutableMapOf(),
+    var activeTaskId: TaskId? = null,
+    private val _fallbackHistory: MutableList<TurnExecution> = mutableListOf(),
+    val artifacts: MutableMap<String, String> = mutableMapOf(),
+    val facts: MutableMap<String, String> = mutableMapOf(),
+    var pendingAction: PendingAction? = null
+) {
+    /**
+     * 현재 활성 작업
+     */
+    val activeTask: TaskSlot? get() = activeTaskId?.let { tasks[it] }
+
+    /**
+     * 프록시: activeTask가 있으면 그 task의 executionHistory, 없으면 fallback
+     */
+    val executionHistory: MutableList<TurnExecution>
+        get() = activeTask?.context?.executionHistory ?: _fallbackHistory
+
+    /**
+     * fallback history를 새 TaskSlot으로 마이그레이션하고 등록
+     */
+    fun promoteToTask(task: TaskSlot) {
+        if (_fallbackHistory.isNotEmpty()) {
+            task.context.executionHistory.addAll(_fallbackHistory)
+            _fallbackHistory.clear()
+        }
+        tasks[task.id] = task
+        activeTaskId = task.id
+    }
+
+    fun clear() {
+        tasks.clear()
+        activeTaskId = null
+        _fallbackHistory.clear()
+        artifacts.clear()
+        facts.clear()
+        pendingAction = null
+    }
+}
+
+/**
+ * 턴 실행 기록 - 하나의 턴에서 수행된 실행 결과
+ */
+data class TurnExecution(
+    val turnIndex: Int,
+    val blueprint: Blueprint?,
+    val result: BlueprintExecutionResult?,
+    val summary: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
+ * 보류 중인 행동 - 다음 턴에서 처리할 액션
+ */
+sealed class PendingAction {
+    data class ContinueExecution(val reasoning: String, val ragContext: String? = null) : PendingAction()
+    data class NeedsConfirmation(val description: String, val blueprint: Blueprint) : PendingAction()
+}
+
+/**
+ * 다음 행동 힌트 - caller가 루프를 제어하기 위한 신호
+ */
+enum class NextAction {
+    CONTINUE_EXECUTION,
+    AWAIT_USER,
+    NEEDS_CONFIRMATION
+}
+
+/**
+ * 대화 세션
+ *
+ * Phase 6: class로 전환 - draftSpec이 activeTask에 위임되는 프록시 패턴.
+ * activeTask가 없으면 _fallbackDraftSpec 사용 (하위 호환).
+ */
+class ConversationSession(
     val sessionId: String = UUID.randomUUID().toString(),
     val history: MutableList<ConversationMessage> = mutableListOf(),
-    var draftSpec: DraftSpec = DraftSpec.empty(),
+    private var _fallbackDraftSpec: DraftSpec = DraftSpec.empty(),
     var confirmed: Boolean = false,
+    val context: SessionContext = SessionContext(),
     val createdAt: Long = System.currentTimeMillis()
 ) {
+    /**
+     * 프록시: activeTask가 있으면 그 task의 draftSpec, 없으면 fallback
+     */
+    var draftSpec: DraftSpec
+        get() = context.activeTask?.draftSpec ?: _fallbackDraftSpec
+        set(value) {
+            val task = context.activeTask
+            if (task != null) {
+                task.draftSpec = value
+            } else {
+                _fallbackDraftSpec = value
+            }
+        }
+
     fun addUserMessage(content: String) {
         history.add(ConversationMessage(MessageRole.USER, content))
     }
@@ -317,38 +469,112 @@ data class ConversationSession(
     private fun applyUpdates(spec: DraftSpec, updates: Map<String, JsonElement>): DraftSpec {
         var updated = spec
 
-        updates["intent"]?.jsonPrimitive?.contentOrNull?.let {
+        fun JsonElement.asPrimitiveOrNull(): String? = try {
+            jsonPrimitive.contentOrNull
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+
+        fun JsonElement.asArrayOrNull(): List<String>? = try {
+            jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
+        } catch (_: IllegalArgumentException) {
+            try {
+                jsonPrimitive.contentOrNull?.let { listOf(it) }
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+        }
+
+        updates["intent"]?.asPrimitiveOrNull()?.let {
             updated = updated.copy(intent = it)
         }
-        updates["taskType"]?.jsonPrimitive?.contentOrNull?.let { typeName ->
+        updates["taskType"]?.asPrimitiveOrNull()?.let { typeName ->
             try {
                 updated = updated.copy(taskType = TaskType.valueOf(typeName))
             } catch (_: Exception) {}
         }
-        updates["domain"]?.jsonPrimitive?.contentOrNull?.let {
+        updates["domain"]?.asPrimitiveOrNull()?.let {
             updated = updated.copy(domain = it)
         }
-        updates["techStack"]?.jsonArray?.let { arr ->
-            updated = updated.copy(techStack = arr.mapNotNull { it.jsonPrimitive.contentOrNull })
+        updates["techStack"]?.asArrayOrNull()?.let { arr ->
+            updated = updated.copy(techStack = arr)
         }
-        updates["targetPath"]?.jsonPrimitive?.contentOrNull?.let {
+        updates["targetPath"]?.asPrimitiveOrNull()?.let {
             updated = updated.copy(targetPath = it)
         }
-        updates["content"]?.jsonPrimitive?.contentOrNull?.let {
+        updates["content"]?.asPrimitiveOrNull()?.let {
             updated = updated.copy(content = it)
         }
-        updates["scale"]?.jsonPrimitive?.contentOrNull?.let {
+        updates["scale"]?.asPrimitiveOrNull()?.let {
             updated = updated.copy(scale = it)
         }
-        updates["constraints"]?.jsonArray?.let { arr ->
-            updated = updated.copy(constraints = arr.mapNotNull { it.jsonPrimitive.contentOrNull })
+        updates["constraints"]?.asArrayOrNull()?.let { arr ->
+            updated = updated.copy(constraints = arr)
         }
 
         return updated
     }
 
-    fun reset() {
-        draftSpec = DraftSpec.empty()
+    /**
+     * 현재 활성 작업 확정 (없으면 생성)
+     *
+     * fallback 상태의 draftSpec/executionHistory를 새 TaskSlot으로 승격시킨다.
+     */
+    fun ensureActiveTask(label: String = draftSpec.intent ?: "작업"): TaskSlot {
+        context.activeTask?.let { return it }
+
+        val taskId = "task-${UUID.randomUUID().toString().take(8)}"
+        val task = TaskSlot(
+            id = taskId,
+            label = label,
+            draftSpec = _fallbackDraftSpec
+        )
+        context.promoteToTask(task)
+        _fallbackDraftSpec = DraftSpec.empty()
+        return task
+    }
+
+    /**
+     * Spec만 초기화 (context 보존) - 작업 완료 후 다음 작업 대기
+     */
+    fun resetSpec() {
+        val activeTask = context.activeTask
+        if (activeTask != null) {
+            activeTask.draftSpec = DraftSpec.empty()
+        } else {
+            _fallbackDraftSpec = DraftSpec.empty()
+        }
         confirmed = false
+    }
+
+    /**
+     * 전체 초기화 (context 포함) - 세션 완전 리셋
+     */
+    fun resetAll() {
+        _fallbackDraftSpec = DraftSpec.empty()
+        confirmed = false
+        context.clear()
+    }
+
+    /**
+     * 하위 호환: 기존 reset()은 resetSpec()과 동일
+     */
+    fun reset() {
+        resetSpec()
+    }
+
+    /**
+     * 실행 결과를 context에 적재
+     */
+    fun integrateResult(blueprint: Blueprint?, result: BlueprintExecutionResult?, summary: String) {
+        val turnIndex = context.executionHistory.size + 1
+        context.executionHistory.add(
+            TurnExecution(
+                turnIndex = turnIndex,
+                blueprint = blueprint,
+                result = result,
+                summary = summary
+            )
+        )
     }
 }

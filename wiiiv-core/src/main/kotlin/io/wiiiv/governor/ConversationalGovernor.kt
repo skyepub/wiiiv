@@ -470,21 +470,22 @@ class ConversationalGovernor(
             )
         }
 
-        // 완료 확인 (쓰기 의도 가드레일 포함)
-        if (decision.isComplete) {
-            val intentRequiresWrite = detectWriteIntent(draftSpec, session)
-            val hasExecutedWrite = hasExecutedWriteOperation(session)
+        // writeIntent 첫 선언 저장 (세션 내 고정)
+        if (session.context.declaredWriteIntent == null) {
+            session.context.declaredWriteIntent = decision.writeIntent
+        }
+        val writeIntent = session.context.declaredWriteIntent ?: decision.writeIntent
 
-            if (intentRequiresWrite && !hasExecutedWrite) {
-                // 조기 완료 거부: 쓰기 작업이 아직 수행되지 않음
-                val originalIntent = findOriginalUserIntent(session)
+        // 완료 확인 (writeIntent 일관성 검증)
+        if (decision.isComplete) {
+            if (writeIntent && !hasExecutedWriteOperation(session)) {
+                // Case 3: 쓰기 선언했으나 쓰기 미실행 → Continue 강제
                 session.history.add(ConversationMessage(
                     MessageRole.SYSTEM,
-                    "아직 쓰기 작업(PUT/POST/DELETE)이 실행되지 않았습니다. " +
-                        "사용자의 원래 요청: $originalIntent. 남은 단계를 계속 진행하세요."
+                    "writeIntent=true로 선언했으나 아직 쓰기 작업(PUT/POST/DELETE/PATCH)이 실행되지 않았습니다. 남은 쓰기 작업을 계속하세요."
                 ))
                 session.context.pendingAction = PendingAction.ContinueExecution(
-                    reasoning = "Write operations pending: $originalIntent"
+                    reasoning = "writeIntent=true declared but no write operation executed"
                 )
                 return ConversationResponse(
                     action = ActionType.EXECUTE,
@@ -522,20 +523,16 @@ class ConversationalGovernor(
             )
         }
 
-        // API 호출이 비어있으면 완료로 간주 (쓰기 의도 가드레일 동일 적용)
+        // API 호출이 비어있으면 완료로 간주 (writeIntent 일관성 검증 동일 적용)
         if (decision.calls.isEmpty()) {
-            val intentRequiresWrite2 = detectWriteIntent(draftSpec, session)
-            val hasExecutedWrite2 = hasExecutedWriteOperation(session)
-
-            if (intentRequiresWrite2 && !hasExecutedWrite2) {
-                val originalIntent = findOriginalUserIntent(session)
+            if (writeIntent && !hasExecutedWriteOperation(session)) {
+                // Case 3: 쓰기 선언했으나 쓰기 미실행 → Continue 강제
                 session.history.add(ConversationMessage(
                     MessageRole.SYSTEM,
-                    "아직 쓰기 작업(PUT/POST/DELETE)이 실행되지 않았습니다. " +
-                        "사용자의 원래 요청: $originalIntent. 남은 단계를 계속 진행하세요."
+                    "writeIntent=true로 선언했으나 아직 쓰기 작업(PUT/POST/DELETE/PATCH)이 실행되지 않았습니다. 남은 쓰기 작업을 계속하세요."
                 ))
                 session.context.pendingAction = PendingAction.ContinueExecution(
-                    reasoning = "Write operations pending: $originalIntent"
+                    reasoning = "writeIntent=true declared but no write operation executed"
                 )
                 return ConversationResponse(
                     action = ActionType.EXECUTE,
@@ -555,6 +552,19 @@ class ConversationalGovernor(
             return ConversationResponse(
                 action = ActionType.EXECUTE,
                 message = summary,
+                sessionId = session.sessionId
+            )
+        }
+
+        // Case 4: 쓰기 미선언인데 쓰기 호출 존재 → Abort
+        val hasWriteCall = decision.calls.any { it.method.uppercase() in WRITE_HTTP_METHODS }
+        if (!writeIntent && hasWriteCall) {
+            val writeCalls = decision.calls
+                .filter { it.method.uppercase() in WRITE_HTTP_METHODS }
+                .joinToString(", ") { "${it.method} ${it.url}" }
+            return ConversationResponse(
+                action = ActionType.CANCEL,
+                message = "writeIntent=false로 선언했으나 쓰기 API 호출($writeCalls)이 포함되어 있습니다. 워크플로우를 중단합니다.",
                 sessionId = session.sessionId
             )
         }
@@ -1114,12 +1124,15 @@ class ConversationalGovernor(
                 }
             } ?: emptyList()
 
+            val writeIntent = jsonElement["writeIntent"]?.jsonPrimitive?.booleanOrNull ?: false
+
             ApiWorkflowDecision(
                 isComplete = isComplete,
                 isAbort = isAbort,
                 reasoning = reasoning,
                 summary = summary,
-                calls = calls
+                calls = calls,
+                writeIntent = writeIntent
             )
         } catch (e: Exception) {
             // 파싱 실패 시 abort
@@ -1308,28 +1321,6 @@ class ConversationalGovernor(
     }
 
     /**
-     * 쓰기 의도 감지: DraftSpec intent + 세션의 사용자 메시지 모두 확인
-     *
-     * LLM이 intent를 축소 추출할 수 있으므로 ("shipped로 변경" → "사용자 조회"),
-     * 원본 사용자 메시지도 검사한다.
-     */
-    private fun detectWriteIntent(draftSpec: DraftSpec, session: ConversationSession): Boolean {
-        // 1. DraftSpec intent 확인
-        val fromIntent = draftSpec.intent?.let { intent ->
-            WRITE_INTENT_KEYWORDS.any { keyword -> intent.contains(keyword, ignoreCase = true) }
-        } ?: false
-        if (fromIntent) return true
-
-        // 2. 세션의 사용자 메시지 확인 (LLM이 intent를 축소 추출한 경우 대비)
-        return session.history
-            .filter { it.role == MessageRole.USER }
-            .takeLast(5)
-            .any { msg ->
-                WRITE_INTENT_KEYWORDS.any { keyword -> msg.content.contains(keyword, ignoreCase = true) }
-            }
-    }
-
-    /**
      * 실행 히스토리에서 쓰기 작업(PUT/POST/DELETE/PATCH) 존재 여부 확인
      */
     private fun hasExecutedWriteOperation(session: ConversationSession): Boolean {
@@ -1341,24 +1332,7 @@ class ConversationalGovernor(
         }
     }
 
-    /**
-     * 세션에서 쓰기 키워드를 포함한 최초 사용자 메시지 찾기
-     */
-    private fun findOriginalUserIntent(session: ConversationSession): String {
-        return session.history
-            .filter { it.role == MessageRole.USER }
-            .firstOrNull { msg ->
-                WRITE_INTENT_KEYWORDS.any { keyword -> msg.content.contains(keyword, ignoreCase = true) }
-            }?.content?.take(100) ?: session.draftSpec.intent ?: "unknown"
-    }
-
     companion object {
-        /** 쓰기 의도를 나타내는 키워드 (한국어 + 영어) */
-        private val WRITE_INTENT_KEYWORDS = listOf(
-            "변경", "수정", "업데이트", "삭제", "생성", "추가", "등록", "제거",
-            "change", "modify", "update", "delete", "create", "add", "remove"
-        )
-
         /** 쓰기 HTTP 메서드 */
         private val WRITE_HTTP_METHODS = setOf("PUT", "POST", "DELETE", "PATCH")
 
@@ -1452,7 +1426,9 @@ data class ApiWorkflowDecision(
     /** 현재까지 진행 요약 */
     val summary: String,
     /** 호출할 API 목록 */
-    val calls: List<ApiCallDecision>
+    val calls: List<ApiCallDecision>,
+    /** 쓰기 의도 선언 (LLM이 첫 응답에서 선언) */
+    val writeIntent: Boolean = false
 )
 
 /**

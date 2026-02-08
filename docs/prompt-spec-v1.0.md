@@ -114,22 +114,33 @@ B-class 실패 감지
 
 ### 4.1 현존 승격 사례
 
-#### WRITE_INTENT_GUARD
+#### WRITE_INTENT_GUARD (v2: writeIntent 선언 기반)
 
 | 항목 | 내용 |
 |------|------|
 | 원래 불변 조건 | P003-B03 (변경 요청 시 모든 대상 PUT/POST 완료 후 isComplete) |
 | 승격 사유 | LLM이 intent를 "조회"로 축소 추출 → isComplete=true 오판 |
+| v2 변경 | 키워드 기반 → writeIntent 선언 기반 일관성 검증으로 전환 |
 | 코드 위치 | ConversationalGovernor.kt |
-| 핵심 함수 | `detectWriteIntent()` (line 1316), `hasExecutedWriteOperation()` (line 1335) |
-| 적용 지점 | `executeLlmDecidedTurn()` (line 474, line 527) — 두 곳에서 동일 가드 적용 |
+| 핵심 함수 | `hasExecutedWriteOperation()` — 실행 이력의 WRITE 존재 여부 확인 |
+| 적용 지점 | `executeLlmDecidedTurn()` — 3개 지점 (writeIntent 저장, 완료 시 검증, 실행 전 검증) |
+
+**4-Cell Consistency Matrix**:
+
+| writeIntent | 실제 calls | Guard 결과 |
+|---|---|---|
+| `false` | READ만 | OK |
+| `true` | WRITE >= 1 | OK |
+| `true` | WRITE 없음 | Continue 강제 (Case 3) |
+| `false` | WRITE 존재 | Abort (Case 4) |
 
 **동작 원리**:
 
-1. `detectWriteIntent()`: DraftSpec.intent + 최근 사용자 메시지 5개에서 쓰기 키워드 탐색
-   - 키워드: 변경, 수정, 업데이트, 삭제, 생성, 추가, 등록, 제거, change, modify, update, delete, create, add, remove
-2. `hasExecutedWriteOperation()`: executionHistory에서 PUT/POST/DELETE/PATCH 실행 여부 확인
-3. 쓰기 의도가 있으나 쓰기 실행이 없으면 → isComplete 거부, `PendingAction.ContinueExecution` 강제
+1. LLM이 첫 번째 API workflow 응답에서 `writeIntent: true/false`를 선언
+2. `SessionContext.declaredWriteIntent`에 저장 (세션 내 고정, 이후 턴에서 변경 불가)
+3. 일관성 검증:
+   - Case 3 (writeIntent=true, WRITE 미실행): isComplete 거부, `PendingAction.ContinueExecution` 강제
+   - Case 4 (writeIntent=false, WRITE 호출 존재): 즉시 Abort
 
 ---
 
@@ -238,7 +249,8 @@ B-class 실패 감지
 | P003-S02 | S | `calls[].method`는 GET/POST/PUT/DELETE/PATCH 중 하나다 | enum validation |
 | P003-S03 | S | `calls[].url`은 `http(s)://`로 시작하는 절대 URL이다 | regex validation |
 | P003-S04 | S | `isComplete=true`이면 `calls`는 빈 배열이다 | structural assert |
-| P003-B01 | B | 조회 요청 시 GET만 호출 (쓰기 미실행) | E2E 반복 + method stats, 95%+ |
+| P003-S05 | S | `writeIntent`는 boolean이며 필수 필드다 | JSON schema + type check |
+| P003-B01 | B | 조회 목적 요청 → writeIntent=false 선언 | E2E 반복 + field assert, 95%+ |
 | P003-B02 | B | 이미 호출한 API 재호출 금지 | E2E 반복 + dedup log check |
 | P003-B03 | B | 변경 요청 시 모든 대상 PUT/POST 완료 후 isComplete | E2E 반복 + coverage check |
 | P003-B04 | B | 사용자 지정 값 정확 사용 (예: "shipped" → body에 "shipped") | E2E 반복 + payload assert |
@@ -248,7 +260,7 @@ B-class 실패 감지
 
 | B-class ID | 가드레일 | 코드 위치 | 사유 |
 |------------|----------|-----------|------|
-| P003-B03 | WRITE_INTENT_GUARD | ConversationalGovernor.kt:474, :527 | LLM intent 축소 → isComplete 오판 방지 |
+| P003-B03 | WRITE_INTENT_GUARD (v2: writeIntent 선언 기반) | ConversationalGovernor.kt `executeLlmDecidedTurn()` | writeIntent 선언과 실제 호출의 일관성 검증 |
 
 ---
 
@@ -466,13 +478,13 @@ LLM 호출 또는 응답 파싱 실패 시 (LlmPersona.kt):
 |--------|---------|---------|---------|-----------|
 | P-001 DEFAULT | 3 | 4 | 2 | - |
 | P-002 PROJECT_GENERATION | 3 | 2 | 1 | - |
-| P-003 API_WORKFLOW | 4 | 4 | 1 | WRITE_INTENT_GUARD |
+| P-003 API_WORKFLOW | 5 | 4 | 1 | WRITE_INTENT_GUARD (v2) |
 | P-004 EXECUTION_RESULT | 2 | 1 | 1 | - |
 | P-005 ARCHITECT_PERSONA | 2 | 2 | 1 | - |
 | P-006 REVIEWER_PERSONA | 2 | 2 | 1 | - |
 | P-007 ADVERSARY_PERSONA | 2 | 3 | 1 | - |
 | P-008 SPEC_ENRICHMENT | 3 | 2 | 1 | - |
-| **합계** | **21** | **20** | **9** | **1** |
+| **합계** | **22** | **20** | **9** | **1** |
 
 ---
 

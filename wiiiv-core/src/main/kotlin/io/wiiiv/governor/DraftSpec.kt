@@ -359,7 +359,8 @@ class SessionContext(
     private val _fallbackHistory: MutableList<TurnExecution> = mutableListOf(),
     val artifacts: MutableMap<String, String> = mutableMapOf(),
     val facts: MutableMap<String, String> = mutableMapOf(),
-    var pendingAction: PendingAction? = null
+    var pendingAction: PendingAction? = null,
+    var declaredWriteIntent: Boolean? = null
 ) {
     /**
      * 현재 활성 작업
@@ -391,6 +392,7 @@ class SessionContext(
         artifacts.clear()
         facts.clear()
         pendingAction = null
+        declaredWriteIntent = null
     }
 }
 

@@ -429,6 +429,22 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 
 **범위 엄수**: 사용자가 "조회"를 요청하면 GET만 한다. "변경"을 요청하면 필요한 GET을 먼저 하고 PUT/POST로 변경한다. 요청하지 않은 작업은 절대 하지 않는다.
 
+## writeIntent 선언 (필수)
+
+**첫 번째 응답에서 반드시 `writeIntent`를 선언하라.**
+
+- `writeIntent: true` — 이 워크플로우가 데이터 변경(PUT/POST/DELETE/PATCH)을 포함하는 경우
+- `writeIntent: false` — 조회/열람/확인 목적인 경우
+
+판단 기준:
+- 조회/열람/확인 목적이면 `false`. 예: "주문 조회해줘", "사용자 목록 보여줘", "변경 이력을 조회해줘"
+- 변경/수정/삭제/생성이면 `true`. 예: "주문 상태를 변경해줘", "사용자를 삭제해줘"
+
+few-shot 예시:
+- "변경 이력을 조회해줘" → `writeIntent: false` (조회이므로)
+- "john의 주문을 shipped로 변경해줘" → `writeIntent: true` (변경이므로)
+- "사용자 목록 조회해줘" → `writeIntent: false` (조회이므로)
+
 ## 규칙
 
 1. **한 번에 하나의 API 호출** (또는 동일 패턴의 배치 호출. 예: 동일 엔드포인트에 대한 여러 PUT)
@@ -455,6 +471,7 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 
 ```json
 {
+  "writeIntent": true,
   "isComplete": false,
   "isAbort": false,
   "reasoning": "사용자 의도 중 아직 미달성인 부분과 다음 호출이 필요한 이유",

@@ -134,6 +134,7 @@ class FileExecutor : Executor {
     /**
      * READ - 파일 읽기
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun executeRead(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
         val file = File(step.path)
 
@@ -176,6 +177,7 @@ class FileExecutor : Executor {
     /**
      * WRITE - 파일 쓰기
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun executeWrite(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
         val file = File(step.path)
         val content = step.content ?: ""
@@ -201,6 +203,7 @@ class FileExecutor : Executor {
     /**
      * COPY - 파일 복사
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun executeCopy(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
         val source = File(step.path)
         val target = File(step.targetPath ?: return FileOperationResult.Error(
@@ -230,7 +233,7 @@ class FileExecutor : Executor {
                 put("size", JsonPrimitive(source.length()))
                 put("action", JsonPrimitive("COPY"))
             },
-            artifacts = mapOf("copied_file" to step.targetPath!!)
+            artifacts = mapOf("copied_file" to step.targetPath)
         )
 
         return FileOperationResult.Success(output)
@@ -239,6 +242,7 @@ class FileExecutor : Executor {
     /**
      * MOVE - 파일 이동
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun executeMove(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
         val source = File(step.path)
         val target = File(step.targetPath ?: return FileOperationResult.Error(
@@ -267,7 +271,7 @@ class FileExecutor : Executor {
                 put("target", JsonPrimitive(step.targetPath))
                 put("action", JsonPrimitive("MOVE"))
             },
-            artifacts = mapOf("moved_file" to step.targetPath!!)
+            artifacts = mapOf("moved_file" to step.targetPath)
         )
 
         return FileOperationResult.Success(output)
@@ -276,6 +280,7 @@ class FileExecutor : Executor {
     /**
      * DELETE - 파일 삭제
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun executeDelete(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
         val file = File(step.path)
 
@@ -315,6 +320,7 @@ class FileExecutor : Executor {
     /**
      * MKDIR - 디렉토리 생성
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun executeMkdir(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
         val dir = File(step.path)
 

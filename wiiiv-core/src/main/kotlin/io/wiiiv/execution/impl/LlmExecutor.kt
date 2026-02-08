@@ -127,7 +127,7 @@ class LlmExecutor(
                 error = ExecutionError(
                     category = e.category,
                     code = e.code,
-                    message = e.message ?: "LLM provider error"
+                    message = e.message
                 ),
                 partialOutput = e.partialResponse?.let { createOutput(step.stepId, it, model, true) }
             )

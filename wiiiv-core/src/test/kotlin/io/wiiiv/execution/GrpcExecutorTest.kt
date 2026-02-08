@@ -314,9 +314,9 @@ class GrpcExecutorTest {
         val result = executor.execute(step, context)
 
         assertIs<ExecutionResult.Success>(result)
-        assertEquals("grpc-meta", result.meta?.stepId)
-        assertTrue(result.meta?.resourceRefs?.contains("localhost:50051") == true)
-        assertTrue(result.meta?.resourceRefs?.contains("TestService/TestMethod") == true)
+        assertEquals("grpc-meta", result.meta.stepId)
+        assertTrue(result.meta.resourceRefs.contains("localhost:50051") == true)
+        assertTrue(result.meta.resourceRefs.contains("TestService/TestMethod") == true)
     }
 
     @Test

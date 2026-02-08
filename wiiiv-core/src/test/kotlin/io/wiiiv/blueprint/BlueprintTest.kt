@@ -128,7 +128,7 @@ class BlueprintTest {
 
         // Then
         assertTrue(executionStep is ExecutionStep.FileStep)
-        val fileStep = executionStep as ExecutionStep.FileStep
+        val fileStep = executionStep
         assertEquals("test-step", fileStep.stepId)
         assertEquals(FileAction.WRITE, fileStep.action)
         assertEquals("/tmp/test.txt", fileStep.path)
@@ -326,7 +326,7 @@ class BlueprintTest {
 
         // Then
         assertTrue(executionStep is ExecutionStep.CommandStep)
-        val cmdStep = executionStep as ExecutionStep.CommandStep
+        val cmdStep = executionStep
         assertEquals("sh", cmdStep.command)
         assertEquals(listOf("-c", "./gradlew build"), cmdStep.args)
         assertEquals("/tmp/test-project", cmdStep.workingDir)
@@ -385,7 +385,7 @@ class BlueprintTest {
         val executionStep = step.toExecutionStep()
 
         assertTrue(executionStep is ExecutionStep.ApiCallStep)
-        val apiStep = executionStep as ExecutionStep.ApiCallStep
+        val apiStep = executionStep
         assertEquals("step-api", apiStep.stepId)
         assertEquals(io.wiiiv.execution.HttpMethod.POST, apiStep.method)
         assertEquals("http://localhost:8080/api/users", apiStep.url)

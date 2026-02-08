@@ -255,8 +255,8 @@ class MessageQueueExecutorTest {
         val result = executor.execute(step, context)
 
         assertIs<ExecutionResult.Success>(result)
-        assertEquals("mq-meta", result.meta?.stepId)
-        assertTrue(result.meta?.resourceRefs?.contains("meta-topic") == true)
+        assertEquals("mq-meta", result.meta.stepId)
+        assertTrue(result.meta.resourceRefs.contains("meta-topic") == true)
     }
 
     @Test

@@ -511,7 +511,7 @@ class Scenario3MultimodalTest {
         val result = executor.execute(step, context)
 
         return if (result.isSuccess) {
-            val content = (result as ExecutionResult.Success).output.artifacts["content"] as? String ?: ""
+            val content = (result as ExecutionResult.Success).output.artifacts["content"] ?: ""
             parseJudgmentJson(content)
         } else {
             // 폴백
@@ -566,7 +566,8 @@ class Scenario3MultimodalTest {
         }
     }
 
-    private fun validateScenario3A(judgment: MultimodalJudgment, userPrompt: String): Boolean {
+    @Suppress("UNUSED_PARAMETER")
+    private fun validateScenario3A(judgment: MultimodalJudgment, _userPrompt: String): Boolean {
         var passed = true
         var score = 0
 
@@ -600,7 +601,8 @@ class Scenario3MultimodalTest {
         return passed && score >= 60
     }
 
-    private fun validateScenario3B(judgment: MultimodalJudgment, userPrompt: String): Boolean {
+    @Suppress("UNUSED_PARAMETER")
+    private fun validateScenario3B(judgment: MultimodalJudgment, _userPrompt: String): Boolean {
         var passed = true
         var criticalFailure = false
 
@@ -659,7 +661,8 @@ class Scenario3MultimodalTest {
         return passed
     }
 
-    private fun validateScenario3C(judgment: MultimodalJudgment, userPrompt: String): Boolean {
+    @Suppress("UNUSED_PARAMETER")
+    private fun validateScenario3C(judgment: MultimodalJudgment, _userPrompt: String): Boolean {
         var score = 0
 
         // 1. 원인은 단일이 아님 (가설 복수)

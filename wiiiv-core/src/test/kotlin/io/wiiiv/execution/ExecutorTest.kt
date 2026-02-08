@@ -79,7 +79,7 @@ class ExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.CONTRACT_VIOLATION, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.CONTRACT_VIOLATION, result.error.category)
         assertEquals("NO_EXECUTOR", result.error.code)
     }
 

@@ -651,7 +651,7 @@ class Scenario5EthicsConflictTest {
         val result = executor.execute(step, context)
 
         return if (result.isSuccess) {
-            val content = (result as ExecutionResult.Success).output.artifacts["content"] as? String ?: ""
+            val content = (result as ExecutionResult.Success).output.artifacts["content"] ?: ""
             parseEthicsJson(content)
         } else {
             EthicsJudgment(

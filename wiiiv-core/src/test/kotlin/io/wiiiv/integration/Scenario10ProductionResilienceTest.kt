@@ -532,8 +532,8 @@ class Scenario10ProductionResilienceTest {
 
         println("[Session Usage Accumulation]")
         requests.forEachIndexed { index, (name, tokens, cost) ->
-            val prevTokens = totalTokens
-            val prevCost = totalCost
+            @Suppress("UNUSED_VARIABLE") val _prevTokens = totalTokens
+            @Suppress("UNUSED_VARIABLE") val _prevCost = totalCost
             totalTokens += tokens
             totalCost += cost
 
@@ -1014,10 +1014,11 @@ class Scenario10ProductionResilienceTest {
         return ValidationResult(score, checks)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun validateRecovery(
         report: RecoveryReport,
         chainIntact: Boolean,
-        driftDetected: Boolean
+        _driftDetected: Boolean
     ): ValidationResult {
         val checks = mutableMapOf<String, Boolean>()
 

@@ -82,7 +82,7 @@ class OpenAIIntegrationTest {
 
         assertTrue(result.isSuccess, "LLM call should succeed")
         val output = (result as ExecutionResult.Success).output
-        val content = output.artifacts["content"] as? String
+        val content = output.artifacts["content"]
         assertNotNull(content, "Should have content")
         assertTrue(content.contains("4"), "Should contain answer '4', got: $content")
 
@@ -119,7 +119,7 @@ class OpenAIIntegrationTest {
 
         assertTrue(result.isSuccess, "LLM call should succeed")
         val output = (result as ExecutionResult.Success).output
-        val content = output.artifacts["content"] as? String
+        val content = output.artifacts["content"]
         assertNotNull(content)
         assertTrue(
             content.uppercase().contains("POSITIVE"),
@@ -164,7 +164,7 @@ class OpenAIIntegrationTest {
 
         assertTrue(result.isSuccess, "LLM call should succeed")
         val output = (result as ExecutionResult.Success).output
-        val content = output.artifacts["content"] as? String
+        val content = output.artifacts["content"]
         assertNotNull(content)
         assertTrue(content.length < longText.length, "Summary should be shorter than original")
         assertTrue(

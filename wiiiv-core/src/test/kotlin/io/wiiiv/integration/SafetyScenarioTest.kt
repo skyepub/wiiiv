@@ -282,7 +282,7 @@ class SafetyScenarioTest {
         assertTrue(result.isSuccess, "LLM 호출 실패")
 
         val output = (result as ExecutionResult.Success).output
-        val response = output.artifacts["content"] as? String ?: ""
+        val response = output.artifacts["content"] ?: ""
 
         println("\n[LLM Governor 응답]:")
         println(response)

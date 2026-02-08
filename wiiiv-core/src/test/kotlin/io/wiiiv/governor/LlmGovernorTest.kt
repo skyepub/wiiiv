@@ -43,7 +43,7 @@ class LlmGovernorTest {
 
         // Then: SimpleDACS YES → Blueprint 생성
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val blueprint = (result as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = result.blueprint
         assertEquals("YES", blueprint.specSnapshot.dacsResult)
         assertEquals("spec-null-provider", blueprint.specSnapshot.specId)
         assertTrue(blueprint.specSnapshot.governorId.contains("gov-test-null"))
@@ -75,7 +75,7 @@ class LlmGovernorTest {
 
         // Then: REVISION → GovernorResult.Failed
         assertTrue(result is GovernorResult.Failed)
-        assertTrue((result as GovernorResult.Failed).error.startsWith("REVISION"))
+        assertTrue(result.error.startsWith("REVISION"))
     }
 
     @Test
@@ -104,7 +104,7 @@ class LlmGovernorTest {
 
         // Then: NO → GovernorResult.Denied
         assertTrue(result is GovernorResult.Denied)
-        assertTrue((result as GovernorResult.Denied).reason.contains("NO"))
+        assertTrue(result.reason.contains("NO"))
     }
 
     @Test
@@ -132,7 +132,7 @@ class LlmGovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val snapshot = (result as GovernorResult.BlueprintCreated).blueprint.specSnapshot
+        val snapshot = result.blueprint.specSnapshot
         assertEquals("YES", snapshot.dacsResult)
         assertNotEquals("DIRECT_ALLOW", snapshot.dacsResult)
     }
@@ -166,7 +166,7 @@ class LlmGovernorTest {
         configurableDacs.setNextResult(Consensus.REVISION, "Need more info")
         val revisionResult = governor.createBlueprint(request, spec)
         assertTrue(revisionResult is GovernorResult.Failed)
-        assertTrue((revisionResult as GovernorResult.Failed).error.startsWith("REVISION"))
+        assertTrue(revisionResult.error.startsWith("REVISION"))
 
         // When: YES
         configurableDacs.setNextResult(Consensus.YES, "Approved")
@@ -246,7 +246,7 @@ class LlmGovernorTest {
 
         // Then: LLM 실패 → 원본 Spec(sparse) → DACS REVISION → Failed
         assertTrue(result is GovernorResult.Failed)
-        assertTrue((result as GovernorResult.Failed).error.startsWith("REVISION"))
+        assertTrue(result.error.startsWith("REVISION"))
     }
 
     @Test

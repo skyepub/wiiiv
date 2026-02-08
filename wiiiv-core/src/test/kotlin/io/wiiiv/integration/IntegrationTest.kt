@@ -71,7 +71,7 @@ class IntegrationTest {
 
         val governorResult = governor.createBlueprint(request, spec)
         assertTrue(governorResult is GovernorResult.BlueprintCreated)
-        val blueprint = (governorResult as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = governorResult.blueprint
 
         // Blueprint 검증
         assertEquals(spec.id, blueprint.specSnapshot.specId)
@@ -184,7 +184,7 @@ class IntegrationTest {
         )
         val governorResult = governor.createBlueprint(request, spec)
         assertTrue(governorResult is GovernorResult.BlueprintCreated)
-        val blueprint = (governorResult as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = governorResult.blueprint
 
         // === 4. Gate가 거부하는 상황 (사용자 미승인) ===
         val gateChain = GateChain.standard()
@@ -281,7 +281,7 @@ class IntegrationTest {
 
         // Gate 검사
         assertTrue(gateChain.check(baseGateContext.copy(
-            blueprintId = (mkdirResult as GovernorResult.BlueprintCreated).blueprint.id
+            blueprintId = mkdirResult.blueprint.id
         )).isAllow)
 
         // 실행
@@ -298,7 +298,7 @@ class IntegrationTest {
         val writeResult = governor.createBlueprint(writeRequest, spec)
         assertTrue(writeResult is GovernorResult.BlueprintCreated)
 
-        val writeExec = runner.execute((writeResult as GovernorResult.BlueprintCreated).blueprint)
+        val writeExec = runner.execute(writeResult.blueprint)
         assertTrue(writeExec.isSuccess)
 
         // === 6. Step 3: READ (검증) ===
@@ -309,12 +309,12 @@ class IntegrationTest {
         val readResult = governor.createBlueprint(readRequest, spec)
         assertTrue(readResult is GovernorResult.BlueprintCreated)
 
-        val readExec = runner.execute((readResult as GovernorResult.BlueprintCreated).blueprint)
+        val readExec = runner.execute(readResult.blueprint)
         assertTrue(readExec.isSuccess)
 
         // === 7. 최종 검증 ===
         val content = readExec.getStepOutput(
-            (readResult as GovernorResult.BlueprintCreated).blueprint.steps[0].stepId
+            readResult.blueprint.steps[0].stepId
         )?.json?.get("content")?.jsonPrimitive?.content
 
         assertNotNull(content)

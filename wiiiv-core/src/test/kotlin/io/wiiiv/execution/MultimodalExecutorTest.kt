@@ -342,8 +342,8 @@ class MultimodalExecutorTest {
         val result = executor.execute(step, context)
 
         assertIs<ExecutionResult.Success>(result)
-        assertEquals("mm-meta", result.meta?.stepId)
-        assertTrue(result.meta?.resourceRefs?.contains(testImageFile.absolutePath) == true)
+        assertEquals("mm-meta", result.meta.stepId)
+        assertTrue(result.meta.resourceRefs.contains(testImageFile.absolutePath) == true)
     }
 
     @Test

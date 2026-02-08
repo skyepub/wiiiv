@@ -51,7 +51,7 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val blueprint = (result as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = result.blueprint
 
         assertEquals(1, blueprint.steps.size)
         assertEquals(BlueprintStepType.FILE_READ, blueprint.steps[0].type)
@@ -80,9 +80,8 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.Denied)
-        val denied = result as GovernorResult.Denied
-        assertEquals("spec-read-only", denied.specId)
-        assertTrue(denied.reason.contains("FILE_WRITE"))
+        assertEquals("spec-read-only", result.specId)
+        assertTrue(result.reason.contains("FILE_WRITE"))
     }
 
     @Test
@@ -148,8 +147,7 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.Denied)
-        val denied = result as GovernorResult.Denied
-        assertTrue(denied.reason.contains("/etc/passwd"))
+        assertTrue(result.reason.contains("/etc/passwd"))
     }
 
     @Test
@@ -190,7 +188,7 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val step = (result as GovernorResult.BlueprintCreated).blueprint.steps[0]
+        val step = result.blueprint.steps[0]
         assertEquals(BlueprintStepType.FILE_WRITE, step.type)
         assertEquals("/tmp/output.txt", step.params["path"])
         assertEquals("Hello wiiiv v2.0", step.params["content"])
@@ -211,7 +209,7 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val step = (result as GovernorResult.BlueprintCreated).blueprint.steps[0]
+        val step = result.blueprint.steps[0]
         assertEquals(BlueprintStepType.FILE_COPY, step.type)
         assertEquals("/tmp/source.txt", step.params["source"])
         assertEquals("/tmp/dest.txt", step.params["target"])
@@ -231,7 +229,7 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val step = (result as GovernorResult.BlueprintCreated).blueprint.steps[0]
+        val step = result.blueprint.steps[0]
         assertEquals(BlueprintStepType.FILE_MKDIR, step.type)
     }
 
@@ -271,7 +269,7 @@ class GovernorTest {
         // When - Governor creates Blueprint
         val governorResult = governor.createBlueprint(request, spec)
         assertTrue(governorResult is GovernorResult.BlueprintCreated)
-        val blueprint = (governorResult as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = governorResult.blueprint
 
         // When - BlueprintRunner executes Blueprint
         val runner = BlueprintRunner.create(FileExecutor.INSTANCE)
@@ -311,7 +309,7 @@ class GovernorTest {
 
         // Step 2: Execute write Blueprint
         val runner = BlueprintRunner.create(FileExecutor.INSTANCE)
-        val writeExecution = runner.execute((writeResult as GovernorResult.BlueprintCreated).blueprint)
+        val writeExecution = runner.execute(writeResult.blueprint)
         assertTrue(writeExecution.isSuccess)
 
         // Verify file was written
@@ -327,12 +325,12 @@ class GovernorTest {
         assertTrue(readResult is GovernorResult.BlueprintCreated)
 
         // Step 4: Execute read Blueprint
-        val readExecution = runner.execute((readResult as GovernorResult.BlueprintCreated).blueprint)
+        val readExecution = runner.execute(readResult.blueprint)
         assertTrue(readExecution.isSuccess)
 
         // Verify content matches
         val readOutput = readExecution.getStepOutput(
-            (readResult as GovernorResult.BlueprintCreated).blueprint.steps[0].stepId
+            readResult.blueprint.steps[0].stepId
         )
         assertEquals(
             "Written by wiiiv v2.0 Governor",
@@ -361,7 +359,7 @@ class GovernorTest {
 
         // Then
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val snapshot = (result as GovernorResult.BlueprintCreated).blueprint.specSnapshot
+        val snapshot = result.blueprint.specSnapshot
 
         assertEquals("spec-snapshot-test", snapshot.specId)
         assertEquals("2.1.0", snapshot.specVersion)

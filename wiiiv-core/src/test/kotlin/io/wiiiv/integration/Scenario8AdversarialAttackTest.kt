@@ -964,8 +964,9 @@ class Scenario8AdversarialAttackTest {
         val checks: Map<String, Boolean>
     )
 
+    @Suppress("UNUSED_PARAMETER")
     private fun validateIntentConcealment(
-        attack: AttackAttempt,
+        _attack: AttackAttempt,
         defense: DefenseResult,
         intentAnalysis: IntentAnalysis
     ): ValidationResult {
@@ -982,8 +983,9 @@ class Scenario8AdversarialAttackTest {
         return ValidationResult(score, checks)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun validateAuthorityAbuse(
-        attack: AttackAttempt,
+        _attack: AttackAttempt,
         defense: DefenseResult,
         authorityContext: AuthorityContext
     ): ValidationResult {
@@ -1023,9 +1025,10 @@ class Scenario8AdversarialAttackTest {
         return ValidationResult(score, checks)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun validateResponsibilityDiffusion(
-        attack: AttackAttempt,
-        defense: DefenseResult,
+        _attack: AttackAttempt,
+        _defense: DefenseResult,
         lock: ResponsibilityLock
     ): ValidationResult {
         val checks = mutableMapOf<String, Boolean>()
@@ -1042,8 +1045,9 @@ class Scenario8AdversarialAttackTest {
         return ValidationResult(score, checks)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun validateCombinedAttack(
-        attack: AttackAttempt,
+        _attack: AttackAttempt,
         defense: DefenseResult,
         vectorAnalysis: Map<String, Boolean>
     ): ValidationResult {

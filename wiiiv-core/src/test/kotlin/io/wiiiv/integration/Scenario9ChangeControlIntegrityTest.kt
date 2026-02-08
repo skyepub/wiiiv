@@ -489,7 +489,7 @@ class Scenario9ChangeControlIntegrityTest {
         }
 
         assertTrue(violation != null, "Tampering should be detected")
-        assertEquals(ViolationType.HASH_MISMATCH, violation?.type, "Should detect hash mismatch")
+        assertEquals(ViolationType.HASH_MISMATCH, violation.type, "Should detect hash mismatch")
         assertTrue(originalRecord.locked, "Original record should remain locked")
     }
 
@@ -928,11 +928,12 @@ class Scenario9ChangeControlIntegrityTest {
         val checks: Map<String, Boolean>
     )
 
+    @Suppress("UNUSED_PARAMETER")
     private fun validatePolicyTracking(
         diff: PolicyDiff,
         driftEvent: ConfigDriftEvent,
-        resultV1: DACSResult,
-        resultV11: DACSResult
+        _resultV1: DACSResult,
+        _resultV11: DACSResult
     ): ValidationResult {
         val checks = mutableMapOf<String, Boolean>()
 

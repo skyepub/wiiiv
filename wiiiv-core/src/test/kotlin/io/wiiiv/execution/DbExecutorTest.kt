@@ -92,7 +92,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.CONTRACT_VIOLATION, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.CONTRACT_VIOLATION, result.error.category)
         assertEquals("INVALID_STEP_TYPE", result.error.code)
     }
 
@@ -109,7 +109,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals("QUERY", output.json["mode"]?.jsonPrimitive?.content)
         assertEquals(3, output.json["rowCount"]?.jsonPrimitive?.int)
@@ -133,7 +133,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         val columns = output.json["columns"]?.jsonArray
         assertNotNull(columns)
@@ -152,7 +152,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(0, output.json["rowCount"]?.jsonPrimitive?.int)
         val rows = output.json["rows"]?.jsonArray
@@ -172,7 +172,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(2, output.json["rowCount"]?.jsonPrimitive?.int)
         assertEquals(true, output.json["hasMore"]?.jsonPrimitive?.boolean)
@@ -189,7 +189,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(2, output.json["rowCount"]?.jsonPrimitive?.int)
     }
@@ -207,7 +207,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals("MUTATION", output.json["mode"]?.jsonPrimitive?.content)
         assertEquals(1, output.json["affectedRows"]?.jsonPrimitive?.int)
@@ -220,7 +220,7 @@ class DbExecutorTest {
         )
         val verifyResult = executor.execute(verifyStep, context)
         assertTrue(verifyResult is ExecutionResult.Success)
-        val cnt = (verifyResult as ExecutionResult.Success).output.json["rows"]?.jsonArray
+        val cnt = verifyResult.output.json["rows"]?.jsonArray
             ?.get(0)?.jsonObject?.get("CNT")?.jsonPrimitive?.int
         assertEquals(4, cnt)
     }
@@ -236,7 +236,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(1, output.json["affectedRows"]?.jsonPrimitive?.int)
 
@@ -248,7 +248,7 @@ class DbExecutorTest {
         )
         val verifyResult = executor.execute(verifyStep, context)
         assertTrue(verifyResult is ExecutionResult.Success)
-        val age = (verifyResult as ExecutionResult.Success).output.json["rows"]?.jsonArray
+        val age = verifyResult.output.json["rows"]?.jsonArray
             ?.get(0)?.jsonObject?.get("AGE")?.jsonPrimitive?.int
         assertEquals(31, age)
     }
@@ -264,7 +264,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(1, output.json["affectedRows"]?.jsonPrimitive?.int)
 
@@ -276,7 +276,7 @@ class DbExecutorTest {
         )
         val verifyResult = executor.execute(verifyStep, context)
         assertTrue(verifyResult is ExecutionResult.Success)
-        val cnt = (verifyResult as ExecutionResult.Success).output.json["rows"]?.jsonArray
+        val cnt = verifyResult.output.json["rows"]?.jsonArray
             ?.get(0)?.jsonObject?.get("CNT")?.jsonPrimitive?.int
         assertEquals(2, cnt)
     }
@@ -292,7 +292,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(0, output.json["affectedRows"]?.jsonPrimitive?.int)
     }
@@ -310,7 +310,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals("DDL", output.json["mode"]?.jsonPrimitive?.content)
         assertEquals(true, output.json["success"]?.jsonPrimitive?.boolean)
@@ -376,7 +376,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, result.error.category)
     }
 
     @Test
@@ -407,7 +407,7 @@ class DbExecutorTest {
         val result = failingExecutor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, result.error.category)
         assertEquals("CONNECTION_FAILED", result.error.code)
     }
 
@@ -439,7 +439,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals("3", output.artifacts["rowCount"])
     }
@@ -461,7 +461,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val row = (result as ExecutionResult.Success).output.json["rows"]?.jsonArray?.get(0)?.jsonObject
+        val row = result.output.json["rows"]?.jsonArray?.get(0)?.jsonObject
         assertNotNull(row)
         assertTrue(row["EMAIL"] is JsonNull || row["EMAIL"]?.jsonPrimitive?.contentOrNull == null)
     }
@@ -477,7 +477,7 @@ class DbExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val row = (result as ExecutionResult.Success).output.json["rows"]?.jsonArray?.get(0)?.jsonObject
+        val row = result.output.json["rows"]?.jsonArray?.get(0)?.jsonObject
         val age = row?.get("AGE")?.jsonPrimitive?.int
         assertEquals(30, age)
     }

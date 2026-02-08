@@ -535,6 +535,35 @@ class ConversationSession(
     }
 
     /**
+     * 현재 작업을 SUSPENDED TaskSlot으로 보존
+     *
+     * - activeTask가 있으면 SUSPENDED로 전환
+     * - activeTask가 없고 fallback DraftSpec에 의미 있는 내용이 있으면 TaskSlot으로 승격 후 SUSPENDED
+     * - 보존할 내용이 없으면 null 반환
+     *
+     * @return 보존된 TaskSlot, 또는 null
+     */
+    fun suspendCurrentWork(): TaskSlot? {
+        if (context.activeTask != null) {
+            val task = context.activeTask!!
+            task.status = TaskStatus.SUSPENDED
+            context.activeTaskId = null
+            return task
+        }
+
+        val spec = draftSpec
+        val intent = spec.intent
+        if (intent != null) {
+            val task = ensureActiveTask(intent)
+            task.status = TaskStatus.SUSPENDED
+            context.activeTaskId = null
+            return task
+        }
+
+        return null
+    }
+
+    /**
      * Spec만 초기화 (context 보존) - 작업 완료 후 다음 작업 대기
      */
     fun resetSpec() {
@@ -544,6 +573,23 @@ class ConversationSession(
         } else {
             _fallbackDraftSpec = DraftSpec.empty()
         }
+        confirmed = false
+    }
+
+    /**
+     * 현재 작업만 취소 (다른 SUSPENDED 작업은 보존)
+     *
+     * - activeTask가 있으면 tasks에서 제거하고 activeTaskId를 null로
+     * - activeTask가 없으면 fallback DraftSpec만 초기화
+     * - SUSPENDED/COMPLETED 작업은 그대로 보존
+     */
+    fun cancelCurrentTask() {
+        val activeTask = context.activeTask
+        if (activeTask != null) {
+            context.tasks.remove(activeTask.id)
+            context.activeTaskId = null
+        }
+        _fallbackDraftSpec = DraftSpec.empty()
         confirmed = false
     }
 

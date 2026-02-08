@@ -161,9 +161,11 @@ fun main() = runBlocking {
                 println()
 
                 // auto-continue: nextAction == CONTINUE_EXECUTION이면 "계속" 메시지로 다음 턴 실행
+                // 계약: CONFIRM/ASK가 나오면 여기에 도달하지 않음 (nextAction이 null)
                 if (response.nextAction == NextAction.CONTINUE_EXECUTION && continuations < 10) {
                     continuations++
-                    println("      (계속 실행 중... $continuations/10)")
+                    val reason = response.message.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: ""
+                    println("      (자동 계속 $continuations/10: $reason)")
                     response = governor.chat(session.sessionId, "계속")
                 } else {
                     break

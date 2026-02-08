@@ -154,8 +154,8 @@ class RagTest {
 
             // Check that consecutive chunks have overlapping content
             for (i in 0 until chunks.size - 1) {
-                val endOfCurrent = chunks[i].content.takeLast(10)
-                val startOfNext = chunks[i + 1].content.take(10)
+                @Suppress("UNUSED_VARIABLE") val _endOfCurrent = chunks[i].content.takeLast(10)
+                @Suppress("UNUSED_VARIABLE") val _startOfNext = chunks[i + 1].content.take(10)
                 // Due to overlap, there should be shared content
                 assertTrue(chunks.size >= 2)
             }

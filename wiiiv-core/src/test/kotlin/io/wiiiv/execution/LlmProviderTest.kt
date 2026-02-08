@@ -457,7 +457,7 @@ class LlmProviderTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertNotNull((result as ExecutionResult.Success).output.artifacts["content"])
+        assertNotNull(result.output.artifacts["content"])
     }
 
     @Test

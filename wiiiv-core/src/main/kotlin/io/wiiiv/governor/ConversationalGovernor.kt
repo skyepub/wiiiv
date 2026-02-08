@@ -95,6 +95,15 @@ class ConversationalGovernor(
         // 사용자 메시지 기록
         session.addUserMessage(userMessage)
 
+        // pendingAction이 ContinueExecution이면 LLM 판단 없이 바로 실행 계속
+        val pending = session.context.pendingAction
+        if (pending is PendingAction.ContinueExecution) {
+            session.context.pendingAction = null
+            val response = executeTurn(session)
+            session.addGovernorMessage(response.message)
+            return response
+        }
+
         // LLM이 없으면 기본 처리
         if (llmProvider == null) {
             return handleWithoutLlm(session, userMessage)
@@ -115,8 +124,19 @@ class ConversationalGovernor(
             handleTaskSwitch(session, switchSignal)
         }
 
-        // specUpdates 적용
+        // specUpdates 적용 (자동 작업 보존 포함)
         governorAction.specUpdates?.let { updates ->
+            // taskSwitch가 이미 처리한 경우가 아니면, taskType 변경 감지 시 현재 작업을 자동 보존
+            if (governorAction.taskSwitch == null) {
+                val newTaskType = updates["taskType"]?.jsonPrimitive?.contentOrNull?.let { str ->
+                    try { TaskType.valueOf(str) } catch (_: Exception) { null }
+                }
+                val currentSpec = session.draftSpec
+                if (newTaskType != null && currentSpec.taskType != null
+                    && newTaskType != currentSpec.taskType && currentSpec.intent != null) {
+                    session.suspendCurrentWork()
+                }
+            }
             session.updateSpec(updates)
         }
 
@@ -247,7 +267,7 @@ class ConversationalGovernor(
             }
 
             ActionType.CANCEL -> {
-                session.resetAll()
+                session.cancelCurrentTask()
                 ConversationResponse(
                     action = ActionType.CANCEL,
                     message = action.message.ifBlank { "알겠습니다. 언제든 새로 시작할 수 있어요." },
@@ -450,8 +470,31 @@ class ConversationalGovernor(
             )
         }
 
-        // 완료 확인
+        // 완료 확인 (쓰기 의도 가드레일 포함)
         if (decision.isComplete) {
+            val intentRequiresWrite = detectWriteIntent(draftSpec, session)
+            val hasExecutedWrite = hasExecutedWriteOperation(session)
+
+            if (intentRequiresWrite && !hasExecutedWrite) {
+                // 조기 완료 거부: 쓰기 작업이 아직 수행되지 않음
+                val originalIntent = findOriginalUserIntent(session)
+                session.history.add(ConversationMessage(
+                    MessageRole.SYSTEM,
+                    "아직 쓰기 작업(PUT/POST/DELETE)이 실행되지 않았습니다. " +
+                        "사용자의 원래 요청: $originalIntent. 남은 단계를 계속 진행하세요."
+                ))
+                session.context.pendingAction = PendingAction.ContinueExecution(
+                    reasoning = "Write operations pending: $originalIntent"
+                )
+                return ConversationResponse(
+                    action = ActionType.EXECUTE,
+                    message = "조회 완료. 쓰기 작업 진행 중...\n\n" +
+                        formatTurnExecutionSummary(session.context.executionHistory),
+                    sessionId = session.sessionId,
+                    nextAction = NextAction.CONTINUE_EXECUTION
+                )
+            }
+
             val summary = decision.summary.ifBlank { "API 워크플로우 완료" } + "\n\n" +
                 formatTurnExecutionSummary(session.context.executionHistory)
             session.integrateResult(null, null, "완료: ${decision.summary}")
@@ -479,8 +522,30 @@ class ConversationalGovernor(
             )
         }
 
-        // API 호출이 비어있으면 완료로 간주
+        // API 호출이 비어있으면 완료로 간주 (쓰기 의도 가드레일 동일 적용)
         if (decision.calls.isEmpty()) {
+            val intentRequiresWrite2 = detectWriteIntent(draftSpec, session)
+            val hasExecutedWrite2 = hasExecutedWriteOperation(session)
+
+            if (intentRequiresWrite2 && !hasExecutedWrite2) {
+                val originalIntent = findOriginalUserIntent(session)
+                session.history.add(ConversationMessage(
+                    MessageRole.SYSTEM,
+                    "아직 쓰기 작업(PUT/POST/DELETE)이 실행되지 않았습니다. " +
+                        "사용자의 원래 요청: $originalIntent. 남은 단계를 계속 진행하세요."
+                ))
+                session.context.pendingAction = PendingAction.ContinueExecution(
+                    reasoning = "Write operations pending: $originalIntent"
+                )
+                return ConversationResponse(
+                    action = ActionType.EXECUTE,
+                    message = "조회 완료. 쓰기 작업 진행 중...\n\n" +
+                        formatTurnExecutionSummary(session.context.executionHistory),
+                    sessionId = session.sessionId,
+                    nextAction = NextAction.CONTINUE_EXECUTION
+                )
+            }
+
             val summary = decision.summary.ifBlank { "API 워크플로우 완료 (호출 없음)" } + "\n\n" +
                 formatTurnExecutionSummary(session.context.executionHistory)
             session.integrateResult(null, null, "완료 (호출 없음)")
@@ -518,6 +583,11 @@ class ConversationalGovernor(
                 "Calls: ${decision.calls.map { "${it.method} ${it.url}" }}\n" +
                 "Result: $resultSummary"
         ))
+
+        // pendingAction 설정 → 다음 chat()에서 LLM 판단 없이 바로 executeTurn()
+        session.context.pendingAction = PendingAction.ContinueExecution(
+            reasoning = decision.reasoning
+        )
 
         // nextAction = CONTINUE_EXECUTION → caller가 자동 계속
         return ConversationResponse(
@@ -820,6 +890,38 @@ class ConversationalGovernor(
                 appendLine()
                 appendLine("성공: ${result.successCount}개, 실패: ${result.failureCount}개")
             }
+
+            // Step 출력 포함 (파일 내용, 명령 결과 등)
+            result.runnerResult.results.forEach { stepResult ->
+                val stepId = stepResult.meta.stepId
+                val output = result.context.getStepOutput(stepId) ?: return@forEach
+
+                // FILE_READ: content
+                output.json["content"]?.let { content ->
+                    val text = content.jsonPrimitive.contentOrNull ?: return@let
+                    val path = output.json["path"]?.jsonPrimitive?.contentOrNull ?: ""
+                    appendLine()
+                    appendLine("[$path]")
+                    appendLine(text.take(2000))
+                }
+
+                // COMMAND: stdout
+                output.stdout?.let { stdout ->
+                    if (stdout.isNotBlank()) {
+                        appendLine()
+                        appendLine("[stdout]")
+                        appendLine(stdout.take(2000))
+                    }
+                }
+
+                // API: statusCode + body
+                output.json["statusCode"]?.let { statusCode ->
+                    val code = statusCode.jsonPrimitive.contentOrNull
+                    val body = output.json["body"]?.jsonPrimitive?.contentOrNull
+                    appendLine()
+                    appendLine("[HTTP $code] ${body?.take(1000) ?: ""}")
+                }
+            }
         }
     }
 
@@ -841,7 +943,7 @@ class ConversationalGovernor(
             }
 
             lower.contains("취소") || lower.contains("됐어") || lower.contains("그만") -> {
-                session.resetAll()
+                session.cancelCurrentTask()
                 session.addGovernorMessage("알겠습니다. 언제든 새로 시작할 수 있어요.")
                 ConversationResponse(
                     action = ActionType.CANCEL,
@@ -890,13 +992,12 @@ class ConversationalGovernor(
      * 대상을 찾지 못하면 activeTaskId를 null로 설정 (새 작업 생성 대기).
      */
     private fun handleTaskSwitch(session: ConversationSession, switchSignal: String) {
-        // 현재 활성 작업 일시 중단
-        session.context.activeTask?.let { task ->
-            task.status = TaskStatus.SUSPENDED
-        }
+        // 현재 작업 보존 (활성 TaskSlot 또는 인터뷰 중 fallback DraftSpec)
+        val suspendedId = session.suspendCurrentWork()?.id
 
-        // 대상 작업 검색 (ID 또는 라벨 매칭)
+        // 대상 작업 검색 (방금 중단한 작업 제외, ID 또는 라벨 매칭)
         val targetTask = session.context.tasks.values.find { task ->
+            task.id != suspendedId &&
             task.status == TaskStatus.SUSPENDED &&
             (task.id == switchSignal || task.label.contains(switchSignal, ignoreCase = true))
         }
@@ -904,9 +1005,6 @@ class ConversationalGovernor(
         if (targetTask != null) {
             targetTask.status = TaskStatus.ACTIVE
             session.context.activeTaskId = targetTask.id
-        } else {
-            // 매칭 없음 → activeTaskId null → ensureActiveTask에서 새 작업 생성
-            session.context.activeTaskId = null
         }
     }
 
@@ -928,12 +1026,24 @@ class ConversationalGovernor(
             }
         }
 
+        // 이미 호출한 API 목록 추출 (Blueprint steps에서 METHOD + URL)
+        val calledApis = history.flatMap { turn ->
+            turn.blueprint?.steps
+                ?.filter { it.type == BlueprintStepType.API_CALL }
+                ?.map { step ->
+                    val method = step.params["method"] ?: "GET"
+                    val url = step.params["url"] ?: ""
+                    "$method $url"
+                } ?: emptyList()
+        }
+
         // 프롬프트 생성
         val prompt = GovernorPrompt.apiWorkflowPrompt(
             intent = draftSpec.intent ?: "",
             domain = draftSpec.domain,
             ragContext = ragContext,
             executionHistory = executionHistory,
+            calledApis = calledApis,
             recentHistory = session.getRecentHistory(5)
         )
 
@@ -1197,7 +1307,61 @@ class ConversationalGovernor(
         }
     }
 
+    /**
+     * 쓰기 의도 감지: DraftSpec intent + 세션의 사용자 메시지 모두 확인
+     *
+     * LLM이 intent를 축소 추출할 수 있으므로 ("shipped로 변경" → "사용자 조회"),
+     * 원본 사용자 메시지도 검사한다.
+     */
+    private fun detectWriteIntent(draftSpec: DraftSpec, session: ConversationSession): Boolean {
+        // 1. DraftSpec intent 확인
+        val fromIntent = draftSpec.intent?.let { intent ->
+            WRITE_INTENT_KEYWORDS.any { keyword -> intent.contains(keyword, ignoreCase = true) }
+        } ?: false
+        if (fromIntent) return true
+
+        // 2. 세션의 사용자 메시지 확인 (LLM이 intent를 축소 추출한 경우 대비)
+        return session.history
+            .filter { it.role == MessageRole.USER }
+            .takeLast(5)
+            .any { msg ->
+                WRITE_INTENT_KEYWORDS.any { keyword -> msg.content.contains(keyword, ignoreCase = true) }
+            }
+    }
+
+    /**
+     * 실행 히스토리에서 쓰기 작업(PUT/POST/DELETE/PATCH) 존재 여부 확인
+     */
+    private fun hasExecutedWriteOperation(session: ConversationSession): Boolean {
+        return session.context.executionHistory.any { turn ->
+            turn.blueprint?.steps?.any { step ->
+                step.type == BlueprintStepType.API_CALL &&
+                    step.params["method"] in WRITE_HTTP_METHODS
+            } ?: false
+        }
+    }
+
+    /**
+     * 세션에서 쓰기 키워드를 포함한 최초 사용자 메시지 찾기
+     */
+    private fun findOriginalUserIntent(session: ConversationSession): String {
+        return session.history
+            .filter { it.role == MessageRole.USER }
+            .firstOrNull { msg ->
+                WRITE_INTENT_KEYWORDS.any { keyword -> msg.content.contains(keyword, ignoreCase = true) }
+            }?.content?.take(100) ?: session.draftSpec.intent ?: "unknown"
+    }
+
     companion object {
+        /** 쓰기 의도를 나타내는 키워드 (한국어 + 영어) */
+        private val WRITE_INTENT_KEYWORDS = listOf(
+            "변경", "수정", "업데이트", "삭제", "생성", "추가", "등록", "제거",
+            "change", "modify", "update", "delete", "create", "add", "remove"
+        )
+
+        /** 쓰기 HTTP 메서드 */
+        private val WRITE_HTTP_METHODS = setOf("PUT", "POST", "DELETE", "PATCH")
+
         /**
          * ConversationalGovernor 생성
          */

@@ -216,7 +216,7 @@ class WebSocketExecutorTest {
 
         // Even on failure, meta should be present
         assertIs<ExecutionResult.Failure>(result)
-        assertEquals("ws-1", result.meta?.stepId)
-        assertTrue(result.meta?.resourceRefs?.contains("ws://localhost:59999/ws") == true)
+        assertEquals("ws-1", result.meta.stepId)
+        assertTrue(result.meta.resourceRefs.contains("ws://localhost:59999/ws") == true)
     }
 }

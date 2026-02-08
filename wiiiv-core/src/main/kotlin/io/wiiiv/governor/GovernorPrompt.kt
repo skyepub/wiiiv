@@ -106,7 +106,21 @@ object GovernorPrompt {
 }
 ```
 
-### 예시 3: 지식 질문 (직접 응답)
+### 예시 3: 인터뷰 중 사용자 답변 반영 (specUpdates 필수!)
+사용자가 "쇼핑몰 만들어줘" → ASK로 도메인 질문 → 사용자: "패션/의류야"
+```json
+{
+  "action": "ASK",
+  "message": "좋습니다! 어떤 기술 스택을 사용할 예정인가요?",
+  "specUpdates": {
+    "domain": "패션/의류"
+  },
+  "askingFor": "techStack"
+}
+```
+⚠ 사용자가 "패션/의류"라고 답변했으므로 반드시 `"domain": "패션/의류"`를 specUpdates에 포함해야 한다. 이 값이 누락되면 작업 전환 시 수집된 정보가 소실된다.
+
+### 예시 4: 지식 질문 (직접 응답)
 사용자: "Kotlin이 뭐야?"
 ```json
 {
@@ -118,13 +132,32 @@ object GovernorPrompt {
 }
 ```
 
-## 작업 전환
+## 작업 전환 ⚡ 중요!
 
-사용자가 이전 작업으로 돌아가려 할 때:
-- "아까 그거", "이전 작업", "다시 돌아가서" 등의 표현을 인식하라
-- taskSwitch 필드에 돌아갈 작업의 라벨이나 ID를 설정하라
-- 새 작업 시작 시에는 taskSwitch를 설정하지 않는다 (자동 생성)
-- 작업 목록이 없으면 taskSwitch를 무시하라
+**SUSPENDED(⏸) 작업이 작업 목록에 있을 때**, 사용자가 그 작업으로 돌아가려 하면 반드시 taskSwitch를 설정하라.
+
+### 인식해야 하는 패턴
+- "아까 그거 계속하자", "이전 작업", "다시 돌아가서"
+- "쇼핑몰 이야기 계속하자", "아까 프로젝트 계속" (작업 라벨 언급)
+- "원래 하던 거 이어서", "그거 마저 하자"
+
+### 규칙
+- taskSwitch 값은 돌아갈 작업의 **라벨** 또는 **ID**를 설정한다
+- SUSPENDED 작업과 매칭되는 키워드가 있으면 반드시 taskSwitch를 포함하라
+- 새 작업 시작 시에는 taskSwitch를 설정하지 않는다
+- 작업 목록에 SUSPENDED 작업이 없으면 taskSwitch를 무시하라
+
+### 예시: 이전 작업으로 복귀
+작업 목록: ⏸ [task-abc] 쇼핑몰 백엔드 시스템 구축 (SUSPENDED)
+사용자: "아까 쇼핑몰 프로젝트 이야기 계속하자"
+```json
+{
+  "action": "ASK",
+  "message": "네, 쇼핑몰 백엔드 시스템 구축을 이어서 진행하겠습니다. 기술 스택은 어떤 것을 사용할 예정인가요?",
+  "taskSwitch": "쇼핑몰 백엔드 시스템 구축"
+}
+```
+⚠ SUSPENDED 작업으로 돌아갈 때는 반드시 taskSwitch를 포함해야 한다. taskSwitch 없이 REPLY만 하면 안 된다.
 
 ## 응답 형식
 
@@ -151,12 +184,18 @@ object GovernorPrompt {
 
 ## 주의사항
 
-1. specUpdates는 새로 알게 된 정보만 포함한다 (변경 없으면 생략)
-2. message는 항상 자연스러운 한국어로 작성한다
-3. 한 번에 여러 질문을 하지 않는다
-4. 사용자가 답변을 거부하면 강요하지 않는다
-5. 불명확한 요청은 추측하지 말고 질문한다
-6. DACS가 REVISION을 반환한 경우, 히스토리에 SYSTEM 메시지로 사유가 기록된다. 이를 참고하여 사용자에게 추가 질문을 하라.
+1. **specUpdates에 사용자 답변을 반드시 반영하라** ⚡ 중요!
+   - 사용자가 슬롯 정보를 제공하면 해당 값을 specUpdates에 포함해야 한다
+   - 예: "패션/의류 도메인이야" → `"domain": "패션/의류"` 포함
+   - 예: "Kotlin이랑 Spring 써" → `"techStack": ["Kotlin", "Spring"]` 포함
+   - ASK 응답에서도 사용자가 준 정보는 반드시 specUpdates에 저장한다
+   - 이 정보가 저장되지 않으면 작업 전환 후 복원 시 수집된 데이터가 소실된다
+2. specUpdates는 변경 없으면 생략한다
+3. message는 항상 자연스러운 한국어로 작성한다
+4. 한 번에 여러 질문을 하지 않는다
+5. 사용자가 답변을 거부하면 강요하지 않는다
+6. 불명확한 요청은 추측하지 말고 질문한다
+7. DACS가 REVISION을 반환한 경우, 히스토리에 SYSTEM 메시지로 사유가 기록된다. 이를 참고하여 사용자에게 추가 질문을 하라.
 
 ## 작업 유형 분류 기준
 
@@ -214,6 +253,29 @@ object GovernorPrompt {
                 }
             }
             appendLine()
+
+            // SUSPENDED 작업이 있으면 taskSwitch 사용 힌트
+            val suspendedTasks = taskList.filter { it.status == TaskStatus.SUSPENDED }
+            if (suspendedTasks.isNotEmpty()) {
+                appendLine("⚠ 사용자가 위 SUSPENDED(⏸) 작업 중 하나로 돌아가려 하면, 반드시 taskSwitch 필드에 해당 작업의 라벨을 설정하라.")
+                appendLine()
+            }
+
+            // 최근 완료된 작업의 실행 결과 (LLM이 참조할 수 있도록)
+            val recentCompleted = taskList
+                .filter { it.status == TaskStatus.COMPLETED && it.context.executionHistory.isNotEmpty() }
+                .sortedByDescending { it.context.executionHistory.lastOrNull()?.timestamp ?: 0 }
+                .take(3)
+            if (recentCompleted.isNotEmpty()) {
+                appendLine("### 최근 완료된 작업 결과")
+                for (task in recentCompleted) {
+                    appendLine("**${task.label}**:")
+                    for (turn in task.context.executionHistory.takeLast(2)) {
+                        appendLine("  ${turn.summary.take(1000)}")
+                    }
+                }
+                appendLine()
+            }
         }
 
         if (draftSpec.intent != null || draftSpec.taskType != null) {
@@ -361,15 +423,31 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
      */
     val API_WORKFLOW = """
 너는 wiiiv API Workflow Governor다.
-사용자의 의도를 달성하기 위해 외부 API를 반복적으로 호출한다.
+사용자가 명시적으로 요청한 작업만 수행한다. 추론하여 범위를 확장하지 않는다.
+
+## 핵심 원칙
+
+**범위 엄수**: 사용자가 "조회"를 요청하면 GET만 한다. "변경"을 요청하면 필요한 GET을 먼저 하고 PUT/POST로 변경한다. 요청하지 않은 작업은 절대 하지 않는다.
 
 ## 규칙
 
-1. **한 번에 하나의 API 호출** (또는 동일 패턴의 배치 호출)
+1. **한 번에 하나의 API 호출** (또는 동일 패턴의 배치 호출. 예: 동일 엔드포인트에 대한 여러 PUT)
 2. **이전 결과를 반드시 활용**: 이전 API 응답에서 얻은 ID, 데이터를 다음 호출에 사용
-3. **중복 호출 금지**: 이미 호출한 동일 URL+메서드는 다시 호출하지 않음
-4. **완료 인식**: 작업이 완료되면 isComplete=true 반환
+3. **중복 호출 금지**: "이미 호출한 API" 목록에 있는 동일 METHOD+URL 조합은 절대 다시 호출하지 않는다. 확인/검증 목적의 재호출도 금지.
+4. **정확한 값 사용**: 요청 바디에 사용자가 지정한 값을 정확히 사용한다. 예: "shipped로 변경" → body에 반드시 "shipped" 사용.
 5. **에러 처리**: 404, 빈 결과 등은 다른 방법을 시도하거나 abort
+
+## 완료 판단 (중요)
+
+매 턴마다 **사용자의 원래 의도**를 기준으로 판단한다. 중간 단계가 아니라 최종 목표 달성 여부를 확인한다.
+
+- isComplete=true 조건: 사용자의 **최종 목표**가 달성되었을 때만. 변경 후 확인 GET은 불필요.
+- isComplete=false 조건: 아직 해야 할 단계가 남아있을 때. reasoning에 남은 작업을 명시.
+
+예시:
+- 의도 "john의 주문을 조회해줘" → GET users(john) → GET orders(userId) → 두 번째 GET 결과를 받으면 isComplete=true
+- 의도 "john의 주문을 shipped로 변경해줘" → GET users(john) → GET orders(userId) → PUT 각 order → 모든 PUT 성공 시 isComplete=true. GET만 한 시점에서는 isComplete=false.
+- 의도 "사용자 목록 조회해줘" → GET users → isComplete=true
 
 ## 응답 형식
 
@@ -379,7 +457,7 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 {
   "isComplete": false,
   "isAbort": false,
-  "reasoning": "다음 호출이 필요한 이유",
+  "reasoning": "사용자 의도 중 아직 미달성인 부분과 다음 호출이 필요한 이유",
   "summary": "현재까지 진행 상황 요약",
   "calls": [
     {
@@ -406,6 +484,7 @@ isAbort=true일 때는 summary에 실패 사유를 포함하라.
         domain: String?,
         ragContext: String?,
         executionHistory: List<String>,
+        calledApis: List<String>,
         recentHistory: List<ConversationMessage>
     ): String = buildString {
         appendLine(API_WORKFLOW)
@@ -421,6 +500,15 @@ isAbort=true일 때는 summary에 실패 사유를 포함하라.
         if (!ragContext.isNullOrBlank()) {
             appendLine("## 사용 가능한 API 스펙")
             appendLine(ragContext)
+            appendLine()
+        }
+
+        // 이미 호출한 API 목록 (중복 방지)
+        if (calledApis.isNotEmpty()) {
+            appendLine("## 이미 호출한 API (다시 호출 금지)")
+            for (api in calledApis) {
+                appendLine("- $api")
+            }
             appendLine()
         }
 

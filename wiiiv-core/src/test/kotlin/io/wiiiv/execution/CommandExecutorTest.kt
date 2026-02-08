@@ -53,7 +53,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
         assertEquals(0, output.json["exitCode"]?.jsonPrimitive?.content?.toInt())
         assertTrue(output.json["stdout"]?.jsonPrimitive?.content?.contains("Hello wiiiv") == true)
     }
@@ -71,7 +71,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content
         assertNotNull(stdout)
         assertTrue(stdout.isNotBlank())
     }
@@ -90,7 +90,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content?.trim()
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content?.trim()
         assertEquals("5", stdout)
     }
 
@@ -110,7 +110,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content?.trim()
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content?.trim()
         assertTrue(stdout?.contains(testDir.name) == true)
     }
 
@@ -128,7 +128,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, result.error.category)
         assertEquals("WORKING_DIR_NOT_FOUND", result.error.code)
     }
 
@@ -149,7 +149,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content?.trim()
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content?.trim()
         assertEquals("test_value_123", stdout)
     }
 
@@ -168,7 +168,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, result.error.category)
         assertEquals("COMMAND_NOT_FOUND", result.error.code)
     }
 
@@ -185,7 +185,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, result.error.category)
         assertEquals("COMMAND_FAILED", result.error.code)
 
         // Should have partial output with exit code
@@ -206,7 +206,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        val partialOutput = (result as ExecutionResult.Failure).partialOutput
+        val partialOutput = result.partialOutput
         assertNotNull(partialOutput)
         assertTrue(partialOutput.json["stdout"]?.jsonPrimitive?.content?.contains("error message") == true)
     }
@@ -228,7 +228,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.TIMEOUT, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.TIMEOUT, result.error.category)
         assertEquals("COMMAND_TIMEOUT", result.error.code)
     }
 
@@ -265,7 +265,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content
         assertEquals("Hello from stdin", stdout)
     }
 
@@ -285,7 +285,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content
         assertTrue(stdout?.contains("line1") == true)
         assertTrue(stdout?.contains("line2") == true)
     }
@@ -304,7 +304,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val stdout = (result as ExecutionResult.Success).output.json["stdout"]?.jsonPrimitive?.content?.trim()
+        val stdout = result.output.json["stdout"]?.jsonPrimitive?.content?.trim()
         assertEquals("2", stdout)
     }
 
@@ -393,7 +393,7 @@ class CommandExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output.json
+        val output = result.output.json
         assertEquals("echo", output["command"]?.jsonPrimitive?.content)
         assertEquals("arg1 arg2", output["args"]?.jsonPrimitive?.content)
     }

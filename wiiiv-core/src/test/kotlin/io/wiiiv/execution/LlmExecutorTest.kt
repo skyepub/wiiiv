@@ -62,7 +62,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.CONTRACT_VIOLATION, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.CONTRACT_VIOLATION, result.error.category)
         assertEquals("INVALID_STEP_TYPE", result.error.code)
     }
 
@@ -81,7 +81,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
         assertEquals("Completed text", output.json["content"]?.jsonPrimitive?.content)
         assertEquals("stop", output.json["finishReason"]?.jsonPrimitive?.content)
 
@@ -104,7 +104,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals("Analysis result", (result as ExecutionResult.Success).output.json["content"]?.jsonPrimitive?.content)
+        assertEquals("Analysis result", result.output.json["content"]?.jsonPrimitive?.content)
 
         val lastCall = mockProvider.getLastCall()
         assertEquals(LlmAction.ANALYZE, lastCall?.action)
@@ -123,7 +123,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals("Summary", (result as ExecutionResult.Success).output.json["content"]?.jsonPrimitive?.content)
+        assertEquals("Summary", result.output.json["content"]?.jsonPrimitive?.content)
 
         val lastCall = mockProvider.getLastCall()
         assertEquals(LlmAction.SUMMARIZE, lastCall?.action)
@@ -210,7 +210,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         // Check JSON fields
         assertNotNull(output.json["model"])
@@ -270,7 +270,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, result.error.category)
         assertEquals("API_ERROR", result.error.code)
     }
 
@@ -291,7 +291,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.TIMEOUT, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.TIMEOUT, result.error.category)
     }
 
     @Test
@@ -312,8 +312,8 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, (result as ExecutionResult.Failure).error.category)
-        assertEquals("RATE_LIMIT", (result as ExecutionResult.Failure).error.code)
+        assertEquals(ErrorCategory.EXTERNAL_SERVICE_ERROR, result.error.category)
+        assertEquals("RATE_LIMIT", result.error.code)
     }
 
     // ==================== Finish Reason Tests ====================
@@ -337,7 +337,7 @@ class LlmExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
         assertEquals("length", output.json["finishReason"]?.jsonPrimitive?.content)
     }
 
@@ -357,7 +357,7 @@ class LlmExecutorTest {
         val result = echoExecutor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals("[COMPLETE] Hello world", (result as ExecutionResult.Success).output.json["content"]?.jsonPrimitive?.content)
+        assertEquals("[COMPLETE] Hello world", result.output.json["content"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -374,7 +374,7 @@ class LlmExecutorTest {
         val result = echoExecutor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals("[ANALYZE] Some code", (result as ExecutionResult.Success).output.json["content"]?.jsonPrimitive?.content)
+        assertEquals("[ANALYZE] Some code", result.output.json["content"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -391,7 +391,7 @@ class LlmExecutorTest {
         val result = echoExecutor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals("[SUMMARIZE] Long document", (result as ExecutionResult.Success).output.json["content"]?.jsonPrimitive?.content)
+        assertEquals("[SUMMARIZE] Long document", result.output.json["content"]?.jsonPrimitive?.content)
     }
 
     // ==================== Integration with Runner ====================

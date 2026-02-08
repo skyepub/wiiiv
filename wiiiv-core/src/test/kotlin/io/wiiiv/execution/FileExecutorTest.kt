@@ -58,7 +58,7 @@ class FileExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
         assertEquals("Hello, wiiiv!", output.json["content"]?.jsonPrimitive?.content)
     }
 
@@ -76,7 +76,7 @@ class FileExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, result.error.category)
         assertEquals("FILE_NOT_FOUND", result.error.code)
     }
 
@@ -170,7 +170,7 @@ class FileExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, result.error.category)
     }
 
     // ==================== MOVE Tests ====================
@@ -237,7 +237,7 @@ class FileExecutorTest {
 
         // Then
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, result.error.category)
     }
 
     // ==================== MKDIR Tests ====================

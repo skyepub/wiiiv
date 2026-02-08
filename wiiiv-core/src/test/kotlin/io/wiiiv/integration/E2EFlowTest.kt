@@ -84,7 +84,7 @@ class E2EFlowTest {
             spec
         )
         assertTrue(mkdirResult is GovernorResult.BlueprintCreated)
-        val mkdirBlueprint = (mkdirResult as GovernorResult.BlueprintCreated).blueprint
+        val mkdirBlueprint = mkdirResult.blueprint
 
         // Gate 검증
         val gateResult = gateChain.check(GateContext(
@@ -110,7 +110,7 @@ class E2EFlowTest {
             spec
         )
         assertTrue(writeResult is GovernorResult.BlueprintCreated)
-        val writeExec = runner.execute((writeResult as GovernorResult.BlueprintCreated).blueprint)
+        val writeExec = runner.execute(writeResult.blueprint)
         assertTrue(writeExec.isSuccess, "WRITE should succeed")
 
         // Step 3: READ
@@ -122,11 +122,11 @@ class E2EFlowTest {
             spec
         )
         assertTrue(readResult is GovernorResult.BlueprintCreated)
-        val readExec = runner.execute((readResult as GovernorResult.BlueprintCreated).blueprint)
+        val readExec = runner.execute(readResult.blueprint)
         assertTrue(readExec.isSuccess, "READ should succeed")
 
         // 내용 검증
-        val readOutput = readExec.getStepOutput((readResult as GovernorResult.BlueprintCreated).blueprint.steps[0].stepId)
+        val readOutput = readExec.getStepOutput(readResult.blueprint.steps[0].stepId)
         assertNotNull(readOutput)
         assertTrue(readOutput.json["content"]?.jsonPrimitive?.content?.contains("E2E Test Data") == true)
 
@@ -140,7 +140,7 @@ class E2EFlowTest {
             spec
         )
         assertTrue(copyResult is GovernorResult.BlueprintCreated)
-        val copyExec = runner.execute((copyResult as GovernorResult.BlueprintCreated).blueprint)
+        val copyExec = runner.execute(copyResult.blueprint)
         assertTrue(copyExec.isSuccess, "COPY should succeed")
 
         // Step 5: DELETE
@@ -152,7 +152,7 @@ class E2EFlowTest {
             spec
         )
         assertTrue(deleteResult is GovernorResult.BlueprintCreated)
-        val deleteExec = runner.execute((deleteResult as GovernorResult.BlueprintCreated).blueprint)
+        val deleteExec = runner.execute(deleteResult.blueprint)
         assertTrue(deleteExec.isSuccess, "DELETE should succeed")
 
         // === 5. 최종 검증 ===
@@ -173,7 +173,7 @@ class E2EFlowTest {
 
         // === 2. DACS 합의 ===
         val dacs = SimpleDACS.DEFAULT
-        val dacsResult = dacs.evaluate(DACSRequest(spec = spec))
+        dacs.evaluate(DACSRequest(spec = spec))
         // COMMAND without path restrictions may get REVISION
         // For E2E test, we proceed with direct executor usage
 
@@ -442,7 +442,7 @@ class E2EFlowTest {
             spec
         )
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val blueprint = (result as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = result.blueprint
 
         // === 실행 - 실패 예상 ===
         val runner = BlueprintRunner.create(FileExecutor.INSTANCE)
@@ -455,7 +455,7 @@ class E2EFlowTest {
         // 오류 정보가 포함됨
         val stepResult = execResult.runnerResult.results.first()
         assertTrue(stepResult is ExecutionResult.Failure)
-        val failure = stepResult as ExecutionResult.Failure
+        val failure = stepResult
         assertEquals(ErrorCategory.RESOURCE_NOT_FOUND, failure.error.category)
         assertTrue(failure.error.message.contains("not found") || failure.error.message.contains("exist"))
     }
@@ -680,7 +680,7 @@ class E2EFlowTest {
         )
 
         assertTrue(result is GovernorResult.BlueprintCreated)
-        val blueprint = (result as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = result.blueprint
 
         // === 검증: Snapshot이 원본 Spec 정보를 포함 ===
         assertEquals(spec.id, blueprint.specSnapshot.specId)
@@ -832,7 +832,7 @@ class E2EFlowTest {
         val governorResult = governor.createBlueprint(request, spec)
 
         assertTrue(governorResult is GovernorResult.BlueprintCreated)
-        val blueprint = (governorResult as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = governorResult.blueprint
 
         // Blueprint 검증
         assertEquals(spec.id, blueprint.specSnapshot.specId)

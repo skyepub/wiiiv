@@ -73,7 +73,7 @@ class LlmGovernorE2ETest {
         // === 5. Governor: enrichSpec → DACS → Blueprint 생성 ===
         val result = governor.createBlueprint(request, spec)
         assertTrue(result is GovernorResult.BlueprintCreated, "Expected BlueprintCreated, got $result")
-        val blueprint = (result as GovernorResult.BlueprintCreated).blueprint
+        val blueprint = result.blueprint
 
         // Blueprint 검증
         assertEquals("YES", blueprint.specSnapshot.dacsResult)
@@ -149,7 +149,7 @@ class LlmGovernorE2ETest {
             result is GovernorResult.Denied,
             "Expected Denied for dangerous intent, got $result"
         )
-        assertTrue((result as GovernorResult.Denied).reason.contains("NO"))
+        assertTrue(result.reason.contains("NO"))
 
         // === 4. Gate도 NO일 때 차단하는지 검증 ===
         val gateLogger = InMemoryGateLogger()

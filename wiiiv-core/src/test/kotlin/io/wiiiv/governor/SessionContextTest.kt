@@ -564,6 +564,149 @@ class SessionContextTest {
         }
 
         @Test
+        fun `suspendCurrentWork saves activeTask as SUSPENDED`() {
+            val session = ConversationSession()
+            session.draftSpec = DraftSpec(intent = "서버 설정", taskType = TaskType.COMMAND)
+            val task = session.ensureActiveTask()
+            session.integrateResult(null, null, "executed something")
+
+            val suspended = session.suspendCurrentWork()
+
+            assertNotNull(suspended)
+            assertEquals(task.id, suspended!!.id)
+            assertEquals(TaskStatus.SUSPENDED, suspended.status)
+            assertNull(session.context.activeTaskId)
+            assertNull(session.context.activeTask)
+            // Task still in map
+            assertEquals(1, session.context.tasks.size)
+            assertEquals(1, suspended.context.executionHistory.size)
+        }
+
+        @Test
+        fun `suspendCurrentWork promotes and saves fallback DraftSpec`() {
+            val session = ConversationSession()
+            session.draftSpec = DraftSpec(intent = "파일 읽기", taskType = TaskType.FILE_READ, targetPath = "/tmp/a.txt")
+            // No ensureActiveTask called — DraftSpec is in fallback
+
+            val suspended = session.suspendCurrentWork()
+
+            assertNotNull(suspended)
+            assertEquals(TaskStatus.SUSPENDED, suspended!!.status)
+            assertEquals("파일 읽기", suspended.label)
+            assertEquals("파일 읽기", suspended.draftSpec.intent)
+            assertEquals(TaskType.FILE_READ, suspended.draftSpec.taskType)
+            assertEquals("/tmp/a.txt", suspended.draftSpec.targetPath)
+            assertNull(session.context.activeTaskId)
+            assertEquals(1, session.context.tasks.size)
+        }
+
+        @Test
+        fun `suspendCurrentWork returns null when nothing to save`() {
+            val session = ConversationSession()
+            // Empty session — no intent, no active task
+
+            val suspended = session.suspendCurrentWork()
+
+            assertNull(suspended)
+            assertEquals(0, session.context.tasks.size)
+        }
+
+        @Test
+        fun `suspendCurrentWork then new task preserves suspended task`() {
+            val session = ConversationSession()
+
+            // Task A
+            session.draftSpec = DraftSpec(intent = "task A", taskType = TaskType.FILE_READ)
+            session.ensureActiveTask()
+            session.integrateResult(null, null, "A result")
+
+            // Suspend via suspendCurrentWork
+            val suspended = session.suspendCurrentWork()
+            assertNotNull(suspended)
+
+            // New task B
+            session.draftSpec = DraftSpec(intent = "task B", taskType = TaskType.COMMAND)
+            val taskB = session.ensureActiveTask()
+            session.integrateResult(null, null, "B result")
+
+            // Both tasks exist
+            assertEquals(2, session.context.tasks.size)
+            assertEquals(TaskStatus.SUSPENDED, suspended!!.status)
+            assertEquals(TaskStatus.ACTIVE, taskB.status)
+            assertEquals(1, suspended.context.executionHistory.size)
+            assertEquals(1, taskB.context.executionHistory.size)
+        }
+
+        @Test
+        fun `cancelCurrentTask removes only active task`() {
+            val session = ConversationSession()
+
+            // Task A: suspend it
+            session.draftSpec = DraftSpec(intent = "task A", taskType = TaskType.FILE_READ)
+            val taskA = session.ensureActiveTask()
+            session.integrateResult(null, null, "A result")
+            taskA.status = TaskStatus.SUSPENDED
+            session.context.activeTaskId = null
+
+            // Task B: make it active
+            session.draftSpec = DraftSpec(intent = "task B", taskType = TaskType.COMMAND)
+            val taskB = session.ensureActiveTask()
+
+            assertEquals(2, session.context.tasks.size)
+
+            // Cancel current (B)
+            session.cancelCurrentTask()
+
+            // B removed, A preserved
+            assertEquals(1, session.context.tasks.size)
+            assertNull(session.context.activeTaskId)
+            assertNotNull(session.context.tasks[taskA.id])
+            assertNull(session.context.tasks[taskB.id])
+            assertEquals(TaskStatus.SUSPENDED, taskA.status)
+        }
+
+        @Test
+        fun `cancelCurrentTask with no active task clears fallback`() {
+            val session = ConversationSession()
+            session.draftSpec = DraftSpec(intent = "something", taskType = TaskType.COMMAND)
+
+            session.cancelCurrentTask()
+
+            assertNull(session.draftSpec.intent)
+            assertNull(session.draftSpec.taskType)
+        }
+
+        @Test
+        fun `cancelCurrentTask preserves suspended and completed tasks`() {
+            val session = ConversationSession()
+
+            // Task A: completed
+            session.draftSpec = DraftSpec(intent = "task A", taskType = TaskType.FILE_READ)
+            val taskA = session.ensureActiveTask()
+            taskA.status = TaskStatus.COMPLETED
+            session.context.activeTaskId = null
+
+            // Task B: suspended
+            session.draftSpec = DraftSpec(intent = "task B", taskType = TaskType.COMMAND)
+            val taskB = session.ensureActiveTask()
+            taskB.status = TaskStatus.SUSPENDED
+            session.context.activeTaskId = null
+
+            // Task C: active (cancel this)
+            session.draftSpec = DraftSpec(intent = "task C", taskType = TaskType.FILE_WRITE)
+            val taskC = session.ensureActiveTask()
+
+            assertEquals(3, session.context.tasks.size)
+
+            session.cancelCurrentTask()
+
+            assertEquals(2, session.context.tasks.size)
+            assertEquals(TaskStatus.COMPLETED, taskA.status)
+            assertEquals(TaskStatus.SUSPENDED, taskB.status)
+            assertNull(session.context.tasks[taskC.id])
+        }
+
+        @Test
         fun `draftSpec falls back after COMPLETED`() {
             val session = ConversationSession()
 

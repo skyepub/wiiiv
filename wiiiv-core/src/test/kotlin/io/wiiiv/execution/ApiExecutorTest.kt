@@ -64,7 +64,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.CONTRACT_VIOLATION, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.CONTRACT_VIOLATION, result.error.category)
         assertEquals("INVALID_STEP_TYPE", result.error.code)
     }
 
@@ -81,7 +81,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.CONTRACT_VIOLATION, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.CONTRACT_VIOLATION, result.error.category)
         assertEquals("INVALID_URL", result.error.code)
     }
 
@@ -96,7 +96,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.CONTRACT_VIOLATION, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.CONTRACT_VIOLATION, result.error.category)
     }
 
     // ==================== Connection Error Tests ====================
@@ -113,7 +113,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        val error = (result as ExecutionResult.Failure).error
+        val error = result.error
         assertTrue(
             error.category == ErrorCategory.TIMEOUT ||
             error.category == ErrorCategory.EXTERNAL_SERVICE_ERROR ||
@@ -134,7 +134,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        val error = (result as ExecutionResult.Failure).error
+        val error = result.error
         assertTrue(
             error.category == ErrorCategory.EXTERNAL_SERVICE_ERROR ||
             error.category == ErrorCategory.IO_ERROR,
@@ -156,7 +156,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success, "Expected Success but got $result")
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(200, output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
         assertEquals("GET", output.json["method"]?.jsonPrimitive?.content)
@@ -176,7 +176,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success, "Expected Success but got $result")
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         assertEquals(200, output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
         assertTrue(output.json["body"]?.jsonPrimitive?.content?.contains("value") == true)
@@ -194,7 +194,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals(200, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(200, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 
     @Test
@@ -208,7 +208,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals(200, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(200, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 
     @Test
@@ -223,7 +223,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals(200, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(200, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 
     // ==================== HTTP Error Response Tests ====================
@@ -241,7 +241,7 @@ class ApiExecutorTest {
         // Executor는 HTTP 상태 코드를 판단하지 않음
         // 4xx/5xx도 Success로 반환 (해석은 상위 계층의 책임)
         assertTrue(result is ExecutionResult.Success, "Expected Success but got $result")
-        assertEquals(404, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(404, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 
     @Test
@@ -256,7 +256,7 @@ class ApiExecutorTest {
 
         // Executor는 HTTP 상태 코드를 판단하지 않음
         assertTrue(result is ExecutionResult.Success)
-        assertEquals(500, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(500, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 
     @Test
@@ -270,7 +270,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals(401, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(401, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 
     // ==================== Headers Tests ====================
@@ -290,7 +290,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val body = (result as ExecutionResult.Success).output.json["body"]?.jsonPrimitive?.content ?: ""
+        val body = result.output.json["body"]?.jsonPrimitive?.content ?: ""
         assertTrue(body.contains("X-Custom-Header") || body.contains("x-custom-header"))
         assertTrue(body.contains("custom-value"))
     }
@@ -308,7 +308,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        val output = (result as ExecutionResult.Success).output
+        val output = result.output
 
         // Check JSON fields
         assertNotNull(output.json["method"])
@@ -414,7 +414,7 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Failure)
-        assertEquals(ErrorCategory.TIMEOUT, (result as ExecutionResult.Failure).error.category)
+        assertEquals(ErrorCategory.TIMEOUT, result.error.category)
     }
 
     // ==================== Redirect Tests ====================
@@ -430,6 +430,6 @@ class ApiExecutorTest {
         val result = executor.execute(step, context)
 
         assertTrue(result is ExecutionResult.Success)
-        assertEquals(200, (result as ExecutionResult.Success).output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
+        assertEquals(200, result.output.json["statusCode"]?.jsonPrimitive?.content?.toInt())
     }
 }

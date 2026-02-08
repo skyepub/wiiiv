@@ -9,7 +9,7 @@ import io.wiiiv.governor.*
 import io.wiiiv.governor.NextAction
 import io.wiiiv.rag.Document
 import io.wiiiv.rag.RagPipeline
-import io.wiiiv.rag.embedding.MockEmbeddingProvider
+import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.*
@@ -25,7 +25,7 @@ import java.time.format.DateTimeFormatter
  *
  * ## Setup
  * - MockApiServer: 임베디드 Ktor Netty (랜덤 포트)
- * - RAG: MockEmbeddingProvider + API 스펙 문서 ingested
+ * - RAG: OpenAIEmbeddingProvider + API 스펙 문서 ingested
  * - Governor: ConversationalGovernor + ApiExecutor + RagPipeline
  *
  * ## 실행 방법
@@ -68,7 +68,7 @@ class ApiWorkflowE2ETest {
 
         // 2. Setup RAG with API spec
         ragPipeline = RagPipeline(
-            embeddingProvider = MockEmbeddingProvider(),
+            embeddingProvider = OpenAIEmbeddingProvider(apiKey = API_KEY),
             vectorStore = InMemoryVectorStore()
         )
 

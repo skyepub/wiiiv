@@ -115,6 +115,7 @@ RetryPolicy (재시도 규칙)
 | Executor Interface Spec | v1.0 |
 | ExecutionRunner Spec | v1.0 |
 | RetryPolicy Spec | v1.0 |
+| Prompt Specification | v1.0 |
 | wiiiv API Reference | v2.0 |
 | wiiiv CLI Reference | v2.0 |
 

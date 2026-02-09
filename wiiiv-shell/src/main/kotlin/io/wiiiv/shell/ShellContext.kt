@@ -2,6 +2,7 @@ package io.wiiiv.shell
 
 import io.wiiiv.governor.ConversationSession
 import io.wiiiv.governor.ConversationalGovernor
+import io.wiiiv.rag.RagPipeline
 import java.io.BufferedReader
 
 /**
@@ -27,7 +28,8 @@ data class ShellContext(
     val modelName: String?,
     val dacsTypeName: String,
     val llmProviderPresent: Boolean,
-    val settings: ShellSettings
+    val settings: ShellSettings,
+    val ragPipeline: RagPipeline? = null
 ) {
     /**
      * y/N 확인 프롬프트 — `/cancel all` 등에서 사용

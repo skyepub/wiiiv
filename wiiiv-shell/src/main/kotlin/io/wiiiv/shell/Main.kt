@@ -13,6 +13,9 @@ import io.wiiiv.execution.impl.OpenAIProvider
 import io.wiiiv.governor.ActionType
 import io.wiiiv.governor.ConversationalGovernor
 import io.wiiiv.governor.NextAction
+import io.wiiiv.rag.RagPipeline
+import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
+import io.wiiiv.rag.vector.InMemoryVectorStore
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -134,6 +137,24 @@ fun main() = runBlocking {
         SimpleDACS.DEFAULT
     }
 
+    // RAG Pipeline 초기화
+    val ragPipeline = if (llmProvider != null) {
+        try {
+            val embeddingProvider = OpenAIEmbeddingProvider.fromEnv()
+            val pipeline = RagPipeline(
+                embeddingProvider = embeddingProvider,
+                vectorStore = InMemoryVectorStore("wiiiv-shell-rag")
+            )
+            println("$pad${BRIGHT_CYAN}[INFO]${RESET} RAG enabled (OpenAI embeddings)")
+            pipeline
+        } catch (e: Exception) {
+            println("$pad\u001B[33m[WARN]\u001B[0m RAG init failed: ${e.message}")
+            null
+        }
+    } else {
+        null
+    }
+
     // Executor 초기화
     val executor = CompositeExecutor(
         executors = listOf(
@@ -150,7 +171,8 @@ fun main() = runBlocking {
         dacs = dacs,
         llmProvider = llmProvider,
         model = if (llmProvider != null) modelName else null,
-        blueprintRunner = blueprintRunner
+        blueprintRunner = blueprintRunner,
+        ragPipeline = ragPipeline
     )
 
     // 세션 시작
@@ -174,7 +196,8 @@ fun main() = runBlocking {
         modelName = if (llmProvider != null) modelName else null,
         dacsTypeName = dacsTypeName,
         llmProviderPresent = llmProvider != null,
-        settings = shellSettings
+        settings = shellSettings,
+        ragPipeline = ragPipeline
     )
 
     // CommandDispatcher 초기화 (object init 트리거)

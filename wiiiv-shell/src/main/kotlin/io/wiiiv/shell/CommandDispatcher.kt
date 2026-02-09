@@ -3,6 +3,7 @@ package io.wiiiv.shell
 import io.wiiiv.shell.commands.ControlCommands
 import io.wiiiv.shell.commands.HelpCommands
 import io.wiiiv.shell.commands.InspectionCommands
+import io.wiiiv.shell.commands.RagCommands
 import io.wiiiv.shell.commands.StatusCommands
 
 /**
@@ -42,6 +43,9 @@ object CommandDispatcher {
 
         // Tier 4 — 설정
         register("/set [key] [value]", "View/change settings") { args, ctx -> ControlCommands.handleSet(args, ctx) }
+
+        // RAG
+        register("/rag <cmd>", "RAG vector store (size/list/search/ingest/remove)") { args, ctx -> RagCommands.handleRag(args, ctx) }
     }
 
     private fun register(name: String, description: String, handler: (List<String>, ShellContext) -> Unit) {

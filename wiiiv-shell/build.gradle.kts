@@ -27,6 +27,11 @@ application {
     mainClass.set("io.wiiiv.shell.MainKt")
 }
 
+tasks.named<JavaExec>("run") {
+    standardInput = System.`in`
+    jvmArgs("-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+}
+
 tasks.jar {
     manifest {
         attributes["Main-Class"] = "io.wiiiv.shell.MainKt"

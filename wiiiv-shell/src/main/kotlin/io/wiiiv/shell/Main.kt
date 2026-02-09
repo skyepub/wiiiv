@@ -26,35 +26,111 @@ fun main() = runBlocking {
     // UTF-8 출력 설정
     System.setOut(PrintStream(System.out, true, StandardCharsets.UTF_8))
 
-    println("""
-        ╔═══════════════════════════════════════════════════════════╗
-        ║                    wiiiv Shell v2.1                       ║
-        ║           Interactive Conversational Governor             ║
-        ╚═══════════════════════════════════════════════════════════╝
-    """.trimIndent())
+    // Logo animation uses raw ANSI codes (including 24-bit RGB)
+    val CYAN = "\u001B[36m"
+    val BRIGHT_CYAN = "\u001B[96m"
+    val WHITE = "\u001B[97m"
+    val DIM = "\u001B[2m"
+    val RESET = "\u001B[0m"
+    val BOLD = "\u001B[1m"
+
+    val line = "\u2500".repeat(59)
+
+    fun animPrint(text: String, delayMs: Long = 30) {
+        println(text)
+        System.out.flush()
+        Thread.sleep(delayMs)
+    }
+
+    val UP7 = "\u001B[7A"
+    val logoLines = listOf(
+        """                  o8o   o8o   o8o""",
+        """                  `"'   `"'   `"'""",
+        """oooo oooo    ooo oooo  oooo  oooo  oooo    ooo""",
+        """ `88. `88.  .8'  `888  `888  `888   `88.  .8'""",
+        """  `88..]88..8'    888   888   888    `88..8'""",
+        """   `888'`888'     888   888   888     `888'""",
+        """    `8'  `8'     o888o o888o o888o     `8'"""
+    )
+
+    fun printLogo(color: String) {
+        for (l in logoLines) { println("$color$l$RESET") }
+        System.out.flush()
+    }
+
+    // separator
+    println("${DIM}$line${RESET}")
+
+    // smooth breathing with 24-bit RGB gradient
+    val steps = 12
+    val minV = 35
+    val maxV = 255
+    fun cyanRgb(v: Int) = "\u001B[38;2;0;${v};${v}m"
+
+    // initial: dim
+    printLogo(cyanRgb(minV))
+    Thread.sleep(300)
+
+    // fade up: dim → bright
+    for (i in 1..steps) {
+        val v = minV + (maxV - minV) * i / steps
+        print(UP7)
+        printLogo(cyanRgb(v))
+        Thread.sleep(60)
+    }
+    Thread.sleep(150)
+
+    // fade down: bright → dim
+    for (i in steps downTo 0) {
+        val v = minV + (maxV - minV) * i / steps
+        print(UP7)
+        printLogo(cyanRgb(v))
+        Thread.sleep(60)
+    }
+    Thread.sleep(200)
+
+    // final: settle with info text
+    print(UP7)
+    println("${BRIGHT_CYAN}                  o8o   o8o   o8o${RESET}")
+    println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
+    println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
+    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v2.1  2025-${RESET}")
+    println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
+    println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
+    println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")
+
+    println()
+    animPrint("  ${WHITE}- A Natural Language-Based Multi-Decision Execution System${RESET}", 30)
+    println()
     println()
 
+    val pad = " ".repeat(9)
+
     // LLM Provider 초기화
+    val modelName = "gpt-4o-mini"
     val llmProvider = try {
         val key = System.getenv("OPENAI_API_KEY") ?: ""
         if (key.isNotBlank()) {
-            println("[INFO] OpenAI API 키 감지됨 - LLM 모드로 시작합니다.")
-            OpenAIProvider.fromEnv(model = "gpt-4o-mini")
+            println("$pad${BRIGHT_CYAN}[INFO]${RESET} OpenAI API key detected - LLM mode")
+            OpenAIProvider.fromEnv(model = modelName)
         } else {
-            println("[WARN] OPENAI_API_KEY 없음 - 기본 모드로 시작합니다.")
+            println("$pad\u001B[33m[WARN]\u001B[0m OPENAI_API_KEY not set - basic mode")
             null
         }
     } catch (e: Exception) {
-        println("[WARN] LLM Provider 초기화 실패: ${e.message}")
+        println("$pad\u001B[33m[WARN]\u001B[0m LLM Provider init failed: ${e.message}")
         null
     }
 
     // DACS 초기화
+    val dacsTypeName: String
     val dacs = if (llmProvider != null) {
-        println("[INFO] HybridDACS 사용 (LLM + 규칙 기반)")
-        HybridDACS(llmProvider, "gpt-4o-mini")
+        dacsTypeName = "HybridDACS"
+        println("$pad${BRIGHT_CYAN}[INFO]${RESET} HybridDACS (LLM + rule-based)")
+        HybridDACS(llmProvider, modelName)
     } else {
-        println("[INFO] SimpleDACS 사용 (규칙 기반)")
+        dacsTypeName = "SimpleDACS"
+        println("$pad${BRIGHT_CYAN}[INFO]${RESET} SimpleDACS (rule-based)")
         SimpleDACS.DEFAULT
     }
 
@@ -73,23 +149,41 @@ fun main() = runBlocking {
         id = "gov-shell",
         dacs = dacs,
         llmProvider = llmProvider,
-        model = if (llmProvider != null) "gpt-4o-mini" else null,
+        model = if (llmProvider != null) modelName else null,
         blueprintRunner = blueprintRunner
     )
 
     // 세션 시작
     val session = governor.startSession()
     println()
-    println("[SESSION] 세션 ID: ${session.sessionId}")
+    println("$pad${BRIGHT_CYAN}[SESSION]${RESET} ID: ${session.sessionId}")
     println()
-    println("대화를 시작하세요. 종료하려면 'exit' 또는 'quit'을 입력하세요.")
-    println("─".repeat(60))
+    println("${pad}Type your message. 'exit' or 'quit' to end. '/help' for commands.")
+    println("  ${DIM}$line${RESET}")
     println()
 
     val reader = BufferedReader(InputStreamReader(System.`in`, StandardCharsets.UTF_8))
 
+    // Shell 설정 및 컨텍스트
+    val shellSettings = ShellSettings()
+    val shellCtx = ShellContext(
+        governor = governor,
+        sessionId = session.sessionId,
+        session = session,
+        reader = reader,
+        modelName = if (llmProvider != null) modelName else null,
+        dacsTypeName = dacsTypeName,
+        llmProviderPresent = llmProvider != null,
+        settings = shellSettings
+    )
+
+    // CommandDispatcher 초기화 (object init 트리거)
+    CommandDispatcher
+
+    val c = ShellColors
+
     while (true) {
-        print("> ")
+        print("${c.DIM}>${c.RESET} ")
         System.out.flush()
 
         val input = reader.readLine()?.trim()
@@ -98,13 +192,16 @@ fun main() = runBlocking {
             continue
         }
 
-        // 사용자 입력을 로그에 표시 (파이프 입력 시에도 보이도록)
-        println(input)
-
         if (input.lowercase() in listOf("exit", "quit", "q", "종료")) {
             println()
-            println("세션을 종료합니다. 안녕히 가세요!")
+            println("Session ended. Bye!")
             break
+        }
+
+        // 슬래시 명령 처리 — Governor를 우회
+        if (CommandDispatcher.isCommand(input)) {
+            CommandDispatcher.dispatch(input, shellCtx)
+            continue
         }
 
         try {
@@ -113,59 +210,62 @@ fun main() = runBlocking {
 
             // auto-continue loop: nextAction이 CONTINUE_EXECUTION이면 자동 계속
             do {
-                print("wiiiv> ")
+                print("${c.CYAN}wiiiv>${c.RESET} ")
                 println(response.message)
 
                 // 추가 정보 출력
                 when (response.action) {
                     ActionType.ASK -> {
                         response.askingFor?.let {
-                            println("      (필요: $it)")
+                            println("      (need: $it)")
                         }
                     }
                     ActionType.CONFIRM -> {
                         response.confirmationSummary?.let {
                             println()
-                            println("      ─── 확인 요약 ───")
+                            println("      --- Confirm ---")
                             it.lines().forEach { line -> println("      $line") }
-                            println("      " + "─".repeat(20))
+                            println("      " + "-".repeat(20))
                         }
                     }
                     ActionType.EXECUTE -> {
                         response.blueprint?.let { bp ->
                             println()
-                            println("      ─── Blueprint ───")
+                            println("      --- Blueprint ---")
                             println("      ID: ${bp.id}")
-                            println("      Steps: ${bp.steps.size}개")
+                            println("      Steps: ${bp.steps.size}")
                             bp.steps.forEachIndexed { i, step ->
                                 println("        ${i + 1}. ${step.type}: ${step.params}")
                             }
-                            println("      " + "─".repeat(20))
+                            println("      " + "-".repeat(20))
                         }
                         response.executionResult?.let { result ->
                             println()
-                            println("      ─── 실행 결과 ───")
-                            println("      성공: ${result.isSuccess}")
-                            println("      성공 step: ${result.successCount}개")
+                            println("      --- Result ---")
+                            println("      Success: ${result.isSuccess}")
+                            println("      OK steps: ${result.successCount}")
                             if (result.failureCount > 0) {
-                                println("      실패 step: ${result.failureCount}개")
+                                println("      Failed steps: ${result.failureCount}")
                             }
-                            println("      " + "─".repeat(20))
+                            println("      " + "-".repeat(20))
                         }
                     }
                     ActionType.CANCEL -> {
-                        println("      (세션 리셋)")
+                        println("      (session reset)")
                     }
                     else -> {}
                 }
                 println()
 
-                // auto-continue: nextAction == CONTINUE_EXECUTION이면 "계속" 메시지로 다음 턴 실행
-                // 계약: CONFIRM/ASK가 나오면 여기에 도달하지 않음 (nextAction이 null)
-                if (response.nextAction == NextAction.CONTINUE_EXECUTION && continuations < 10) {
+                // auto-continue: ShellSettings 기반
+                val maxCont = shellSettings.maxContinue
+                if (shellSettings.autoContinue
+                    && response.nextAction == NextAction.CONTINUE_EXECUTION
+                    && continuations < maxCont
+                ) {
                     continuations++
                     val reason = response.message.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: ""
-                    println("      (자동 계속 $continuations/10: $reason)")
+                    println("      (auto-continue $continuations/$maxCont: $reason)")
                     response = governor.chat(session.sessionId, "계속")
                 } else {
                     break

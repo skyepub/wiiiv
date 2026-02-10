@@ -175,6 +175,10 @@ fun main() = runBlocking {
         ragPipeline = ragPipeline
     )
 
+    // Progress Display 설정
+    val progressDisplay = ShellProgressDisplay()
+    governor.progressListener = progressDisplay
+
     // 세션 시작
     val session = governor.startSession()
     println()
@@ -228,13 +232,14 @@ fun main() = runBlocking {
         }
 
         try {
+            progressDisplay.reset()
             var response = governor.chat(session.sessionId, input)
             var continuations = 0
 
             // auto-continue loop: nextAction이 CONTINUE_EXECUTION이면 자동 계속
             do {
                 print("${c.CYAN}wiiiv>${c.RESET} ")
-                println(response.message)
+                println(ShellRenderer.render(response.message))
 
                 // 추가 정보 출력
                 when (response.action) {

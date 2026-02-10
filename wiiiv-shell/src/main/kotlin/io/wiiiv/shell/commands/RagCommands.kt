@@ -143,9 +143,10 @@ object RagCommands {
             return
         }
 
-        val file = File(path)
+        val resolved = resolvePath(path)
+        val file = File(resolved)
         if (!file.exists()) {
-            println("  ${c.RED}File not found: $path${c.RESET}")
+            println("  ${c.RED}File not found: $resolved${c.RESET}")
             return
         }
 
@@ -219,4 +220,6 @@ object RagCommands {
         val deleted = runBlocking { pipeline.deleteDocument(matchedId) }
         println("  ${c.GREEN}Removed.${c.RESET} $deleted chunks deleted.")
     }
+
+    // Path resolution delegated to shared resolvePath() in PathUtils.kt
 }

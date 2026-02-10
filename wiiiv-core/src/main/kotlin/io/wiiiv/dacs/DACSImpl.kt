@@ -168,6 +168,11 @@ class RuleBasedAdversary : Persona {
         val concerns = mutableListOf<String>()
         var hasExplicitProhibition = false
 
+        // workspace를 context에서 파싱 (동적 safe path)
+        val workspacePath = context?.lines()
+            ?.find { it.startsWith("workspace:") }
+            ?.substringAfter("workspace:")?.trim()
+
         // 1. 명백한 금지 패턴 검사 (NO 대상)
         val hasProhibitedPath = spec.allowedPaths.any { path ->
             // 정확히 일치하는 금지 패턴
@@ -200,13 +205,19 @@ class RuleBasedAdversary : Persona {
 
         // 4. 민감 경로 검사 (REVISION 대상 - Gate에서 최종 판단)
         val sensitivePaths = listOf("/etc", "/root", "/usr", "/bin", "/sbin")
-        val safePaths = listOf("/tmp", "/var/tmp", "/var/folders", System.getProperty("java.io.tmpdir"))
+        val dynamicSafePaths = buildList {
+            add("/tmp")
+            add("/var/tmp")
+            add("/var/folders")
+            add(System.getProperty("java.io.tmpdir"))
+            workspacePath?.let { add(it) }
+        }
 
         val allowsSensitivePaths = spec.allowedPaths.any { path ->
             val isSensitive = sensitivePaths.any { sensitive ->
                 path.startsWith(sensitive)
             }
-            val isSafe = safePaths.any { safe ->
+            val isSafe = dynamicSafePaths.any { safe ->
                 path.startsWith(safe)
             }
             isSensitive && !isSafe

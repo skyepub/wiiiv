@@ -18,4 +18,10 @@ object ShellColors {
     val YELLOW get() = if (enabled) "\u001B[33m" else ""
     val RED get() = if (enabled) "\u001B[31m" else ""
     val GREEN get() = if (enabled) "\u001B[32m" else ""
+    val BLUE get() = if (enabled) "\u001B[34m" else ""
+    val BRIGHT_BLUE get() = if (enabled) "\u001B[94m" else ""
+    val MAGENTA get() = if (enabled) "\u001B[35m" else ""
+    val BRIGHT_MAGENTA get() = if (enabled) "\u001B[95m" else ""
+    val BRIGHT_YELLOW get() = if (enabled) "\u001B[93m" else ""
+    val BRIGHT_GREEN get() = if (enabled) "\u001B[92m" else ""
 }

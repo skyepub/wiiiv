@@ -53,8 +53,19 @@ class ConversationalGovernor(
     private val ragPipeline: RagPipeline? = null
 ) : Governor {
 
+    var progressListener: GovernorProgressListener? = null
+
     private val sessions = ConcurrentHashMap<String, ConversationSession>()
     private val json = Json { ignoreUnknownKeys = true }
+
+    private fun emitProgress(
+        phase: ProgressPhase,
+        detail: String? = null,
+        stepIndex: Int? = null,
+        totalSteps: Int? = null
+    ) {
+        progressListener?.onProgress(ProgressEvent(phase, detail, stepIndex, totalSteps))
+    }
 
     /**
      * 새 대화 세션 시작
@@ -110,6 +121,7 @@ class ConversationalGovernor(
         }
 
         // LLM으로 다음 행동 결정
+        emitProgress(ProgressPhase.LLM_THINKING, "다음 행동 결정 중...")
         val governorAction = try {
             decideAction(session, userMessage)
         } catch (e: Exception) {
@@ -158,11 +170,16 @@ class ConversationalGovernor(
      * LLM을 통해 다음 행동 결정
      */
     private suspend fun decideAction(session: ConversationSession, userMessage: String): GovernorAction {
+        // RAG 검색 — 사용자 메시지로 관련 문서 조회
+        val ragContext = consultRag(userMessage, session.draftSpec)
+
         val systemPrompt = GovernorPrompt.withContext(
             draftSpec = session.draftSpec,
             recentHistory = session.getRecentHistory(10),
             executionHistory = session.context.executionHistory,
-            taskList = session.context.tasks.values.toList()
+            taskList = session.context.tasks.values.toList(),
+            ragContext = ragContext,
+            workspace = session.context.workspace
         )
 
         // System prompt + 사용자 메시지를 하나의 프롬프트로 결합
@@ -178,7 +195,7 @@ class ConversationalGovernor(
                 action = LlmAction.COMPLETE,
                 prompt = fullPrompt,
                 model = model ?: llmProvider.defaultModel,
-                maxTokens = 1000
+                maxTokens = 2000
             )
         )
 
@@ -186,10 +203,32 @@ class ConversationalGovernor(
     }
 
     /**
+     * RAG 검색 — 사용자 메시지 + DraftSpec 기반
+     */
+    private suspend fun consultRag(userMessage: String, draftSpec: DraftSpec): String? {
+        if (ragPipeline == null) return null
+
+        val query = buildString {
+            append(userMessage)
+            draftSpec.intent?.let { append(" $it") }
+            draftSpec.domain?.let { append(" $it") }
+        }.trim()
+
+        if (query.isBlank()) return null
+
+        return try {
+            val result = ragPipeline.search(query, topK = 5)
+            if (result.isEmpty()) null else result.toNumberedContext()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * LLM 응답을 GovernorAction으로 파싱
      */
     private fun parseGovernorAction(response: String): GovernorAction {
-        val jsonStr = extractJson(response)
+        val (jsonStr, tail) = extractJsonWithTail(response)
 
         return try {
             val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
@@ -201,7 +240,13 @@ class ConversationalGovernor(
                 ActionType.REPLY
             }
 
-            val message = jsonElement["message"]?.jsonPrimitive?.contentOrNull ?: ""
+            // JSON 뒤의 내용(코드블록 등)을 message에 합침
+            val jsonMessage = jsonElement["message"]?.jsonPrimitive?.contentOrNull ?: ""
+            val message = if (tail.isNotBlank()) {
+                "$jsonMessage\n\n$tail"
+            } else {
+                jsonMessage
+            }
 
             val specUpdates = jsonElement["specUpdates"]?.jsonObject?.let {
                 it.entries.associate { (k, v) -> k to v }
@@ -288,7 +333,8 @@ class ConversationalGovernor(
      *    - false → executeDirectTurn() (FILE_READ, COMMAND 등)
      */
     private suspend fun executeTurn(session: ConversationSession): ConversationResponse {
-        val draftSpec = session.draftSpec
+        var draftSpec = session.draftSpec
+        val workspace = session.context.workspace
 
         // 1. 실행이 필요하지 않은 타입 (CONVERSATION, INFORMATION)
         if (!draftSpec.requiresExecution()) {
@@ -310,6 +356,15 @@ class ConversationalGovernor(
             )
         }
 
+        // 2.5. PROJECT_CREATE: workspace에서 targetPath 유도
+        if (draftSpec.taskType == TaskType.PROJECT_CREATE && draftSpec.targetPath == null && workspace != null) {
+            val derivedPath = deriveProjectPath(workspace, draftSpec)
+            if (derivedPath != null) {
+                draftSpec = draftSpec.copy(targetPath = derivedPath)
+                session.draftSpec = draftSpec
+            }
+        }
+
         // 3. DraftSpec → Spec 변환
         val spec = try {
             draftSpec.toSpec()
@@ -324,6 +379,7 @@ class ConversationalGovernor(
 
         // 4. DACS (risky이고 첫 실행일 때만)
         if (draftSpec.isRisky() && session.context.executionHistory.isEmpty()) {
+            emitProgress(ProgressPhase.DACS_EVALUATING, "DACS 합의 평가 중...")
             val dacsResponse = evaluateDACS(session, spec, draftSpec)
             if (dacsResponse != null) return dacsResponse
         }
@@ -332,7 +388,7 @@ class ConversationalGovernor(
         return if (needsLlmDecision(draftSpec)) {
             executeLlmDecidedTurn(session, draftSpec, spec)
         } else {
-            executeDirectTurn(session, draftSpec, spec)
+            executeDirectTurn(session, draftSpec, spec, workspace)
         }
     }
 
@@ -354,12 +410,17 @@ class ConversationalGovernor(
         spec: Spec,
         draftSpec: DraftSpec
     ): ConversationResponse? {
+        val dacsContext = buildString {
+            draftSpec.intent?.let { append(it) }
+            session.context.workspace?.let { append("\nworkspace: $it") }
+        }
+
         val dacsResult = try {
             dacs.evaluate(
                 DACSRequest(
                     requestId = session.sessionId,
                     spec = spec,
-                    context = draftSpec.intent
+                    context = dacsContext.ifBlank { null }
                 )
             )
         } catch (e: Exception) {
@@ -400,16 +461,83 @@ class ConversationalGovernor(
      * 단순 작업 실행 (FILE_READ, FILE_WRITE, COMMAND, PROJECT_CREATE 등)
      *
      * Blueprint 생성 → 실행 → 결과 적재 (세션 리셋 없음)
+     *
+     * PROJECT_CREATE의 경우 COMMAND step을 분리 실행하여,
+     * 파일 생성은 성공했으나 빌드/테스트 명령만 실패한 경우
+     * partial success로 처리한다.
      */
     private suspend fun executeDirectTurn(
         session: ConversationSession,
         draftSpec: DraftSpec,
-        spec: Spec
+        spec: Spec,
+        workspace: String? = null
     ): ConversationResponse {
         // Blueprint 생성
-        val blueprint = createBlueprintFromDraftSpec(draftSpec, spec)
+        val blueprint = createBlueprintFromDraftSpec(draftSpec, spec, workspace)
 
-        // 실행
+        // PROJECT_CREATE: COMMAND step 분리 실행 (soft-fail)
+        if (draftSpec.taskType == TaskType.PROJECT_CREATE && blueprintRunner != null) {
+            val (fileSteps, cmdSteps) = blueprint.steps.partition {
+                it.type != BlueprintStepType.COMMAND
+            }
+
+            // 1. 파일 생성 (필수)
+            val fileBlueprint = blueprint.copy(steps = fileSteps)
+            emitProgress(ProgressPhase.EXECUTING, "파일 생성 중...", 0, fileSteps.size)
+            val fileResult = try {
+                blueprintRunner.execute(fileBlueprint)
+            } catch (e: Exception) {
+                null
+            }
+
+            if (fileResult == null || !fileResult.isSuccess) {
+                emitProgress(ProgressPhase.DONE)
+                val summary = formatExecutionResult(fileResult)
+                session.integrateResult(blueprint, fileResult, summary)
+                session.resetSpec()
+                session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+                session.context.activeTaskId = null
+                return ConversationResponse(
+                    action = ActionType.EXECUTE,
+                    message = summary,
+                    sessionId = session.sessionId,
+                    blueprint = blueprint,
+                    executionResult = fileResult
+                )
+            }
+
+            // 2. 명령 실행 (선택 — 실패해도 전체 성공)
+            var cmdResult: BlueprintExecutionResult? = null
+            if (cmdSteps.isNotEmpty()) {
+                emitProgress(ProgressPhase.COMMAND_RUNNING, "빌드/테스트 실행 중...")
+                val cmdBlueprint = blueprint.copy(steps = cmdSteps)
+                cmdResult = try {
+                    blueprintRunner.execute(cmdBlueprint)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            emitProgress(ProgressPhase.DONE)
+
+            // 통합 결과
+            val summary = formatProjectResult(fileResult, cmdResult)
+            session.integrateResult(blueprint, fileResult, summary)
+            session.resetSpec()
+            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+            session.context.activeTaskId = null
+
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = summary,
+                sessionId = session.sessionId,
+                blueprint = blueprint,
+                executionResult = fileResult
+            )
+        }
+
+        // 일반 실행 (PROJECT_CREATE 외)
+        emitProgress(ProgressPhase.EXECUTING, "실행 중...", 0, blueprint.steps.size)
         val executionResult = if (blueprintRunner != null) {
             try {
                 blueprintRunner.execute(blueprint)
@@ -419,6 +547,8 @@ class ConversationalGovernor(
         } else {
             null
         }
+
+        emitProgress(ProgressPhase.DONE)
 
         // 결과를 session context에 적재
         val summary = formatExecutionResult(executionResult)
@@ -615,9 +745,10 @@ class ConversationalGovernor(
     /**
      * DraftSpec에서 Blueprint 생성
      */
-    private suspend fun createBlueprintFromDraftSpec(draftSpec: DraftSpec, spec: Spec): Blueprint {
+    private suspend fun createBlueprintFromDraftSpec(draftSpec: DraftSpec, spec: Spec, workspace: String? = null): Blueprint {
+        emitProgress(ProgressPhase.BLUEPRINT_CREATING, "Blueprint 생성 중...")
         val now = Instant.now().toString()
-        val steps = createSteps(draftSpec)
+        val steps = createSteps(draftSpec, workspace)
 
         return Blueprint(
             id = "bp-${UUID.randomUUID()}",
@@ -642,7 +773,7 @@ class ConversationalGovernor(
     /**
      * DraftSpec에서 BlueprintStep 생성
      */
-    private suspend fun createSteps(draftSpec: DraftSpec): List<BlueprintStep> {
+    private suspend fun createSteps(draftSpec: DraftSpec, workspace: String? = null): List<BlueprintStep> {
         val stepId = "step-${UUID.randomUUID().toString().take(8)}"
 
         return when (draftSpec.taskType) {
@@ -695,7 +826,9 @@ class ConversationalGovernor(
             }
 
             TaskType.PROJECT_CREATE -> {
-                val basePath = draftSpec.targetPath ?: "/tmp/wiiiv-project"
+                val basePath = draftSpec.targetPath
+                    ?: deriveProjectPath(workspace, draftSpec)
+                    ?: "/tmp/wiiiv-project"
                 // LLM이 있으면 실제 프로젝트 파일 생성 시도
                 if (llmProvider != null) {
                     try {
@@ -936,6 +1069,49 @@ class ConversationalGovernor(
     }
 
     /**
+     * PROJECT_CREATE 결과 포맷팅 — 파일 생성 + COMMAND 분리 실행 결과
+     *
+     * 파일 생성 성공 + COMMAND 실패 → partial success 메시지
+     */
+    private fun formatProjectResult(
+        fileResult: BlueprintExecutionResult,
+        cmdResult: BlueprintExecutionResult?
+    ): String = buildString {
+        appendLine("프로젝트 생성 완료!")
+        appendLine()
+        appendLine("파일 생성: ${fileResult.successCount}개 step 성공")
+
+        if (cmdResult != null) {
+            if (cmdResult.isSuccess) {
+                appendLine("빌드/테스트: 성공 (${cmdResult.successCount}개 step)")
+            } else {
+                appendLine()
+                appendLine("⚠ 빌드/테스트 실행 실패 — 수동 확인 필요")
+                // 실패 상세 (어떤 명령이 실패했는지)
+                cmdResult.runnerResult.results.forEach { stepResult ->
+                    if (stepResult is io.wiiiv.execution.ExecutionResult.Failure) {
+                        val stepId = stepResult.meta.stepId
+                        appendLine("  - $stepId: ${stepResult.error.message}")
+                    }
+                }
+            }
+        }
+
+        // 파일 생성 결과 출력
+        fileResult.runnerResult.results.forEach { stepResult ->
+            val stepId = stepResult.meta.stepId
+            val output = fileResult.context.getStepOutput(stepId) ?: return@forEach
+            output.json["content"]?.let { content ->
+                val text = content.jsonPrimitive.contentOrNull ?: return@let
+                val path = output.json["path"]?.jsonPrimitive?.contentOrNull ?: ""
+                appendLine()
+                appendLine("[$path]")
+                appendLine(text.take(2000))
+            }
+        }
+    }
+
+    /**
      * LLM 없이 기본 처리
      */
     private fun handleWithoutLlm(session: ConversationSession, userMessage: String): ConversationResponse {
@@ -977,22 +1153,62 @@ class ConversationalGovernor(
     }
 
     /**
-     * JSON 추출 (마크다운 코드 블록 등 제거)
+     * JSON 추출 + tail — 중괄호 균형 매칭으로 JSON 객체와 나머지 텍스트를 분리한다.
+     *
+     * LLM이 JSON 뒤에 코드블록 등을 추가로 출력하는 경우,
+     * JSON 부분과 나머지(tail)를 모두 반환하여 message에 합칠 수 있게 한다.
+     *
+     * @return Pair(jsonString, tailContent)
+     */
+    private fun extractJsonWithTail(response: String): Pair<String, String> {
+        val trimmed = response.trim()
+
+        // 1. 직접 JSON인 경우 (tail 없음)
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            return Pair(trimmed, "")
+        }
+
+        // 2. 중괄호 균형 매칭으로 JSON + tail 분리
+        val start = trimmed.indexOf('{')
+        if (start == -1) return Pair(trimmed, "")
+
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for (i in start until trimmed.length) {
+            val c = trimmed[i]
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            when {
+                c == '\\' && inString -> escaped = true
+                c == '"' && !escaped -> inString = !inString
+                c == '{' && !inString -> depth++
+                c == '}' && !inString -> {
+                    depth--
+                    if (depth == 0) {
+                        val jsonPart = trimmed.substring(start, i + 1)
+                        // JSON 뒤의 텍스트에서 코드블록 래핑(```) 제거
+                        val tailRaw = trimmed.substring(i + 1).trim()
+                        val tail = tailRaw
+                            .removePrefix("```")  // JSON 코드블록 닫힘
+                            .trim()
+                        return Pair(jsonPart, tail)
+                    }
+                }
+            }
+        }
+
+        return Pair(trimmed, "")
+    }
+
+    /**
+     * JSON만 추출 (tail 불필요한 호출용)
      */
     private fun extractJson(response: String): String {
-        val codeBlockRegex = """```(?:json)?\s*([\s\S]*?)```""".toRegex()
-        val codeBlockMatch = codeBlockRegex.find(response)
-        if (codeBlockMatch != null) {
-            return codeBlockMatch.groupValues[1].trim()
-        }
-
-        val jsonRegex = """\{[\s\S]*\}""".toRegex()
-        val jsonMatch = jsonRegex.find(response)
-        if (jsonMatch != null) {
-            return jsonMatch.value
-        }
-
-        return response.trim()
+        return extractJsonWithTail(response).first
     }
 
     /**
@@ -1330,6 +1546,92 @@ class ConversationalGovernor(
                     step.params["method"] in WRITE_HTTP_METHODS
             } ?: false
         }
+    }
+
+    /**
+     * 워크스페이스와 DraftSpec으로부터 프로젝트 경로를 유도한다.
+     *
+     * domain 또는 intent에서 slug를 생성하여 workspace 하위에 프로젝트 디렉토리 경로를 반환.
+     * workspace가 null이면 null 반환.
+     */
+    internal fun deriveProjectPath(workspace: String?, draftSpec: DraftSpec): String? {
+        if (workspace == null) return null
+
+        val slug = generateSlug(draftSpec.domain ?: draftSpec.intent ?: return null)
+        return "$workspace/$slug"
+    }
+
+    /**
+     * 한국어/영어 텍스트를 kebab-case slug로 변환한다.
+     *
+     * 예: "연락처 관리" → "contact-manager"
+     *     "E-commerce Backend" → "e-commerce-backend"
+     */
+    internal fun generateSlug(text: String): String {
+        // 한국어 도메인 → 영문 slug 매핑 (공통 패턴)
+        val koreanMappings = mapOf(
+            "연락처" to "contact",
+            "주소록" to "addressbook",
+            "할일" to "todo",
+            "관리" to "manager",
+            "쇼핑몰" to "shopping-mall",
+            "쇼핑" to "shopping",
+            "게시판" to "board",
+            "블로그" to "blog",
+            "채팅" to "chat",
+            "일정" to "schedule",
+            "학생" to "student",
+            "학점" to "grade",
+            "성적" to "grade",
+            "도서" to "library",
+            "재고" to "inventory",
+            "주문" to "order",
+            "회원" to "member",
+            "사용자" to "user",
+            "인증" to "auth",
+            "결제" to "payment",
+            "배송" to "delivery",
+            "메모" to "memo",
+            "노트" to "note",
+            "프로젝트" to "project",
+            "시스템" to "system",
+            "서버" to "server",
+            "백엔드" to "backend",
+            "프론트엔드" to "frontend",
+            "데이터" to "data",
+            "분석" to "analytics",
+            "대시보드" to "dashboard",
+            "API" to "api",
+            "앱" to "app"
+        )
+
+        // 한국어 텍스트에서 매핑 가능한 단어들을 영문으로 변환
+        val parts = mutableListOf<String>()
+        var remaining = text.trim()
+
+        for ((korean, english) in koreanMappings) {
+            if (remaining.contains(korean)) {
+                parts.add(english)
+                remaining = remaining.replace(korean, " ")
+            }
+        }
+
+        // 영문 단어도 추출
+        val englishWords = remaining
+            .replace(Regex("[^a-zA-Z0-9\\s-]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+            .map { it.lowercase() }
+
+        parts.addAll(englishWords)
+
+        val slug = parts
+            .distinct()
+            .take(3)
+            .joinToString("-")
+
+        return slug.ifBlank { "wiiiv-project" }
     }
 
     companion object {

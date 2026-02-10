@@ -61,9 +61,9 @@ object CommandDispatcher {
      * 슬래시 명령 파싱 및 디스패치
      */
     fun dispatch(input: String, ctx: ShellContext) {
-        val parts = input.removePrefix("/").split(" ", limit = 3)
+        val parts = input.removePrefix("/").trim().split("\\s+".toRegex(), limit = 3)
         val cmd = parts[0].lowercase()
-        val args = parts.drop(1)
+        val args = parts.drop(1).filter { it.isNotBlank() }
 
         val entry = commands.find { entry ->
             // Match by first word of the registered name

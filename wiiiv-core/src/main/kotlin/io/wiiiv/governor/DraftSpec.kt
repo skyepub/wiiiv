@@ -117,22 +117,26 @@ data class DraftSpec(
     fun isRisky(): Boolean = when (taskType) {
         TaskType.FILE_DELETE -> true
         TaskType.COMMAND -> true
-        TaskType.PROJECT_CREATE -> true
+        TaskType.PROJECT_CREATE -> {
+            // PROJECT_CREATE: 시스템 경로일 때만 위험
+            // workspace 하위, /tmp, 상대 경로 등은 안전
+            targetPath?.let { isSystemPath(it) } ?: false
+        }
         TaskType.API_WORKFLOW -> true
         else -> {
             // 특정 경로 패턴만 위험 (시스템 경로)
-            targetPath?.let { path ->
-                path.contains("/etc") ||
-                path.contains("/system") ||
-                path.contains("/root") ||
-                path.contains("/usr") ||
-                path.contains("/**") ||
-                path.contains("C:\\Windows") ||
-                path.contains("C:\\Program")
-                // /tmp, /var/tmp, 상대 경로 등은 안전
-            } ?: false
+            targetPath?.let { isSystemPath(it) } ?: false
         }
     }
+
+    private fun isSystemPath(path: String): Boolean =
+        path.contains("/etc") ||
+        path.contains("/system") ||
+        path.contains("/root") ||
+        path.contains("/usr") ||
+        path.contains("/**") ||
+        path.contains("C:\\Windows") ||
+        path.contains("C:\\Program")
 
     /**
      * 완성된 Spec으로 변환
@@ -360,7 +364,8 @@ class SessionContext(
     val artifacts: MutableMap<String, String> = mutableMapOf(),
     val facts: MutableMap<String, String> = mutableMapOf(),
     var pendingAction: PendingAction? = null,
-    var declaredWriteIntent: Boolean? = null
+    var declaredWriteIntent: Boolean? = null,
+    var workspace: String? = null
 ) {
     /**
      * 현재 활성 작업
@@ -393,6 +398,7 @@ class SessionContext(
         facts.clear()
         pendingAction = null
         declaredWriteIntent = null
+        // workspace is intentionally preserved — it's an environment setting, not task state
     }
 }
 

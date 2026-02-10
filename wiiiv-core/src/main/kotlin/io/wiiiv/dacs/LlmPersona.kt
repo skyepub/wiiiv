@@ -73,6 +73,11 @@ abstract class LlmPersona(
      * 프롬프트 생성
      */
     protected open fun buildPrompt(spec: Spec, context: String?): String {
+        // workspace를 context에서 파싱
+        val workspacePath = context?.lines()
+            ?.find { it.startsWith("workspace:") }
+            ?.substringAfter("workspace:")?.trim()
+
         return buildString {
             appendLine(systemPrompt)
             appendLine()
@@ -87,6 +92,13 @@ abstract class LlmPersona(
             appendLine("Allowed Operations: ${spec.allowedOperations.joinToString(", ")}")
             appendLine("Allowed Paths: ${spec.allowedPaths.joinToString(", ")}")
             appendLine("```")
+            if (workspacePath != null) {
+                appendLine()
+                appendLine("## Workspace")
+                appendLine("The user has configured a workspace directory: $workspacePath")
+                appendLine("All paths under this workspace are user-authorized safe paths.")
+                appendLine("If allowedPaths are under the workspace, treat the scope as well-defined.")
+            }
             if (context != null) {
                 appendLine()
                 appendLine("## Additional Context")

@@ -12,7 +12,8 @@ data class ShellSettings(
     var autoContinue: Boolean = true,
     var maxContinue: Int = 10,
     var verbose: Boolean = false,
-    var color: Boolean = true
+    var color: Boolean = true,
+    var workspace: String? = null
 )
 
 /**

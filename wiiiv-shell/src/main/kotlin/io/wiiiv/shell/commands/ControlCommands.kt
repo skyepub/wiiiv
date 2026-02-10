@@ -3,6 +3,7 @@ package io.wiiiv.shell.commands
 import io.wiiiv.governor.TaskStatus
 import io.wiiiv.shell.ShellColors
 import io.wiiiv.shell.ShellContext
+import java.io.File
 
 /**
  * Tier 3+4 — /switch, /cancel, /set
@@ -84,6 +85,7 @@ object ControlCommands {
             println("  ${c.WHITE}maxcontinue${c.RESET}   ${settings.maxContinue}")
             println("  ${c.WHITE}verbose${c.RESET}       ${if (settings.verbose) "on" else "off"}")
             println("  ${c.WHITE}color${c.RESET}         ${if (settings.color) "on" else "off"}")
+            println("  ${c.WHITE}workspace${c.RESET}     ${settings.workspace ?: "${c.DIM}(not set)${c.RESET}"}")
             println()
             return
         }
@@ -130,9 +132,37 @@ object ControlCommands {
                     else -> println("  ${c.RED}Usage: /set color <on|off>${c.RESET}")
                 }
             }
+            "workspace" -> {
+                val rawPath = args.drop(1).joinToString(" ").trim()
+                if (rawPath.isBlank()) {
+                    val current = settings.workspace
+                    if (current != null) {
+                        println("  workspace = $current")
+                    } else {
+                        println("  ${c.DIM}workspace not set${c.RESET}")
+                        println("  ${c.DIM}Usage: /set workspace <path>${c.RESET}")
+                    }
+                    return
+                }
+
+                val resolved = resolvePath(rawPath)
+                val dir = File(resolved)
+
+                if (!dir.exists()) {
+                    dir.mkdirs()
+                    println("  ${c.DIM}Created directory: $resolved${c.RESET}")
+                } else if (!dir.isDirectory) {
+                    println("  ${c.RED}Not a directory: $resolved${c.RESET}")
+                    return
+                }
+
+                settings.workspace = resolved
+                ctx.session.context.workspace = resolved
+                println("  workspace = $resolved")
+            }
             else -> {
                 println("  ${c.RED}Unknown setting: $key${c.RESET}")
-                println("  Available: autocontinue, maxcontinue, verbose, color")
+                println("  Available: autocontinue, maxcontinue, verbose, color, workspace")
             }
         }
     }

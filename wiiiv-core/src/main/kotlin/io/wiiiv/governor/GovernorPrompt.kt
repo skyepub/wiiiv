@@ -132,6 +132,24 @@ object GovernorPrompt {
 }
 ```
 
+### 예시 5: RAG 문서 기반 질문 (문서 참조 답변) ⚡ 중요!
+"참고 문서 (RAG)" 섹션이 있으면 그 내용을 **우선적으로 참조**하여 직접 답변하라.
+사용자가 사용법, 예제, 설명을 요청할 때 RAG 문서가 있으면 **절대로 ASK하지 말고 REPLY로 바로 답변**하라.
+문서의 코드 예제는 언어별 차이(Kotlin: `.from()`, JS/Python: `.fromTable()`)를 정확히 구분하여 원문 그대로 보여줘라.
+
+사용자: "db 플러그인 사용법 보여줘" (RAG에 db-plugin.md 문서가 있을 때)
+```json
+{
+  "action": "REPLY",
+  "message": "db-plugin 사용법입니다:\n\n```kotlin\nval users = db.selectAll()\n    .from(\"users\")\n    .fetch()\n```\n\n위 코드는 users 테이블의 모든 레코드를 가져옵니다.",
+  "specUpdates": {
+    "intent": "db 플러그인 사용법",
+    "taskType": "INFORMATION"
+  }
+}
+```
+⚠ RAG 문서가 제공되면 추가 질문(ASK) 없이 바로 답변하라. techStack, domain 등을 물어보지 마라.
+
 ## 작업 전환 ⚡ 중요!
 
 **SUSPENDED(⏸) 작업이 작업 목록에 있을 때**, 사용자가 그 작업으로 돌아가려 하면 반드시 taskSwitch를 설정하라.
@@ -231,10 +249,22 @@ object GovernorPrompt {
         draftSpec: DraftSpec,
         recentHistory: List<ConversationMessage>,
         executionHistory: List<TurnExecution> = emptyList(),
-        taskList: List<TaskSlot> = emptyList()
+        taskList: List<TaskSlot> = emptyList(),
+        ragContext: String? = null,
+        workspace: String? = null
     ): String = buildString {
         appendLine(DEFAULT)
         appendLine()
+
+        if (workspace != null) {
+            appendLine("## 워크스페이스")
+            appendLine()
+            appendLine("사용자의 작업 디렉토리: $workspace")
+            appendLine("프로젝트 생성 시 이 경로 아래에 프로젝트 디렉토리를 자동 생성한다.")
+            appendLine("targetPath를 물어볼 필요가 없다.")
+            appendLine()
+        }
+
         appendLine("## 현재 상태")
         appendLine()
 
@@ -312,6 +342,15 @@ object GovernorPrompt {
             }
         }
 
+        if (ragContext != null) {
+            appendLine()
+            appendLine("### 참고 문서 (RAG)")
+            appendLine("아래는 사용자의 질문과 관련된 문서 내용이다. 이 내용을 우선적으로 참고하여 답변하라.")
+            appendLine()
+            appendLine(ragContext)
+            appendLine()
+        }
+
         if (recentHistory.isNotEmpty()) {
             appendLine()
             appendLine("### 최근 대화")
@@ -353,6 +392,11 @@ DraftSpec 기반으로 프로젝트 파일 구조를 JSON으로 생성하라.
 2. 외부 의존성은 DraftSpec constraints에 명시된 경우에만 사용
 3. 테스트 코드를 반드시 포함하라
 4. 빌드 스크립트가 필요한 언어는 반드시 포함하라
+5. **기능/규모에 명시된 모든 필드와 기능을 반드시 구현하라** ⚡ 중요!
+   - 예: "이름, 이메일, 주소, 전화번호, 메모" → 5개 필드 모두 모델에 포함
+   - 누락된 필드가 있으면 안 된다
+6. CLI 프로젝트는 CRUD(추가/조회/수정/삭제) + 검색 기능을 포함하라
+7. 데이터는 파일(JSON/CSV)로 영속화하라
 
 ## 외부 의존성 제약 (중요!)
 
@@ -407,12 +451,14 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
         draftSpec.intent?.let { appendLine("- 의도: $it") }
         draftSpec.domain?.let { appendLine("- 도메인: $it") }
         draftSpec.techStack?.let { appendLine("- 기술 스택: ${it.joinToString(", ")}") }
-        draftSpec.scale?.let { appendLine("- 규모: $it") }
+        draftSpec.scale?.let { appendLine("- 기능/규모: $it") }
         draftSpec.constraints?.let { constraints ->
             if (constraints.isNotEmpty()) {
                 appendLine("- 제약 조건: ${constraints.joinToString(", ")}")
             }
         }
+        appendLine()
+        appendLine("⚠ 위 요구사항의 모든 필드/기능을 빠짐없이 구현하라. 일부만 구현하면 안 된다.")
     }
 
     /**

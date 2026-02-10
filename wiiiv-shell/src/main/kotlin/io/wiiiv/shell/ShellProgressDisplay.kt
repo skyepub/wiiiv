@@ -11,6 +11,7 @@ import io.wiiiv.governor.ProgressPhase
  */
 class ShellProgressDisplay : GovernorProgressListener {
     private var startTime = System.currentTimeMillis()
+    private var hasActiveProgress = false
     private val c = ShellColors
 
     override fun onProgress(event: ProgressEvent) {
@@ -32,15 +33,28 @@ class ShellProgressDisplay : GovernorProgressListener {
 
         val detail = event.detail?.let { " — $it" } ?: ""
 
-        print("\r      ${color}${icon}${c.RESET} ${label}${stepInfo}${detail}  ${c.DIM}[${timeStr}]${c.RESET}    ")
+        print("\r${color}${icon}${c.RESET} ${label}${stepInfo}${detail}  ${c.DIM}[${timeStr}]${c.RESET}    ")
         System.out.flush()
+        hasActiveProgress = true
 
         if (event.phase == ProgressPhase.DONE) {
             println()
+            hasActiveProgress = false
+        }
+    }
+
+    /**
+     * progress 출력 후 줄바꿈 보장 — chat() 반환 후 wiiiv>가 새 줄에서 시작하도록
+     */
+    fun ensureNewline() {
+        if (hasActiveProgress) {
+            println()
+            hasActiveProgress = false
         }
     }
 
     fun reset() {
         startTime = System.currentTimeMillis()
+        hasActiveProgress = false
     }
 }

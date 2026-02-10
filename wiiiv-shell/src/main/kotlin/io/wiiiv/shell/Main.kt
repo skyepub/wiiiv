@@ -234,6 +234,7 @@ fun main() = runBlocking {
         try {
             progressDisplay.reset()
             var response = governor.chat(session.sessionId, input)
+            progressDisplay.ensureNewline()
             var continuations = 0
 
             // auto-continue loop: nextAction이 CONTINUE_EXECUTION이면 자동 계속
@@ -295,6 +296,7 @@ fun main() = runBlocking {
                     val reason = response.message.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: ""
                     println("      (auto-continue $continuations/$maxCont: $reason)")
                     response = governor.chat(session.sessionId, "계속")
+                    progressDisplay.ensureNewline()
                 } else {
                     break
                 }

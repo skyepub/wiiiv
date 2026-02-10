@@ -17,8 +17,6 @@ import io.wiiiv.rag.RagPipeline
 import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import kotlinx.coroutines.runBlocking
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 /**
  * wiiiv Shell - 대화형 Governor 인터페이스
@@ -185,10 +183,11 @@ fun main() = runBlocking {
     println("$pad${BRIGHT_CYAN}[SESSION]${RESET} ID: ${session.sessionId}")
     println()
     println("${pad}Type your message. 'exit' or 'quit' to end. '/help' for commands.")
+    println("${pad}${DIM}Alt+Enter or Ctrl+J for newline${RESET}")
     println("  ${DIM}$line${RESET}")
     println()
 
-    val reader = BufferedReader(InputStreamReader(System.`in`, StandardCharsets.UTF_8))
+    val inputReader = ShellInputReader()
 
     // Shell 설정 및 컨텍스트
     val shellSettings = ShellSettings()
@@ -196,7 +195,7 @@ fun main() = runBlocking {
         governor = governor,
         sessionId = session.sessionId,
         session = session,
-        reader = reader,
+        inputReader = inputReader,
         modelName = if (llmProvider != null) modelName else null,
         dacsTypeName = dacsTypeName,
         llmProviderPresent = llmProvider != null,
@@ -208,12 +207,10 @@ fun main() = runBlocking {
     CommandDispatcher
 
     val c = ShellColors
+    var intentCounter = 0
 
     while (true) {
-        print("${c.DIM}>${c.RESET} ")
-        System.out.flush()
-
-        val input = reader.readLine()?.trim()
+        val input = inputReader.readLine("${c.DIM}>${c.RESET} ")?.trim()
 
         if (input.isNullOrBlank()) {
             continue
@@ -251,33 +248,14 @@ fun main() = runBlocking {
                     }
                     ActionType.CONFIRM -> {
                         response.confirmationSummary?.let {
-                            println()
-                            println("      --- Confirm ---")
-                            it.lines().forEach { line -> println("      $line") }
-                            println("      " + "-".repeat(20))
+                            intentCounter++
+                            println(ShellRenderer.renderConfirmation(it, intentCounter))
                         }
                     }
                     ActionType.EXECUTE -> {
-                        response.blueprint?.let { bp ->
-                            println()
-                            println("      --- Blueprint ---")
-                            println("      ID: ${bp.id}")
-                            println("      Steps: ${bp.steps.size}")
-                            bp.steps.forEachIndexed { i, step ->
-                                println("        ${i + 1}. ${step.type}: ${step.params}")
-                            }
-                            println("      " + "-".repeat(20))
-                        }
-                        response.executionResult?.let { result ->
-                            println()
-                            println("      --- Result ---")
-                            println("      Success: ${result.isSuccess}")
-                            println("      OK steps: ${result.successCount}")
-                            if (result.failureCount > 0) {
-                                println("      Failed steps: ${result.failureCount}")
-                            }
-                            println("      " + "-".repeat(20))
-                        }
+                        println(ShellRenderer.renderExecutionResult(
+                            "", response.blueprint, response.executionResult
+                        ))
                     }
                     ActionType.CANCEL -> {
                         println("      (session reset)")
@@ -309,4 +287,5 @@ fun main() = runBlocking {
     }
 
     governor.endSession(session.sessionId)
+    inputReader.close()
 }

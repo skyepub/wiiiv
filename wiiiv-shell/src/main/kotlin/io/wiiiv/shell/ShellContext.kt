@@ -3,7 +3,6 @@ package io.wiiiv.shell
 import io.wiiiv.governor.ConversationSession
 import io.wiiiv.governor.ConversationalGovernor
 import io.wiiiv.rag.RagPipeline
-import java.io.BufferedReader
 
 /**
  * Shell 레벨 설정 — Governor/DACS 내부는 변경 불가
@@ -25,7 +24,7 @@ data class ShellContext(
     val governor: ConversationalGovernor,
     val sessionId: String,
     val session: ConversationSession,
-    val reader: BufferedReader,
+    val inputReader: ShellInputReader,
     val modelName: String?,
     val dacsTypeName: String,
     val llmProviderPresent: Boolean,
@@ -36,9 +35,7 @@ data class ShellContext(
      * y/N 확인 프롬프트 — `/cancel all` 등에서 사용
      */
     fun confirm(prompt: String): Boolean {
-        print("$prompt (y/N) ")
-        System.out.flush()
-        val answer = reader.readLine()?.trim()?.lowercase()
+        val answer = inputReader.readSimpleLine("$prompt (y/N) ")?.trim()?.lowercase()
         return answer == "y" || answer == "yes"
     }
 }

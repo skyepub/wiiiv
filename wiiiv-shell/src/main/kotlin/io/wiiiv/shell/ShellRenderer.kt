@@ -1,5 +1,11 @@
 package io.wiiiv.shell
 
+import io.wiiiv.blueprint.Blueprint
+import io.wiiiv.blueprint.BlueprintExecutionResult
+import io.wiiiv.blueprint.BlueprintStep
+import io.wiiiv.blueprint.BlueprintStepType
+import io.wiiiv.execution.ExecutionResult
+
 /**
  * Shell 출력 렌더러
  *
@@ -230,5 +236,358 @@ object ShellRenderer {
         var i = start
         while (i < line.length && (line[i].isLetterOrDigit() || line[i] == '_')) i++
         return i
+    }
+
+    // ── Confirmation Rendering ─────────────────────────────────
+
+    private val BOX_WIDTH = 75
+
+    /**
+     * CONFIRM 단계 렌더링
+     *
+     * ```
+     *   ────── Intent #3 ──────────────────────────────────────────────────
+     *     작업: 프로젝트 생성
+     *     의도: 프로젝트 생성
+     *     ...
+     *   ──────────────────────────────────────────────────────────────────
+     * ```
+     */
+    fun renderConfirmation(summary: String, intentNumber: Int): String {
+        val sb = StringBuilder()
+        val dash = "\u2500"
+
+        // header: ────── Intent #N ────────────────
+        val label = " Intent #$intentNumber "
+        val headerPrefix = dash.repeat(6)
+        val headerSuffixLen = (BOX_WIDTH - 6 - label.length).coerceAtLeast(3)
+        val headerSuffix = dash.repeat(headerSuffixLen)
+        sb.appendLine()
+        sb.appendLine("  ${c.DIM}$headerPrefix${c.RESET}${c.BRIGHT_CYAN}$label${c.RESET}${c.DIM}$headerSuffix${c.RESET}")
+
+        // content
+        for (line in summary.trimEnd().lines()) {
+            if (line.isBlank()) continue
+            // key: value 형태를 감지하여 key를 강조
+            val colonIdx = line.indexOf(':')
+            if (colonIdx > 0 && colonIdx < line.length - 1) {
+                val key = line.substring(0, colonIdx).trim()
+                val value = line.substring(colonIdx + 1).trim()
+                sb.appendLine("    ${c.DIM}$key:${c.RESET}  $value")
+            } else {
+                sb.appendLine("    $line")
+            }
+        }
+
+        // footer
+        sb.appendLine("  ${c.DIM}${dash.repeat(BOX_WIDTH)}${c.RESET}")
+
+        return sb.toString().trimEnd()
+    }
+
+    // ── Execution Result Rendering ──────────────────────────────
+
+    /**
+     * 실행 결과 전용 렌더링
+     *
+     * Blueprint step 요약 (content 숨김) + 결과 표시
+     */
+    fun renderExecutionResult(
+        message: String,
+        blueprint: Blueprint?,
+        executionResult: BlueprintExecutionResult?
+    ): String {
+        val sb = StringBuilder()
+
+        // 메시지 렌더링
+        sb.appendLine(render(message))
+
+        // Blueprint 표시
+        if (blueprint != null) {
+            sb.appendLine()
+            val shortId = blueprint.id.take(8)
+            val stepCount = blueprint.steps.size
+            sb.appendLine("  ${c.BRIGHT_CYAN}\uD83D\uDCCB Blueprint${c.RESET}  ${c.DIM}$shortId${c.RESET}  ($stepCount steps)")
+
+            val ruler = "  ${c.DIM}${ "\u2500".repeat(55)}${c.RESET}"
+            var sectionOpen = false
+
+            blueprint.steps.forEachIndexed { i, step ->
+                if (!sectionOpen) {
+                    sb.appendLine(ruler)
+                    sectionOpen = true
+                }
+
+                val emoji = stepStatusEmoji(i, executionResult)
+                val summary = summarizeStep(step)
+                sb.appendLine("  $emoji ${i + 1}. ${c.BRIGHT_CYAN}${step.type}${c.RESET}  $summary")
+
+                // FILE_WRITE: 실선 닫고 → 코드 → 다음 step에서 다시 열림
+                if (step.type == BlueprintStepType.FILE_WRITE) {
+                    val content = step.params["content"]
+                    if (!content.isNullOrBlank()) {
+                        val path = step.params["path"] ?: ""
+                        val lang = detectLanguage(path)
+
+                        sb.appendLine(ruler)
+                        sectionOpen = false
+
+                        sb.appendLine()
+                        val highlighted = highlightCode(content.trimEnd(), lang)
+                        for (line in highlighted.lines()) {
+                            sb.appendLine(line)
+                        }
+                        sb.appendLine()
+                    }
+                }
+            }
+
+            if (sectionOpen) {
+                sb.appendLine(ruler)
+            }
+        }
+
+        // Result 표시
+        if (executionResult != null) {
+            sb.appendLine()
+            val resultLineWidth = 41
+
+            if (executionResult.isSuccess) {
+                sb.appendLine("  ${c.BRIGHT_GREEN}\u2728 실행 완료${c.RESET}")
+                sb.appendLine("  ${c.DIM}\u2500\u2500 결과 ${ "\u2500".repeat(resultLineWidth)}${c.RESET}")
+
+                // 파일 작업 요약
+                val fileSteps = blueprint?.steps?.filter {
+                    it.type in listOf(
+                        BlueprintStepType.FILE_WRITE, BlueprintStepType.FILE_MKDIR,
+                        BlueprintStepType.FILE_COPY, BlueprintStepType.FILE_MOVE,
+                        BlueprintStepType.FILE_READ, BlueprintStepType.FILE_DELETE
+                    )
+                } ?: emptyList()
+
+                val cmdSteps = blueprint?.steps?.filter {
+                    it.type == BlueprintStepType.COMMAND
+                } ?: emptyList()
+
+                val apiSteps = blueprint?.steps?.filter {
+                    it.type == BlueprintStepType.API_CALL
+                } ?: emptyList()
+
+                if (fileSteps.isNotEmpty()) {
+                    val fileSuccessCount = countSuccessSteps(fileSteps, blueprint, executionResult)
+                    val fileFailCount = fileSteps.size - fileSuccessCount
+                    if (fileFailCount == 0) {
+                        sb.appendLine("  파일 작업  ${c.BRIGHT_GREEN}${fileSteps.size}개 성공${c.RESET}")
+                    } else {
+                        sb.appendLine("  파일 작업  ${c.BRIGHT_GREEN}${fileSuccessCount}개 성공${c.RESET}  ${c.YELLOW}${fileFailCount}개 실패${c.RESET}")
+                    }
+                }
+
+                if (cmdSteps.isNotEmpty()) {
+                    val cmdSuccessCount = countSuccessSteps(cmdSteps, blueprint, executionResult)
+                    val cmdFailCount = cmdSteps.size - cmdSuccessCount
+                    if (cmdFailCount == 0) {
+                        sb.appendLine("  명령 실행  ${c.BRIGHT_GREEN}${cmdSteps.size}개 성공${c.RESET}")
+                    } else {
+                        sb.appendLine("  명령 실행  ${c.YELLOW}${cmdFailCount}개 실패${c.RESET} \u2014 수동 확인 필요")
+                    }
+                }
+
+                if (apiSteps.isNotEmpty()) {
+                    val apiSuccessCount = countSuccessSteps(apiSteps, blueprint, executionResult)
+                    val apiFailCount = apiSteps.size - apiSuccessCount
+                    if (apiFailCount == 0) {
+                        sb.appendLine("  API 호출  ${c.BRIGHT_GREEN}${apiSteps.size}개 성공${c.RESET}")
+                    } else {
+                        sb.appendLine("  API 호출  ${c.YELLOW}${apiFailCount}개 실패${c.RESET}")
+                    }
+                }
+
+                // 소요 시간
+                val totalMs = executionResult.runnerResult.results.sumOf { r -> r.meta.durationMs }
+                sb.appendLine("  소요 시간  ${formatDuration(totalMs)}")
+
+                sb.appendLine("  ${c.DIM}${ "\u2500".repeat(resultLineWidth + 6)}${c.RESET}")
+            } else {
+                sb.appendLine("  ${c.RED}\u274C 실행 실패${c.RESET}")
+                sb.appendLine("  ${c.DIM}\u2500\u2500 결과 ${ "\u2500".repeat(resultLineWidth)}${c.RESET}")
+
+                // 실패 상세
+                val results = executionResult.runnerResult.results
+                results.forEach { r ->
+                    if (r is ExecutionResult.Failure) {
+                        val stepId = r.meta.stepId
+                        sb.appendLine("  ${c.RED}실패: $stepId: ${r.error.message}${c.RESET}")
+                    }
+                }
+
+                sb.appendLine("  ${c.DIM}${ "\u2500".repeat(resultLineWidth + 6)}${c.RESET}")
+            }
+        }
+
+        return sb.toString().trimEnd()
+    }
+
+    /**
+     * Step의 성공/실패 이모지 결정
+     */
+    private fun stepStatusEmoji(
+        index: Int,
+        executionResult: BlueprintExecutionResult?
+    ): String {
+        if (executionResult == null) return "\u2B55"  // ⭕ (pending)
+
+        val results = executionResult.runnerResult.results
+        if (index >= results.size) return "\u2B55"
+
+        return when (results[index]) {
+            is ExecutionResult.Success -> "\u2705"   // ✅
+            is ExecutionResult.Failure -> "\u274C"   // ❌
+            is ExecutionResult.Cancelled -> "\u26A0\uFE0F"  // ⚠️
+        }
+    }
+
+    /**
+     * Step 요약 — content를 숨기고 핵심만 표시
+     */
+    fun summarizeStep(step: BlueprintStep): String {
+        return when (step.type) {
+            BlueprintStepType.FILE_MKDIR -> {
+                val path = step.params["path"] ?: ""
+                lastSegment(path) + "/"
+            }
+            BlueprintStepType.FILE_WRITE -> {
+                val path = step.params["path"] ?: ""
+                val content = step.params["content"] ?: ""
+                val size = formatFileSize(content.length.toLong())
+                "${lastTwoSegments(path)}  ${c.DIM}($size)${c.RESET}"
+            }
+            BlueprintStepType.FILE_READ -> {
+                val path = step.params["path"] ?: ""
+                lastTwoSegments(path)
+            }
+            BlueprintStepType.FILE_COPY, BlueprintStepType.FILE_MOVE -> {
+                val source = step.params["source"] ?: ""
+                val target = step.params["target"] ?: ""
+                "${fileName(source)} \u2192 ${fileName(target)}"
+            }
+            BlueprintStepType.FILE_DELETE -> {
+                val path = step.params["path"] ?: ""
+                lastSegment(path)
+            }
+            BlueprintStepType.COMMAND -> {
+                val cmd = step.params["command"] ?: ""
+                val args = step.params["args"] ?: ""
+                "$cmd $args".trim().take(60)
+            }
+            BlueprintStepType.API_CALL -> {
+                val method = step.params["method"] ?: "GET"
+                val url = step.params["url"] ?: ""
+                "$method $url".take(60)
+            }
+            BlueprintStepType.NOOP -> "no-op"
+        }
+    }
+
+    /**
+     * 바이트 수를 KB 단위로 포맷
+     */
+    private fun formatFileSize(bytes: Long): String {
+        return if (bytes < 1024) {
+            "$bytes B"
+        } else {
+            val kb = bytes / 1024.0
+            "%.1f KB".format(kb)
+        }
+    }
+
+    /**
+     * 밀리초를 읽기 좋은 시간으로 포맷
+     */
+    private fun formatDuration(ms: Long): String {
+        return if (ms < 1000) {
+            "${ms}ms"
+        } else {
+            "%.1fs".format(ms / 1000.0)
+        }
+    }
+
+    /**
+     * ANSI 이스케이프 제거 — 가시 문자 수 계산용
+     */
+    private fun stripAnsi(text: String): String {
+        return text.replace(Regex("\u001B\\[[0-9;]*m"), "")
+    }
+
+    /**
+     * 경로의 마지막 segment
+     */
+    private fun lastSegment(path: String): String {
+        val normalized = path.replace("\\", "/").trimEnd('/')
+        return normalized.substringAfterLast("/")
+    }
+
+    /**
+     * 경로의 마지막 2 segment
+     */
+    private fun lastTwoSegments(path: String): String {
+        val normalized = path.replace("\\", "/").trimEnd('/')
+        val parts = normalized.split("/")
+        return if (parts.size >= 2) {
+            "${parts[parts.size - 2]}/${parts[parts.size - 1]}"
+        } else {
+            normalized
+        }
+    }
+
+    /**
+     * 경로에서 파일명만 추출
+     */
+    private fun fileName(path: String): String = lastSegment(path)
+
+    /**
+     * 파일 경로에서 언어 감지
+     */
+    private fun detectLanguage(path: String): String {
+        val ext = path.substringAfterLast(".", "").lowercase()
+        return when (ext) {
+            "kt", "kts" -> "kotlin"
+            "java" -> "java"
+            "js", "mjs", "cjs" -> "javascript"
+            "ts", "tsx" -> "typescript"
+            "py" -> "python"
+            "sql" -> "sql"
+            "sh", "bash" -> "bash"
+            "json" -> "json"
+            "yaml", "yml" -> "yaml"
+            "xml", "html", "htm" -> "xml"
+            "css", "scss" -> "css"
+            "rb" -> "ruby"
+            "go" -> "go"
+            "rs" -> "rust"
+            "c", "h" -> "c"
+            "cpp", "hpp", "cc" -> "cpp"
+            else -> ""
+        }
+    }
+
+    /**
+     * 특정 step 유형들의 성공 개수 계산
+     */
+    private fun countSuccessSteps(
+        steps: List<BlueprintStep>,
+        blueprint: Blueprint?,
+        executionResult: BlueprintExecutionResult
+    ): Int {
+        if (blueprint == null) return 0
+        val results = executionResult.runnerResult.results
+        var count = 0
+        for (step in steps) {
+            val idx = blueprint.steps.indexOf(step)
+            if (idx in results.indices && results[idx] is ExecutionResult.Success) {
+                count++
+            }
+        }
+        return count
     }
 }

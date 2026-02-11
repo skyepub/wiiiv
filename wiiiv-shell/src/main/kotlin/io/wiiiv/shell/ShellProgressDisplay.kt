@@ -38,6 +38,7 @@ class ShellProgressDisplay : GovernorProgressListener {
             ProgressPhase.BLUEPRINT_CREATING -> Triple("", c.BRIGHT_BLUE, "Blueprint 생성")
             ProgressPhase.EXECUTING -> Triple("", c.GREEN, "실행 중")
             ProgressPhase.COMMAND_RUNNING -> Triple("", c.DIM, "명령 실행")
+            ProgressPhase.IMAGE_ANALYZING -> Triple("", c.BRIGHT_CYAN, "이미지 분석")
             ProgressPhase.DONE -> Triple("", c.BRIGHT_GREEN, "완료")
         }
 

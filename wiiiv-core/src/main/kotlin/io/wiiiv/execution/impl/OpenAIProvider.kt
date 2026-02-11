@@ -64,7 +64,25 @@ class OpenAIProvider(
             putJsonArray("messages") {
                 addJsonObject {
                     put("role", JsonPrimitive("user"))
-                    put("content", JsonPrimitive(request.prompt))
+                    if (request.images.isEmpty()) {
+                        put("content", JsonPrimitive(request.prompt))
+                    } else {
+                        putJsonArray("content") {
+                            addJsonObject {
+                                put("type", JsonPrimitive("text"))
+                                put("text", JsonPrimitive(request.prompt))
+                            }
+                            for (image in request.images) {
+                                addJsonObject {
+                                    put("type", JsonPrimitive("image_url"))
+                                    putJsonObject("image_url") {
+                                        val base64 = java.util.Base64.getEncoder().encodeToString(image.data)
+                                        put("url", JsonPrimitive("data:${image.mimeType};base64,$base64"))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

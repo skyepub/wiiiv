@@ -226,6 +226,21 @@ interface LlmProvider {
 }
 
 /**
+ * LLM 이미지 데이터 (Vision API용)
+ */
+data class LlmImage(
+    val data: ByteArray,
+    val mimeType: String  // "image/png", "image/jpeg", "image/gif", "image/webp"
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is LlmImage) return false
+        return data.contentEquals(other.data) && mimeType == other.mimeType
+    }
+    override fun hashCode(): Int = 31 * data.contentHashCode() + mimeType.hashCode()
+}
+
+/**
  * LLM Request
  */
 data class LlmRequest(
@@ -233,7 +248,8 @@ data class LlmRequest(
     val prompt: String,
     val model: String,
     val maxTokens: Int,
-    val params: Map<String, String> = emptyMap()
+    val params: Map<String, String> = emptyMap(),
+    val images: List<LlmImage> = emptyList()
 )
 
 /**

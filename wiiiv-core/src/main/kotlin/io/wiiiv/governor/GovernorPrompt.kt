@@ -23,9 +23,9 @@ object GovernorPrompt {
 
 ## 행동 원칙
 
-### 1. 일반 대화/지식 질문
-- 인사, 잡담, 지식 질문은 직접 답변한다
-- 예: "안녕", "Kotlin이 뭐야?", "오늘 기분 어때?"
+### 1. 일반 대화/지식 질문 ⚡ 중요!
+- 사용자가 무언가를 **실행해달라고 요청**하지 않는 한, 대화는 REPLY로 처리한다
+- 인사, 잡담, 지식 질문, 감상, 정보 제공, 후속 대화 → 모두 REPLY
 - action: REPLY
 
 ### 2. 즉시 실행 가능한 단순 요청 ⚡ 중요!
@@ -44,7 +44,8 @@ object GovernorPrompt {
 - action: ASK
 
 ### 4. 확인 요청
-- Spec이 완성되면 사용자에게 확인을 받는다
+- **복잡한 작업**(PROJECT_CREATE, API_WORKFLOW)의 Spec이 완성되었을 때만 확인을 요청한다
+- 단순 대화, 지식 질문, 이미지 분석, 파일 읽기 등에는 CONFIRM을 절대 사용하지 마라
 - 수집된 내용을 요약해서 보여준다
 - action: CONFIRM
 
@@ -217,13 +218,13 @@ object GovernorPrompt {
 
 ## 작업 유형 분류 기준
 
+- CONVERSATION: 일반 대화, 지식 질문, 감상, 후속 대화, 이미지에 대한 대화 — **판단이 애매하면 CONVERSATION으로 분류하라**
 - FILE_READ: 파일 읽기, 내용 보기
 - FILE_WRITE: 파일 생성, 쓰기, 수정
 - FILE_DELETE: 파일/폴더 삭제
 - COMMAND: 셸 명령어 실행
 - PROJECT_CREATE: 프로젝트 생성, 시스템 구축 (복잡한 작업)
-- INFORMATION: 외부 정보 조회 (날씨, 검색 등)
-- CONVERSATION: 일반 대화, 지식 질문
+- INFORMATION: 외부 정보 조회 (날씨, 검색 등) — 사용자가 정보를 **제공**하는 것은 INFORMATION이 아니라 CONVERSATION이다
 - API_WORKFLOW: 외부 API를 반복 호출하는 워크플로우 (예: "사용자 주문 상태 변경해줘", "API로 데이터 조회해줘")
 
 ## 한국어 API 워크플로우 패턴
@@ -240,6 +241,12 @@ object GovernorPrompt {
 - API/복잡한 작업은 한 턴에 하나의 Blueprint만 실행하라
 - 완료되었으면 REPLY, 아직 필요하면 EXECUTE로 응답하라
 
+### 7. 이미지 분석
+- 사용자가 이미지를 첨부하면 이미지 내용을 분석하고 질문에 답한다
+- 명시적 질문이 없으면 이미지를 종합적으로 설명한다
+- 이미지 속 텍스트가 있으면 추출하여 보여준다
+- action: REPLY (이미지 분석은 별도 실행이 필요하지 않다)
+
 """.trimIndent()
 
     /**
@@ -251,10 +258,17 @@ object GovernorPrompt {
         executionHistory: List<TurnExecution> = emptyList(),
         taskList: List<TaskSlot> = emptyList(),
         ragContext: String? = null,
-        workspace: String? = null
+        workspace: String? = null,
+        imageCount: Int = 0
     ): String = buildString {
         appendLine(DEFAULT)
         appendLine()
+
+        if (imageCount > 0) {
+            appendLine("## 첨부 이미지")
+            appendLine("사용자가 ${imageCount}개의 이미지를 첨부했습니다. 이미지가 메시지에 포함되어 있으니 분석하여 답변하세요.")
+            appendLine()
+        }
 
         if (workspace != null) {
             appendLine("## 워크스페이스")
@@ -327,7 +341,7 @@ object GovernorPrompt {
                 appendLine()
             }
 
-            if (draftSpec.isComplete()) {
+            if (draftSpec.isComplete() && draftSpec.requiresExecution()) {
                 appendLine("### Spec 상태: 완성됨 (확인 필요)")
             }
         } else {

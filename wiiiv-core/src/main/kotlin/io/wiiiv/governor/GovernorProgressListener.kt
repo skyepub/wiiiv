@@ -22,5 +22,6 @@ enum class ProgressPhase {
     BLUEPRINT_CREATING,
     EXECUTING,
     COMMAND_RUNNING,
+    IMAGE_ANALYZING,
     DONE
 }

@@ -222,15 +222,25 @@ fun main() = runBlocking {
             break
         }
 
-        // 슬래시 명령 처리 — Governor를 우회
-        if (CommandDispatcher.isCommand(input)) {
+        // 이미지 경로 감지 (슬래시 명령보다 먼저 — /path/to/img.png 가 명령으로 오인되지 않도록)
+        val (textPart, detectedImages) = ImageInputParser.parse(input)
+
+        // 슬래시 명령 처리 — 이미지가 없을 때만 (이미지 경로는 /로 시작하므로)
+        if (detectedImages.isEmpty() && CommandDispatcher.isCommand(input)) {
             CommandDispatcher.dispatch(input, shellCtx)
             continue
         }
 
         try {
+            val effectiveText = textPart.ifBlank { "이 이미지를 분석하고 설명해주세요." }
+
+            if (detectedImages.isNotEmpty()) {
+                val sizeKB = detectedImages.sumOf { it.data.size } / 1024
+                println("      ${DIM}[image: ${detectedImages.size}장, ${sizeKB}KB]${RESET}")
+            }
+
             progressDisplay.reset()
-            var response = governor.chat(session.sessionId, input)
+            var response = governor.chat(session.sessionId, effectiveText, detectedImages)
             progressDisplay.ensureNewline()
             var continuations = 0
 

@@ -7,6 +7,7 @@ import io.wiiiv.dacs.DACSResult
 import io.wiiiv.dacs.Consensus
 import io.wiiiv.execution.HttpMethod
 import io.wiiiv.execution.LlmAction
+import io.wiiiv.execution.impl.LlmImage
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
 import io.wiiiv.rag.RagPipeline
@@ -95,7 +96,7 @@ class ConversationalGovernor(
      * @param userMessage 사용자 메시지
      * @return Governor 응답
      */
-    suspend fun chat(sessionId: String, userMessage: String): ConversationResponse {
+    suspend fun chat(sessionId: String, userMessage: String, images: List<LlmImage> = emptyList()): ConversationResponse {
         val session = sessions[sessionId]
             ?: return ConversationResponse(
                 action = ActionType.CANCEL,
@@ -121,9 +122,12 @@ class ConversationalGovernor(
         }
 
         // LLM으로 다음 행동 결정
+        if (images.isNotEmpty()) {
+            emitProgress(ProgressPhase.IMAGE_ANALYZING, "${images.size}개 이미지 분석 중...")
+        }
         emitProgress(ProgressPhase.LLM_THINKING, "다음 행동 결정 중...")
         val governorAction = try {
-            decideAction(session, userMessage)
+            decideAction(session, userMessage, images)
         } catch (e: Exception) {
             GovernorAction(
                 action = ActionType.REPLY,
@@ -169,7 +173,7 @@ class ConversationalGovernor(
     /**
      * LLM을 통해 다음 행동 결정
      */
-    private suspend fun decideAction(session: ConversationSession, userMessage: String): GovernorAction {
+    private suspend fun decideAction(session: ConversationSession, userMessage: String, images: List<LlmImage> = emptyList()): GovernorAction {
         // RAG 검색 — 사용자 메시지로 관련 문서 조회
         val ragContext = consultRag(userMessage, session.draftSpec)
 
@@ -179,7 +183,8 @@ class ConversationalGovernor(
             executionHistory = session.context.executionHistory,
             taskList = session.context.tasks.values.toList(),
             ragContext = ragContext,
-            workspace = session.context.workspace
+            workspace = session.context.workspace,
+            imageCount = images.size
         )
 
         // System prompt + 사용자 메시지를 하나의 프롬프트로 결합
@@ -195,7 +200,8 @@ class ConversationalGovernor(
                 action = LlmAction.COMPLETE,
                 prompt = fullPrompt,
                 model = model ?: llmProvider.defaultModel,
-                maxTokens = 2000
+                maxTokens = 2000,
+                images = images
             )
         )
 

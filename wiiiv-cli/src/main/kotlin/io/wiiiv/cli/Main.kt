@@ -50,14 +50,16 @@ fun main(args: Array<String>) = runBlocking {
     }
     println("$pad${BRIGHT_CYAN}[INFO]${RESET} Server connected")
 
-    // 인증
-    if (!authenticate(client, connArgs, terminal, pad)) {
+    // 인증 (출력 줄 수 반환, -1이면 실패)
+    val authLines = authenticate(client, connArgs, terminal, pad)
+    if (authLines < 0) {
         client.close()
         return@runBlocking
     }
 
-    // === 로그인 성공 후 로고 애니메이션 ===
-    println()
+    // === 접속 정보 지우고 로고 애니메이션 ===
+    val connLines = 2 + authLines  // Connecting + Server connected + auth 출력
+    repeat(connLines) { print("\u001B[A\u001B[2K") }  // 커서 위로 + 줄 삭제
 
     val UP7 = "\u001B[7A"
     val logoLines = listOf(
@@ -301,14 +303,14 @@ fun main(args: Array<String>) = runBlocking {
  * - isAutoLogin → autoLogin() → 토큰 저장
  * - username 있음 → 저장된 토큰 시도 → 실패 시 비밀번호 프롬프트
  *
- * @return true 인증 성공, false 실패
+ * @return 출력한 줄 수 (성공), -1 (실패)
  */
 private suspend fun authenticate(
     client: WiiivApiClient,
     connArgs: ConnectionArgs,
     terminal: Terminal,
     pad: String
-): Boolean {
+): Int {
     val BRIGHT_CYAN = "\u001B[96m"
     val RESET = "\u001B[0m"
     val RED = "\u001B[31m"
@@ -318,10 +320,10 @@ private suspend fun authenticate(
             val token = client.autoLogin()
             CredentialStore.saveToken(connArgs.credentialKey(), "auto", token)
             println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated")
-            true
+            1
         } catch (e: Exception) {
             println("$pad${RED}[ERROR]${RESET} Login failed: ${e.message}")
-            false
+            -1
         }
     }
 
@@ -334,7 +336,7 @@ private suspend fun authenticate(
         client.setToken(saved.token)
         if (client.validateToken()) {
             println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated as $username (saved credential)")
-            return true
+            return 1
         }
         // 만료 — 삭제 후 비밀번호 프롬프트로 진행
         CredentialStore.removeToken(hostKey)
@@ -345,7 +347,7 @@ private suspend fun authenticate(
     if (password == null) {
         println()
         println("$pad${RED}[ERROR]${RESET} Login cancelled")
-        return false
+        return -1
     }
     println()
 
@@ -353,10 +355,10 @@ private suspend fun authenticate(
         val token = client.login(username, password)
         CredentialStore.saveToken(hostKey, username, token)
         println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated as $username")
-        true
+        2  // Password 줄 + Authenticated 줄
     } catch (e: Exception) {
         println("$pad${RED}[ERROR]${RESET} Login failed: ${e.message}")
-        false
+        -1
     }
 }
 

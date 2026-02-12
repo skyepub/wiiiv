@@ -107,7 +107,7 @@ fun main(args: Array<String>) = runBlocking {
     println("${BRIGHT_CYAN}                  o8o   o8o   o8o${RESET}")
     println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
     println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
-    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v3.0  2025-${RESET}")
+    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v2.2  2025-${RESET}")
     println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
     println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
     println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")

@@ -1,4 +1,4 @@
-# wiiiv 프로젝트 구조 v3.0
+# wiiiv 프로젝트 구조 v2.2
 
 > 2026-02-12 구조 재설계 계획
 >
@@ -37,7 +37,7 @@ wiiiv/                      <- git root (모노레포)
 
 ---
 
-## 새 구조 (v3.0)
+## 새 구조 (v2.2)
 
 ```
 wiiiv/                          <- git root (모노레포 유지)
@@ -125,7 +125,7 @@ wiiiv-shell ──(in-process)──> wiiiv-core      <- 직접 호출 (문제)
 wiiiv-cli   ──(HTTP)────────> wiiiv-api ──> wiiiv-core
 ```
 
-### 목표 (v3.0)
+### 목표 (v2.2)
 
 ```
 wiiiv-cli      ──(HTTP/WS)──> wiiiv-server ──> wiiiv-core

@@ -450,9 +450,9 @@ DACS는 Gate가 아니다:
 
 ---
 
-## [완료] v3.0 프로젝트 구조 재설계
+## [완료] v2.2 프로젝트 구조 재설계
 
-> 상세 계획: `docs/project-structure-v3.0.md`
+> 상세 계획: `docs/project-structure-v2.2.md`
 
 ### 목표 구조
 
@@ -483,7 +483,7 @@ wiiiv/                          <- git root (모노레포 유지)
 ### 진행 상태
 
 - [x] 구조 논의 및 결정 완료
-- [x] 계획 문서 작성 (`docs/project-structure-v3.0.md`)
+- [x] 계획 문서 작성 (`docs/project-structure-v2.2.md`)
 - [x] CLAUDE.md 반영
 - [x] 1단계 완료 (폴더 이동 + 패키지 리네임)
 - [x] 2단계 완료 (서버 대화형 세션 API + SSE)

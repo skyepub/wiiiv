@@ -22,7 +22,6 @@ fun main(args: Array<String>) = runBlocking {
         .build()
     System.setOut(PrintStream(terminal.output(), true, StandardCharsets.UTF_8))
 
-    // Logo animation uses raw ANSI codes (including 24-bit RGB)
     val CYAN = "\u001B[36m"
     val BRIGHT_CYAN = "\u001B[96m"
     val WHITE = "\u001B[97m"
@@ -30,78 +29,9 @@ fun main(args: Array<String>) = runBlocking {
     val RESET = "\u001B[0m"
 
     val line = "\u2500".repeat(59)
-
-    fun animPrint(text: String, delayMs: Long = 30) {
-        println(text)
-        System.out.flush()
-        Thread.sleep(delayMs)
-    }
-
-    val UP7 = "\u001B[7A"
-    val logoLines = listOf(
-        """                  o8o   o8o   o8o""",
-        """                  `"'   `"'   `"'""",
-        """oooo oooo    ooo oooo  oooo  oooo  oooo    ooo""",
-        """ `88. `88.  .8'  `888  `888  `888   `88.  .8'""",
-        """  `88..]88..8'    888   888   888    `88..8'""",
-        """   `888'`888'     888   888   888     `888'""",
-        """    `8'  `8'     o888o o888o o888o     `8'"""
-    )
-
-    fun printLogo(color: String) {
-        for (l in logoLines) { println("$color$l$RESET") }
-        System.out.flush()
-    }
-
-    // separator
-    println("${DIM}$line${RESET}")
-
-    // smooth breathing with 24-bit RGB gradient
-    val steps = 12
-    val minV = 35
-    val maxV = 255
-    fun cyanRgb(v: Int) = "\u001B[38;2;0;${v};${v}m"
-
-    // initial: dim
-    printLogo(cyanRgb(minV))
-    Thread.sleep(300)
-
-    // fade up: dim → bright
-    for (i in 1..steps) {
-        val v = minV + (maxV - minV) * i / steps
-        print(UP7)
-        printLogo(cyanRgb(v))
-        Thread.sleep(60)
-    }
-    Thread.sleep(150)
-
-    // fade down: bright → dim
-    for (i in steps downTo 0) {
-        val v = minV + (maxV - minV) * i / steps
-        print(UP7)
-        printLogo(cyanRgb(v))
-        Thread.sleep(60)
-    }
-    Thread.sleep(200)
-
-    // final: settle with info text
-    print(UP7)
-    println("${BRIGHT_CYAN}                  o8o   o8o   o8o${RESET}")
-    println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
-    println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
-    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v3.0  2025-${RESET}")
-    println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
-    println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
-    println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")
-
-    println()
-    animPrint("  ${WHITE}- A Natural Language-Based Multi-Decision Execution System${RESET}", 30)
-    println()
-    println()
-
     val pad = " ".repeat(9)
 
-    // === 서버 접속 ===
+    // === 서버 접속 + 인증 (로고 전) ===
     val connArgs = ConnectionArgs.parse(args)
     val serverUrl = if (connArgs.host != "localhost" || connArgs.port != 8235) {
         connArgs.toServerUrl()
@@ -125,6 +55,64 @@ fun main(args: Array<String>) = runBlocking {
         client.close()
         return@runBlocking
     }
+
+    // === 로그인 성공 후 로고 애니메이션 ===
+    println()
+
+    val UP7 = "\u001B[7A"
+    val logoLines = listOf(
+        """                  o8o   o8o   o8o""",
+        """                  `"'   `"'   `"'""",
+        """oooo oooo    ooo oooo  oooo  oooo  oooo    ooo""",
+        """ `88. `88.  .8'  `888  `888  `888   `88.  .8'""",
+        """  `88..]88..8'    888   888   888    `88..8'""",
+        """   `888'`888'     888   888   888     `888'""",
+        """    `8'  `8'     o888o o888o o888o     `8'"""
+    )
+
+    fun printLogo(color: String) {
+        for (l in logoLines) { println("$color$l$RESET") }
+        System.out.flush()
+    }
+
+    println("${DIM}$line${RESET}")
+
+    val steps = 12
+    val minV = 35
+    val maxV = 255
+    fun cyanRgb(v: Int) = "\u001B[38;2;0;${v};${v}m"
+
+    printLogo(cyanRgb(minV))
+    Thread.sleep(300)
+
+    for (i in 1..steps) {
+        val v = minV + (maxV - minV) * i / steps
+        print(UP7)
+        printLogo(cyanRgb(v))
+        Thread.sleep(60)
+    }
+    Thread.sleep(150)
+
+    for (i in steps downTo 0) {
+        val v = minV + (maxV - minV) * i / steps
+        print(UP7)
+        printLogo(cyanRgb(v))
+        Thread.sleep(60)
+    }
+    Thread.sleep(200)
+
+    print(UP7)
+    println("${BRIGHT_CYAN}                  o8o   o8o   o8o${RESET}")
+    println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
+    println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
+    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v3.0  2025-${RESET}")
+    println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
+    println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
+    println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")
+
+    println()
+    println("  ${WHITE}- A Natural Language-Based Multi-Decision Execution System${RESET}")
+    println()
 
     // workspace 결정
     val workspace = System.getenv("WIIIV_WORKSPACE")

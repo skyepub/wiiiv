@@ -2,6 +2,7 @@ package io.wiiiv.server
 
 import io.wiiiv.server.registry.WiiivRegistry
 import io.wiiiv.dacs.SimpleDACS
+import io.wiiiv.governor.ConversationalGovernor
 import io.wiiiv.governor.LlmGovernor
 import io.wiiiv.governor.SimpleGovernor
 import org.junit.jupiter.api.Test
@@ -49,6 +50,20 @@ class WiringVerificationTest {
                 "With API key, DACS should be HybridDACS"
             )
         }
+    }
+
+    @Test
+    fun `Registry has ConversationalGovernor`() {
+        val convGov = WiiivRegistry.conversationalGovernor
+        assertNotNull(convGov)
+        assertTrue(convGov is ConversationalGovernor)
+        assertEquals("gov-server", convGov.id)
+    }
+
+    @Test
+    fun `Registry has SessionManager`() {
+        val sessionManager = WiiivRegistry.sessionManager
+        assertNotNull(sessionManager)
     }
 
     @Test

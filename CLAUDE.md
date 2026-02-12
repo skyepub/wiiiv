@@ -141,7 +141,8 @@ wiiiv/
 │           ├── config/      # 서버 설정 (Auth, CORS, Routing)
 │           ├── dto/         # 요청/응답 DTO
 │           ├── registry/    # 레지스트리
-│           └── routes/      # API 라우트
+│           ├── routes/      # API 라우트
+│           └── session/     # 세션 관리 (SessionManager, SseProgressBridge)
 ├── wiiiv-cli/               # 대화형 터미널 클라이언트 (현 wiiiv-shell)
 │   └── src/main/kotlin/io/wiiiv/cli/
 │       ├── Main.kt          # 진입점
@@ -225,6 +226,16 @@ wiiiv/
 | GET | `/api/v2/rag/documents` | 문서 목록 조회 |
 | DELETE | `/api/v2/rag/{documentId}` | 문서 삭제 |
 | DELETE | `/api/v2/rag` | 저장소 초기화 |
+
+### Session (대화형 세션)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/api/v2/sessions` | 세션 생성 |
+| GET | `/api/v2/sessions` | 내 세션 목록 |
+| GET | `/api/v2/sessions/{id}` | 세션 정보 |
+| DELETE | `/api/v2/sessions/{id}` | 세션 종료 |
+| POST | `/api/v2/sessions/{id}/chat` | 메시지 전송 (SSE 스트리밍 응답) |
 
 ---
 
@@ -384,7 +395,9 @@ wiiiv rag size                   # 저장소 크기
 | **wiiiv-cli** | **SystemCommandTest** | **11** |
 | **wiiiv-cli** | **WiiivClientTest** | **11** |
 | wiiiv-core | LlmGovernorE2ETest | 2 |
-| **wiiiv-server** | **WiringVerificationTest** | **3** |
+| **wiiiv-server** | **SessionManagerTest** | **9** |
+| **wiiiv-server** | **SessionRoutesTest** | **10** |
+| **wiiiv-server** | **WiringVerificationTest** | **5** |
 | **wiiiv-cli** | **E2EIntegrationTest** | **8** |
 
 ---
@@ -457,7 +470,7 @@ wiiiv/                          <- git root (모노레포 유지)
 ### 마이그레이션 단계
 
 - [x] **1단계**: 폴더 이동 + 리네임 (wiiiv-api → wiiiv-backend/wiiiv-server 등)
-- [ ] **2단계**: 서버에 대화형 세션 API 추가 (WebSocket/SSE)
+- [x] **2단계**: 서버에 대화형 세션 API 추가 (SSE 스트리밍)
 - [ ] **3단계**: wiiiv-cli를 서버 접속 클라이언트로 전환 (core 직접호출 제거)
 
 ### 현재 진행 상태

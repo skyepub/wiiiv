@@ -31,6 +31,11 @@ tasks.test {
 
 application {
     mainClass.set("io.wiiiv.shell.MainKt")
+    applicationDefaultJvmArgs = listOf(
+        "-Dfile.encoding=UTF-8",
+        "-Dstdout.encoding=UTF-8",
+        "-Dstderr.encoding=UTF-8"
+    )
 }
 
 tasks.named<JavaExec>("run") {

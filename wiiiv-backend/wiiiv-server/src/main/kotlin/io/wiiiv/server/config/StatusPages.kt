@@ -2,6 +2,7 @@ package io.wiiiv.server.config
 
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.plugins.*
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.wiiiv.server.dto.common.ApiError
@@ -9,6 +10,18 @@ import io.wiiiv.server.dto.common.ApiResponse
 
 fun Application.configureStatusPages() {
     install(StatusPages) {
+        exception<BadRequestException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ApiResponse.error<Unit>(
+                    ApiError(
+                        code = "BAD_REQUEST",
+                        message = cause.message ?: "Invalid request body"
+                    )
+                )
+            )
+        }
+
         exception<IllegalArgumentException> { call, cause ->
             call.respond(
                 HttpStatusCode.BadRequest,

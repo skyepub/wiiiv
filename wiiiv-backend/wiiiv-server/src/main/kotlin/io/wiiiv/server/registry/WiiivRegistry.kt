@@ -1,6 +1,7 @@
 package io.wiiiv.server.registry
 
 import io.wiiiv.blueprint.Blueprint
+import io.wiiiv.blueprint.BlueprintRunner
 import io.wiiiv.dacs.*
 import io.wiiiv.execution.*
 import io.wiiiv.execution.impl.*
@@ -11,6 +12,7 @@ import io.wiiiv.rag.embedding.MockEmbeddingProvider
 import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
+import io.wiiiv.server.session.SessionManager
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -44,12 +46,15 @@ object WiiivRegistry {
         SimpleDACS.DEFAULT  // Degraded Mode (개발 모드 - 느슨한 허용)
     }
 
-    // === Governor ===
+    // === Governor (기존 — /decisions, /blueprints, /executions 라우트용) ===
     val governor: Governor = LlmGovernor.create(
         dacs = dacs,
         llmProvider = llmProvider,
         model = if (llmProvider != null) "gpt-4o-mini" else null
     )
+
+    // === Blueprint Runner ===
+    val blueprintRunner = BlueprintRunner.create(compositeExecutor)
 
     // === Gates ===
     val gateLogger = InMemoryGateLogger()
@@ -77,6 +82,19 @@ object WiiivRegistry {
             vectorStore = InMemoryVectorStore("wiiiv-rag-store")
         )
     }
+
+    // === Conversational Governor (세션 API용) ===
+    val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
+        id = "gov-server",
+        dacs = dacs,
+        llmProvider = llmProvider,
+        model = if (llmProvider != null) "gpt-4o-mini" else null,
+        blueprintRunner = blueprintRunner,
+        ragPipeline = ragPipeline
+    )
+
+    // === Session Manager ===
+    val sessionManager = SessionManager(conversationalGovernor)
 
     // === Storage (In-Memory for now) ===
     private val blueprintStore = ConcurrentHashMap<String, Blueprint>()

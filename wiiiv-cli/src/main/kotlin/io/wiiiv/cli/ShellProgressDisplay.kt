@@ -1,18 +1,16 @@
 package io.wiiiv.cli
 
-import io.wiiiv.governor.GovernorProgressListener
-import io.wiiiv.governor.ProgressEvent
-import io.wiiiv.governor.ProgressPhase
+import io.wiiiv.cli.client.ProgressEventDto
+import io.wiiiv.cli.model.CliProgressPhase
 import java.util.Timer
 import java.util.TimerTask
 
 /**
  * Shell 진행 표시 — 스피너 애니메이션
  *
- * Governor 실행 단계마다 실시간으로 진행 상황을 표시한다.
- * 이벤트 사이 구간에도 스피너가 돌아서 시스템이 살아있음을 보여준다.
+ * 서버에서 수신한 SSE progress 이벤트를 표시한다.
  */
-class ShellProgressDisplay : GovernorProgressListener {
+class ShellProgressDisplay {
     private var startTime = System.currentTimeMillis()
     private var hasActiveProgress = false
     private val c = ShellColors
@@ -28,21 +26,25 @@ class ShellProgressDisplay : GovernorProgressListener {
     @Volatile private var currentStepInfo = ""
     @Volatile private var currentDetail = ""
 
-    override fun onProgress(event: ProgressEvent) {
+    /**
+     * 서버에서 수신한 progress 이벤트 처리
+     */
+    fun onServerProgress(event: ProgressEventDto) {
+        val phase = CliProgressPhase.fromString(event.phase)
         val stepInfo = if (event.totalSteps != null) " (${event.totalSteps} steps)" else ""
         val detail = event.detail?.let { " — $it" } ?: ""
 
-        val (_, color, label) = when (event.phase) {
-            ProgressPhase.LLM_THINKING -> Triple("", c.BRIGHT_CYAN, "LLM 판단 중")
-            ProgressPhase.DACS_EVALUATING -> Triple("", c.YELLOW, "DACS 합의 평가")
-            ProgressPhase.BLUEPRINT_CREATING -> Triple("", c.BRIGHT_BLUE, "Blueprint 생성")
-            ProgressPhase.EXECUTING -> Triple("", c.GREEN, "실행 중")
-            ProgressPhase.COMMAND_RUNNING -> Triple("", c.DIM, "명령 실행")
-            ProgressPhase.IMAGE_ANALYZING -> Triple("", c.BRIGHT_CYAN, "이미지 분석")
-            ProgressPhase.DONE -> Triple("", c.BRIGHT_GREEN, "완료")
+        val (color, label) = when (phase) {
+            CliProgressPhase.LLM_THINKING -> c.BRIGHT_CYAN to "LLM 판단 중"
+            CliProgressPhase.DACS_EVALUATING -> c.YELLOW to "DACS 합의 평가"
+            CliProgressPhase.BLUEPRINT_CREATING -> c.BRIGHT_BLUE to "Blueprint 생성"
+            CliProgressPhase.EXECUTING -> c.GREEN to "실행 중"
+            CliProgressPhase.COMMAND_RUNNING -> c.DIM to "명령 실행"
+            CliProgressPhase.IMAGE_ANALYZING -> c.BRIGHT_CYAN to "이미지 분석"
+            CliProgressPhase.DONE -> c.BRIGHT_GREEN to "완료"
         }
 
-        if (event.phase == ProgressPhase.DONE) {
+        if (phase == CliProgressPhase.DONE) {
             stopSpinner()
             val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
             val timeStr = String.format("%.1fs", elapsed)

@@ -1,8 +1,9 @@
 package io.wiiiv.cli.commands
 
-import io.wiiiv.governor.TaskStatus
 import io.wiiiv.cli.ShellColors
 import io.wiiiv.cli.ShellContext
+import io.wiiiv.cli.client.ControlRequest
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
@@ -20,56 +21,52 @@ object ControlCommands {
             return
         }
 
-        val context = ctx.session.context
-        val targetTask = context.tasks[targetId]
-
-        if (targetTask == null) {
-            println("  ${c.RED}Task #$targetId not found.${c.RESET} Use /tasks to see available tasks.")
-            return
+        runBlocking {
+            try {
+                val result = ctx.client.controlSession(
+                    ctx.sessionId,
+                    ControlRequest("switch", targetId = targetId)
+                )
+                println("  ${result.message}")
+            } catch (e: Exception) {
+                println("  ${c.RED}${e.message}${c.RESET}")
+            }
         }
-
-        if (targetTask.id == context.activeTaskId) {
-            println("  Task #${targetTask.id} is already active.")
-            return
-        }
-
-        // Suspend current work
-        val suspended = ctx.session.suspendCurrentWork()
-        if (suspended != null) {
-            println("  Task #${suspended.id} \"${suspended.label}\" suspended.")
-        }
-
-        // Activate target
-        targetTask.status = TaskStatus.ACTIVE
-        context.activeTaskId = targetTask.id
-        println("  Switched to Task #${targetTask.id} \"${targetTask.label}\".")
     }
 
     fun handleCancel(args: List<String>, ctx: ShellContext) {
         val c = ShellColors
 
         if (args.firstOrNull()?.lowercase() == "all") {
-            // /cancel all — requires confirmation
             if (ctx.confirm("Cancel all tasks and reset session?")) {
-                ctx.session.resetAll()
-                println("  All tasks cancelled. Session reset.")
+                runBlocking {
+                    try {
+                        val result = ctx.client.controlSession(
+                            ctx.sessionId,
+                            ControlRequest("cancelAll")
+                        )
+                        println("  ${result.message}")
+                    } catch (e: Exception) {
+                        println("  ${c.RED}${e.message}${c.RESET}")
+                    }
+                }
             } else {
                 println("  Cancelled.")
             }
             return
         }
 
-        // /cancel — current task only
-        val activeTask = ctx.session.context.activeTask
-        if (activeTask == null) {
-            println("  ${c.DIM}No active task to cancel.${c.RESET}")
-            return
+        runBlocking {
+            try {
+                val result = ctx.client.controlSession(
+                    ctx.sessionId,
+                    ControlRequest("cancel")
+                )
+                println("  ${result.message}")
+            } catch (e: Exception) {
+                println("  ${c.RED}${e.message}${c.RESET}")
+            }
         }
-
-        val label = activeTask.label
-        val id = activeTask.id
-        ctx.session.cancelCurrentTask()
-        println("  Task #$id \"$label\" cancelled.")
     }
 
     fun handleSet(args: List<String>, ctx: ShellContext) {
@@ -77,7 +74,6 @@ object ControlCommands {
         val settings = ctx.settings
 
         if (args.isEmpty()) {
-            // /set — show all settings
             println()
             println("  ${c.BRIGHT_CYAN}[SETTINGS]${c.RESET}")
             println()
@@ -157,7 +153,16 @@ object ControlCommands {
                 }
 
                 settings.workspace = resolved
-                ctx.session.context.workspace = resolved
+
+                // 서버에도 전달
+                runBlocking {
+                    try {
+                        ctx.client.controlSession(
+                            ctx.sessionId,
+                            ControlRequest("setWorkspace", workspace = resolved)
+                        )
+                    } catch (_: Exception) {}
+                }
                 println("  workspace = $resolved")
             }
             else -> {

@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
     application
+    id("com.github.johnrengelman.shadow")
 }
 
 dependencies {
@@ -48,12 +49,9 @@ tasks.named<JavaExec>("run") {
     jvmArgs("-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
 }
 
-tasks.jar {
+tasks.shadowJar {
     manifest {
         attributes["Main-Class"] = "io.wiiiv.cli.MainKt"
     }
-
-    // Fat JAR
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
+    mergeServiceFiles()
 }

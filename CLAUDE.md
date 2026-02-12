@@ -439,4 +439,43 @@ DACS는 Gate가 아니다:
 
 ---
 
+## [진행 중] v3.0 프로젝트 구조 재설계
+
+> 상세 계획: `docs/project-structure-v3.0.md`
+
+### 목표 구조
+
+```
+wiiiv/                          <- git root (모노레포 유지)
+├── wiiiv-backend/              <- 서버측 (Kotlin/Ktor)
+│   ├── wiiiv-core/             <- 엔진 라이브러리 (현재와 동일)
+│   └── wiiiv-server/           <- HTTP/WebSocket 서버 (현 wiiiv-api)
+├── wiiiv-cli/                  <- 터미널 클라이언트 (현 wiiiv-shell + wiiiv-cli 통합)
+│   (실행 바이너리: wiiiv)       <- 대화형 + 명령형 모두 지원
+├── wiiiv-frontend/             <- 웹 클라이언트 (향후)
+├── wiiiv-app/                  <- 데스크톱 클라이언트 (향후)
+└── docs/
+```
+
+### 핵심 원칙
+
+- 모든 클라이언트는 wiiiv-server에 접속한다 (core 직접 호출 금지)
+- 서버가 유일한 엔진 호스트다 (Governor, DACS, Executor는 서버에서만 실행)
+- MySQL 비유: wiiiv-server = mysqld, wiiiv(cli) = mysql
+
+### 마이그레이션 단계
+
+- [ ] **1단계**: 폴더 이동 + 리네임 (wiiiv-api → wiiiv-backend/wiiiv-server 등)
+- [ ] **2단계**: 서버에 대화형 세션 API 추가 (WebSocket/SSE)
+- [ ] **3단계**: wiiiv-cli를 서버 접속 클라이언트로 전환 (core 직접호출 제거)
+
+### 현재 진행 상태
+
+- [x] 구조 논의 및 결정 완료
+- [x] 계획 문서 작성 (`docs/project-structure-v3.0.md`)
+- [x] CLAUDE.md 반영
+- [ ] 1단계 착수 대기
+
+---
+
 *wiiiv / 하늘나무 / SKYTREE*

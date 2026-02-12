@@ -226,8 +226,8 @@ enum class TaskType(val displayName: String) {
     /** 프로젝트 생성 (복잡한 작업) */
     PROJECT_CREATE("프로젝트 생성"),
 
-    /** 정보 질문 (검색/API 호출 필요) */
-    INFORMATION("정보 조회"),
+    /** @deprecated CONVERSATION으로 통합. 하위 호환용으로 유지. */
+    INFORMATION("일반 대화"),
 
     /** 일반 대화 (실행 불필요) */
     CONVERSATION("일반 대화"),

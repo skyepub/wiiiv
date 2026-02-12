@@ -3,6 +3,7 @@ package io.wiiiv.shell
 import io.wiiiv.blueprint.BlueprintRunner
 import java.io.PrintStream
 import java.nio.charset.StandardCharsets
+import org.jline.terminal.TerminalBuilder
 import io.wiiiv.dacs.SimpleDACS
 import io.wiiiv.dacs.HybridDACS
 import io.wiiiv.execution.CompositeExecutor
@@ -24,8 +25,13 @@ import kotlinx.coroutines.runBlocking
  * ConversationalGovernor와 실시간으로 대화하는 REPL 환경
  */
 fun main() = runBlocking {
-    // UTF-8 출력 설정
-    System.setOut(PrintStream(System.out, true, StandardCharsets.UTF_8))
+    // JLine3 Terminal을 맨 처음 초기화 — 모든 출력보다 먼저
+    // System.out을 terminal.output()에 연결하여 터미널 인코딩 통일
+    val terminal = TerminalBuilder.builder()
+        .system(true)
+        .encoding(StandardCharsets.UTF_8)
+        .build()
+    System.setOut(PrintStream(terminal.output(), true, StandardCharsets.UTF_8))
 
     // Logo animation uses raw ANSI codes (including 24-bit RGB)
     val CYAN = "\u001B[36m"
@@ -187,7 +193,7 @@ fun main() = runBlocking {
     println("  ${DIM}$line${RESET}")
     println()
 
-    val inputReader = ShellInputReader()
+    val inputReader = ShellInputReader(terminal)
 
     // Shell 설정 및 컨텍스트
     val shellSettings = ShellSettings()

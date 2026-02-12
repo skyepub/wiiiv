@@ -2,7 +2,7 @@
 
 > 2026-02-12 구조 재설계 계획
 >
-> 상태: **계획** (미착수)
+> 상태: **1단계 완료**
 
 ---
 
@@ -88,11 +88,11 @@ MySQL Workbench = wiiiv-app         (데스크톱 클라이언트)
 
 ### 1단계: 구조 정리 (폴더 + 이름)
 
-- [ ] `wiiiv-api/` -> `wiiiv-backend/wiiiv-server/`
-- [ ] `wiiiv-core/` -> `wiiiv-backend/wiiiv-core/`
-- [ ] `wiiiv-shell/` + `wiiiv-cli/` -> `wiiiv-cli/` (이름만, 내부는 아직 shell 코드)
-- [ ] `build.gradle.kts`, `settings.gradle.kts` 수정
-- [ ] CLAUDE.md 업데이트
+- [x] `wiiiv-api/` -> `wiiiv-backend/wiiiv-server/` (패키지: io.wiiiv.api → io.wiiiv.server)
+- [x] `wiiiv-core/` -> `wiiiv-backend/wiiiv-core/`
+- [x] `wiiiv-shell/` -> `wiiiv-cli/` (패키지: io.wiiiv.shell → io.wiiiv.cli, 구 wiiiv-cli 삭제)
+- [x] `build.gradle.kts`, `settings.gradle.kts` 수정
+- [x] CLAUDE.md 업데이트
 
 ### 2단계: 서버에 대화형 API 추가
 

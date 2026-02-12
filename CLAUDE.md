@@ -126,35 +126,26 @@ RetryPolicy (재시도 규칙)
 ```
 wiiiv/
 ├── docs/                    # Canonical Spec 문서
-├── wiiiv-core/              # 핵심 실행 계층
-│   └── src/main/kotlin/io/wiiiv/
-│       ├── execution/       # Executor 계층
-│       ├── runner/          # Runner 계층
-│       ├── blueprint/       # Blueprint 계층
-│       ├── gate/            # Gate 계층
-│       ├── governor/        # Governor 계층
-│       ├── dacs/            # DACS 계층
-│       └── rag/             # RAG 계층 (벡터 검색)
-│           ├── embedding/   # 임베딩 제공자
-│           ├── vector/      # 벡터 저장소
-│           ├── chunk/       # 문서 청킹
-│           └── retrieval/   # 검색/리트리버
-├── wiiiv-api/               # REST API 계층 (Ktor)
-│   └── src/main/kotlin/io/wiiiv/api/
-│       ├── config/          # 서버 설정 (Auth, CORS, Routing)
-│       ├── dto/             # 요청/응답 DTO
-│       │   ├── decision/    # Decision (Governor 판단)
-│       │   ├── blueprint/   # Blueprint (실행 계획)
-│       │   ├── execution/   # Execution (실행 결과)
-│       │   ├── system/      # System (인트로스펙션)
-│       │   └── rag/         # RAG (벡터 검색)
-│       └── routes/          # API 라우트
-├── wiiiv-cli/               # CLI 터미널 인터페이스 (Kotlin + clikt)
+├── wiiiv-backend/           # 서버측 (Kotlin/Ktor)
+│   ├── wiiiv-core/          # 핵심 실행 계층
+│   │   └── src/main/kotlin/io/wiiiv/
+│   │       ├── execution/   # Executor 계층
+│   │       ├── runner/      # Runner 계층
+│   │       ├── blueprint/   # Blueprint 계층
+│   │       ├── gate/        # Gate 계층
+│   │       ├── governor/    # Governor 계층
+│   │       ├── dacs/        # DACS 계층
+│   │       └── rag/         # RAG 계층 (벡터 검색)
+│   └── wiiiv-server/        # HTTP 서버 (Ktor/Netty, 현 wiiiv-api)
+│       └── src/main/kotlin/io/wiiiv/server/
+│           ├── config/      # 서버 설정 (Auth, CORS, Routing)
+│           ├── dto/         # 요청/응답 DTO
+│           ├── registry/    # 레지스트리
+│           └── routes/      # API 라우트
+├── wiiiv-cli/               # 대화형 터미널 클라이언트 (현 wiiiv-shell)
 │   └── src/main/kotlin/io/wiiiv/cli/
 │       ├── Main.kt          # 진입점
-│       ├── client/          # HTTP 클라이언트 (Ktor Client)
-│       ├── commands/        # CLI 명령 (auth, decision, blueprint, execution, system, config, rag)
-│       └── output/          # 출력 포맷터 (human/JSON)
+│       └── commands/        # 명령 핸들러
 ├── build.gradle.kts
 ├── settings.gradle.kts
 └── CLAUDE.md
@@ -176,7 +167,7 @@ wiiiv/
 
 ---
 
-## API v2 엔드포인트 (wiiiv-api)
+## API v2 엔드포인트 (wiiiv-server)
 
 ### 인증
 
@@ -383,17 +374,17 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | ParallelExecutionTest | 14 |
 | wiiiv-core | RagTest | 33 |
 | wiiiv-core | RagExecutorTest | 13 |
-| **wiiiv-api** | **AuthRoutesTest** | **6** |
-| **wiiiv-api** | **DecisionRoutesTest** | **8** |
-| **wiiiv-api** | **BlueprintRoutesTest** | **8** |
-| **wiiiv-api** | **ExecutionRoutesTest** | **10** |
-| **wiiiv-api** | **SystemRoutesTest** | **13** |
+| **wiiiv-server** | **AuthRoutesTest** | **6** |
+| **wiiiv-server** | **DecisionRoutesTest** | **8** |
+| **wiiiv-server** | **BlueprintRoutesTest** | **8** |
+| **wiiiv-server** | **ExecutionRoutesTest** | **10** |
+| **wiiiv-server** | **SystemRoutesTest** | **13** |
 | **wiiiv-cli** | **RagCommandTest** | **10** |
 | **wiiiv-cli** | **AuthCommandTest** | **7** |
 | **wiiiv-cli** | **SystemCommandTest** | **11** |
 | **wiiiv-cli** | **WiiivClientTest** | **11** |
 | wiiiv-core | LlmGovernorE2ETest | 2 |
-| **wiiiv-api** | **WiringVerificationTest** | **3** |
+| **wiiiv-server** | **WiringVerificationTest** | **3** |
 | **wiiiv-cli** | **E2EIntegrationTest** | **8** |
 
 ---
@@ -465,7 +456,7 @@ wiiiv/                          <- git root (모노레포 유지)
 
 ### 마이그레이션 단계
 
-- [ ] **1단계**: 폴더 이동 + 리네임 (wiiiv-api → wiiiv-backend/wiiiv-server 등)
+- [x] **1단계**: 폴더 이동 + 리네임 (wiiiv-api → wiiiv-backend/wiiiv-server 등)
 - [ ] **2단계**: 서버에 대화형 세션 API 추가 (WebSocket/SSE)
 - [ ] **3단계**: wiiiv-cli를 서버 접속 클라이언트로 전환 (core 직접호출 제거)
 
@@ -474,7 +465,7 @@ wiiiv/                          <- git root (모노레포 유지)
 - [x] 구조 논의 및 결정 완료
 - [x] 계획 문서 작성 (`docs/project-structure-v3.0.md`)
 - [x] CLAUDE.md 반영
-- [ ] 1단계 착수 대기
+- [x] 1단계 완료 (폴더 이동 + 패키지 리네임)
 
 ---
 

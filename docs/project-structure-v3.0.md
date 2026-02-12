@@ -2,7 +2,7 @@
 
 > 2026-02-12 구조 재설계 계획
 >
-> 상태: **2단계 완료**
+> 상태: **3단계 완료**
 
 ---
 
@@ -105,11 +105,14 @@ MySQL Workbench = wiiiv-app         (데스크톱 클라이언트)
 
 ### 3단계: CLI를 서버 접속 클라이언트로 전환
 
-- [ ] core 직접 호출 제거
-- [ ] HTTP/SSE 클라이언트로 전환
-- [ ] 대화형 모드: SSE 기반 REPL (POST /sessions/{id}/chat)
-- [ ] 명령형 모드: REST 기반 단발 호출 (`wiiiv -e "..."`)
-- [ ] 기존 wiiiv-cli 기능 흡수 (auth, config 등)
+- [x] core 직접 호출 제거 (`implementation(project(":wiiiv-core"))` 삭제)
+- [x] HTTP/SSE 클라이언트로 전환 (Ktor Client CIO + WiiivApiClient)
+- [x] 대화형 모드: SSE 기반 REPL (POST /sessions/{id}/chat)
+- [x] 서버에 세션 상태 API 추가 (GET /state, GET /history, POST /control)
+- [x] 슬래시 명령 전체 서버 API 기반으로 재작성
+- [x] CLI/서버 테스트 추가 (WiiivApiClientTest 12개, SessionStateRoutesTest 17개)
+- [ ] 명령형 모드: REST 기반 단발 호출 (`wiiiv -e "..."`) — 향후
+- [ ] 기존 wiiiv-cli 기능 흡수 (auth, config 등) — 향후
 
 ---
 

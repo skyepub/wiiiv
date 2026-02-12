@@ -3,6 +3,7 @@ package io.wiiiv.server.session
 import io.wiiiv.governor.GovernorProgressListener
 import io.wiiiv.governor.ProgressEvent
 import io.wiiiv.governor.ProgressPhase
+import io.wiiiv.server.dto.session.ExecutionSummaryDto
 import kotlinx.coroutines.channels.Channel
 
 /**
@@ -37,7 +38,8 @@ class SseProgressBridge : GovernorProgressListener {
         executionSuccess: Boolean? = null,
         executionStepCount: Int? = null,
         error: String? = null,
-        nextAction: String? = null
+        nextAction: String? = null,
+        executionSummary: ExecutionSummaryDto? = null
     ) {
         channel.trySend(
             SseEvent.Response(
@@ -51,7 +53,8 @@ class SseProgressBridge : GovernorProgressListener {
                 executionSuccess = executionSuccess,
                 executionStepCount = executionStepCount,
                 error = error,
-                nextAction = nextAction
+                nextAction = nextAction,
+                executionSummary = executionSummary
             )
         )
     }
@@ -91,7 +94,8 @@ sealed class SseEvent {
         val executionSuccess: Boolean? = null,
         val executionStepCount: Int? = null,
         val error: String? = null,
-        val nextAction: String? = null
+        val nextAction: String? = null,
+        val executionSummary: ExecutionSummaryDto? = null
     ) : SseEvent()
 
     data class Error(val message: String) : SseEvent()

@@ -6,9 +6,12 @@ import io.ktor.server.auth.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.wiiiv.execution.ExecutionResult
 import io.wiiiv.execution.impl.LlmImage
+import io.wiiiv.governor.ActionType
 import io.wiiiv.governor.ConversationResponse
 import io.wiiiv.governor.NextAction
+import io.wiiiv.governor.TaskStatus
 import io.wiiiv.server.config.UserPrincipal
 import io.wiiiv.server.dto.common.ApiError
 import io.wiiiv.server.dto.common.ApiResponse
@@ -34,6 +37,9 @@ private val sseJson = Json { encodeDefaults = false }
  * GET    /sessions/{id}     - 세션 정보
  * DELETE /sessions/{id}     - 세션 종료
  * POST   /sessions/{id}/chat - 메시지 전송 (SSE 스트리밍)
+ * GET    /sessions/{id}/state   - 세션 상태 조회
+ * GET    /sessions/{id}/history - 대화 이력 조회
+ * POST   /sessions/{id}/control - 세션 제어
  */
 fun Route.sessionRoutes() {
     route("/sessions") {
@@ -215,7 +221,8 @@ fun Route.sessionRoutes() {
                                         executionSuccess = event.executionSuccess,
                                         executionStepCount = event.executionStepCount,
                                         error = event.error,
-                                        nextAction = event.nextAction
+                                        nextAction = event.nextAction,
+                                        executionSummary = event.executionSummary
                                     )
                                 )
                                 is SseEvent.Error -> "error" to """{"message":"${event.message}"}"""
@@ -256,7 +263,8 @@ fun Route.sessionRoutes() {
                                             it.successCount + it.failureCount
                                         },
                                         error = response.error,
-                                        nextAction = response.nextAction?.name
+                                        nextAction = response.nextAction?.name,
+                                        executionSummary = buildExecutionSummary(response)
                                     )
 
                                     continueCount++
@@ -277,7 +285,8 @@ fun Route.sessionRoutes() {
                                         it.successCount + it.failureCount
                                     },
                                     error = response.error,
-                                    nextAction = response.nextAction?.name
+                                    nextAction = response.nextAction?.name,
+                                    executionSummary = buildExecutionSummary(response)
                                 )
                             } finally {
                                 governor.progressListener = null
@@ -294,6 +303,254 @@ fun Route.sessionRoutes() {
                     writerJob.join()
                 }
             }
+
+            // GET /sessions/{id}/state - 세션 상태 조회
+            get("/{id}/state") {
+                val principal = call.principal<UserPrincipal>()!!
+                val sessionId = call.parameters["id"]
+                    ?: throw IllegalArgumentException("Session ID required")
+
+                if (!WiiivRegistry.sessionManager.isOwner(principal.userId, sessionId)) {
+                    call.respond(
+                        HttpStatusCode.Forbidden,
+                        ApiResponse.error<Unit>(
+                            ApiError(code = "FORBIDDEN", message = "Not session owner")
+                        )
+                    )
+                    return@get
+                }
+
+                val session = WiiivRegistry.sessionManager.getSession(sessionId)
+                    ?: throw NoSuchElementException("Session not found: $sessionId")
+
+                val context = session.context
+                val spec = session.draftSpec
+
+                val specDto = DraftSpecDto(
+                    id = spec.id,
+                    intent = spec.intent,
+                    taskType = spec.taskType?.name,
+                    taskTypeDisplayName = spec.taskType?.displayName,
+                    domain = spec.domain,
+                    techStack = spec.techStack,
+                    targetPath = spec.targetPath,
+                    content = spec.content,
+                    scale = spec.scale,
+                    constraints = spec.constraints,
+                    isComplete = spec.isComplete(),
+                    isRisky = spec.isRisky(),
+                    filledSlots = spec.getFilledSlots().toList(),
+                    requiredSlots = spec.getRequiredSlots().toList(),
+                    missingSlots = spec.getMissingSlots().toList()
+                )
+
+                val activeTaskDto = context.activeTask?.let { taskToDto(it) }
+                val taskDtos = context.tasks.values.map { taskToDto(it) }
+
+                val llmProvider = WiiivRegistry.llmProvider
+                val serverInfo = ServerInfoDto(
+                    modelName = if (llmProvider != null) "gpt-4o-mini" else null,
+                    dacsTypeName = if (llmProvider != null) "HybridDACS" else "SimpleDACS",
+                    llmAvailable = llmProvider != null,
+                    ragAvailable = llmProvider != null
+                )
+
+                call.respond(
+                    ApiResponse.success(
+                        SessionStateResponse(
+                            sessionId = session.sessionId,
+                            createdAt = session.createdAt,
+                            turnCount = session.history.size,
+                            spec = specDto,
+                            activeTask = activeTaskDto,
+                            tasks = taskDtos,
+                            declaredWriteIntent = context.declaredWriteIntent,
+                            workspace = context.workspace,
+                            serverInfo = serverInfo
+                        )
+                    )
+                )
+            }
+
+            // GET /sessions/{id}/history - 대화 이력 조회
+            get("/{id}/history") {
+                val principal = call.principal<UserPrincipal>()!!
+                val sessionId = call.parameters["id"]
+                    ?: throw IllegalArgumentException("Session ID required")
+
+                if (!WiiivRegistry.sessionManager.isOwner(principal.userId, sessionId)) {
+                    call.respond(
+                        HttpStatusCode.Forbidden,
+                        ApiResponse.error<Unit>(
+                            ApiError(code = "FORBIDDEN", message = "Not session owner")
+                        )
+                    )
+                    return@get
+                }
+
+                val session = WiiivRegistry.sessionManager.getSession(sessionId)
+                    ?: throw NoSuchElementException("Session not found: $sessionId")
+
+                val count = call.request.queryParameters["count"]?.toIntOrNull() ?: 20
+                val messages = session.getRecentHistory(count)
+
+                call.respond(
+                    ApiResponse.success(
+                        HistoryResponse(
+                            messages = messages.map { msg ->
+                                HistoryMessageDto(
+                                    role = msg.role.name,
+                                    content = msg.content,
+                                    timestamp = msg.timestamp
+                                )
+                            },
+                            total = session.history.size
+                        )
+                    )
+                )
+            }
+
+            // POST /sessions/{id}/control - 세션 제어
+            post("/{id}/control") {
+                val principal = call.principal<UserPrincipal>()!!
+                val sessionId = call.parameters["id"]
+                    ?: throw IllegalArgumentException("Session ID required")
+
+                if (!WiiivRegistry.sessionManager.isOwner(principal.userId, sessionId)) {
+                    call.respond(
+                        HttpStatusCode.Forbidden,
+                        ApiResponse.error<Unit>(
+                            ApiError(code = "FORBIDDEN", message = "Not session owner")
+                        )
+                    )
+                    return@post
+                }
+
+                val session = WiiivRegistry.sessionManager.getSession(sessionId)
+                    ?: throw NoSuchElementException("Session not found: $sessionId")
+
+                val request = try {
+                    call.receive<ControlRequest>()
+                } catch (e: Exception) {
+                    throw IllegalArgumentException("Invalid control request: ${e.message}")
+                }
+
+                val result = when (request.action) {
+                    "switch" -> {
+                        val targetId = request.targetId
+                            ?: return@post call.respond(
+                                HttpStatusCode.BadRequest,
+                                ApiResponse.error<Unit>(
+                                    ApiError(code = "BAD_REQUEST", message = "targetId required for switch")
+                                )
+                            )
+                        val context = session.context
+                        val targetTask = context.tasks[targetId]
+                            ?: return@post call.respond(
+                                HttpStatusCode.NotFound,
+                                ApiResponse.error<Unit>(
+                                    ApiError(code = "NOT_FOUND", message = "Task not found: $targetId")
+                                )
+                            )
+                        session.suspendCurrentWork()
+                        targetTask.status = TaskStatus.ACTIVE
+                        context.activeTaskId = targetTask.id
+                        ControlResponse(true, "Switched to task #${targetTask.id}", targetTask.id)
+                    }
+                    "cancel" -> {
+                        val activeTask = session.context.activeTask
+                        val taskId = activeTask?.id
+                        session.cancelCurrentTask()
+                        ControlResponse(true, "Current task cancelled", taskId)
+                    }
+                    "cancelAll" -> {
+                        session.resetAll()
+                        ControlResponse(true, "All tasks cancelled, session reset")
+                    }
+                    "resetSpec" -> {
+                        session.resetSpec()
+                        ControlResponse(true, "Current spec cleared")
+                    }
+                    "setWorkspace" -> {
+                        val workspace = request.workspace
+                            ?: return@post call.respond(
+                                HttpStatusCode.BadRequest,
+                                ApiResponse.error<Unit>(
+                                    ApiError(code = "BAD_REQUEST", message = "workspace required for setWorkspace")
+                                )
+                            )
+                        session.context.workspace = workspace
+                        ControlResponse(true, "Workspace set to $workspace")
+                    }
+                    else -> {
+                        return@post call.respond(
+                            HttpStatusCode.BadRequest,
+                            ApiResponse.error<Unit>(
+                                ApiError(code = "BAD_REQUEST", message = "Unknown action: ${request.action}")
+                            )
+                        )
+                    }
+                }
+
+                call.respond(ApiResponse.success(result))
+            }
         }
     }
+}
+
+/**
+ * TaskSlot → TaskSummaryDto 변환
+ */
+private fun taskToDto(task: io.wiiiv.governor.TaskSlot): TaskSummaryDto {
+    val spec = task.draftSpec
+    return TaskSummaryDto(
+        id = task.id,
+        label = task.label,
+        status = task.status.name,
+        taskType = spec.taskType?.name,
+        taskTypeDisplayName = spec.taskType?.displayName,
+        targetPath = spec.targetPath,
+        specComplete = spec.isComplete(),
+        specRisky = spec.isRisky(),
+        filledSlotCount = spec.getFilledSlots().size,
+        requiredSlotCount = spec.getRequiredSlots().size,
+        executionCount = task.context.executionHistory.size,
+        createdAt = task.createdAt,
+        artifacts = task.context.artifacts.toMap()
+    )
+}
+
+/**
+ * ConversationResponse → ExecutionSummaryDto 변환 (EXECUTE 액션일 때)
+ */
+private fun buildExecutionSummary(response: ConversationResponse): ExecutionSummaryDto? {
+    if (response.action != ActionType.EXECUTE) return null
+    val blueprint = response.blueprint ?: return null
+    val execResult = response.executionResult ?: return null
+
+    val results = execResult.runnerResult.results
+    val steps = blueprint.steps.mapIndexed { i, step ->
+        val result = results.getOrNull(i)
+        val output = execResult.getStepOutput(step.stepId)
+        StepSummaryDto(
+            stepId = step.stepId,
+            type = step.type.name,
+            params = step.params.filterValues { it.length <= 200 },
+            success = result is ExecutionResult.Success,
+            durationMs = result?.meta?.durationMs ?: 0,
+            stdout = output?.stdout,
+            stderr = output?.stderr,
+            exitCode = output?.exitCode,
+            error = if (result is ExecutionResult.Failure) result.error.message else null,
+            artifacts = output?.artifacts?.mapValues { it.value.toString() } ?: emptyMap()
+        )
+    }
+
+    return ExecutionSummaryDto(
+        blueprintId = blueprint.id,
+        steps = steps,
+        totalDurationMs = results.sumOf { it.meta.durationMs },
+        successCount = execResult.successCount,
+        failureCount = execResult.failureCount
+    )
 }

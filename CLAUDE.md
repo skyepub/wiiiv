@@ -143,10 +143,12 @@ wiiiv/
 │           ├── registry/    # 레지스트리
 │           ├── routes/      # API 라우트
 │           └── session/     # 세션 관리 (SessionManager, SseProgressBridge)
-├── wiiiv-cli/               # 대화형 터미널 클라이언트 (현 wiiiv-shell)
+├── wiiiv-cli/               # 대화형 터미널 클라이언트 (서버 접속, core 무의존)
 │   └── src/main/kotlin/io/wiiiv/cli/
-│       ├── Main.kt          # 진입점
-│       └── commands/        # 명령 핸들러
+│       ├── Main.kt          # 진입점 (서버 접속 + SSE REPL)
+│       ├── client/          # API 클라이언트 (WiiivApiClient, ApiModels)
+│       ├── model/           # CLI 전용 타입 (CliModels)
+│       └── commands/        # 슬래시 명령 핸들러
 ├── build.gradle.kts
 ├── settings.gradle.kts
 └── CLAUDE.md
@@ -236,6 +238,9 @@ wiiiv/
 | GET | `/api/v2/sessions/{id}` | 세션 정보 |
 | DELETE | `/api/v2/sessions/{id}` | 세션 종료 |
 | POST | `/api/v2/sessions/{id}/chat` | 메시지 전송 (SSE 스트리밍 응답) |
+| GET | `/api/v2/sessions/{id}/state` | 전체 세션 상태 (spec, tasks, 서버 정보) |
+| GET | `/api/v2/sessions/{id}/history` | 대화 이력 (페이징) |
+| POST | `/api/v2/sessions/{id}/control` | 세션 제어 (switch, cancel, resetSpec, setWorkspace) |
 
 ---
 
@@ -358,7 +363,7 @@ wiiiv rag size                   # 저장소 크기
   - [x] MockApiServer (임베디드 Ktor Netty, E2E 테스트용)
   - [x] ApiWorkflowE2ETest (6개 시나리오: 단일호출, 2단계, 다단계쓰기, 에러복구, 중복방지, 단일완료)
 
-**테스트 현황: 541+ 통과**
+**테스트 현황: 570+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -397,8 +402,10 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | LlmGovernorE2ETest | 2 |
 | **wiiiv-server** | **SessionManagerTest** | **9** |
 | **wiiiv-server** | **SessionRoutesTest** | **10** |
+| **wiiiv-server** | **SessionStateRoutesTest** | **17** |
 | **wiiiv-server** | **WiringVerificationTest** | **5** |
 | **wiiiv-cli** | **E2EIntegrationTest** | **8** |
+| **wiiiv-cli** | **WiiivApiClientTest** | **12** |
 
 ---
 
@@ -443,7 +450,7 @@ DACS는 Gate가 아니다:
 
 ---
 
-## [진행 중] v3.0 프로젝트 구조 재설계
+## [완료] v3.0 프로젝트 구조 재설계
 
 > 상세 계획: `docs/project-structure-v3.0.md`
 
@@ -471,14 +478,16 @@ wiiiv/                          <- git root (모노레포 유지)
 
 - [x] **1단계**: 폴더 이동 + 리네임 (wiiiv-api → wiiiv-backend/wiiiv-server 등)
 - [x] **2단계**: 서버에 대화형 세션 API 추가 (SSE 스트리밍)
-- [ ] **3단계**: wiiiv-cli를 서버 접속 클라이언트로 전환 (core 직접호출 제거)
+- [x] **3단계**: wiiiv-cli를 서버 접속 클라이언트로 전환 (core 직접호출 제거)
 
-### 현재 진행 상태
+### 진행 상태
 
 - [x] 구조 논의 및 결정 완료
 - [x] 계획 문서 작성 (`docs/project-structure-v3.0.md`)
 - [x] CLAUDE.md 반영
 - [x] 1단계 완료 (폴더 이동 + 패키지 리네임)
+- [x] 2단계 완료 (서버 대화형 세션 API + SSE)
+- [x] 3단계 완료 (CLI → 서버 접속 클라이언트 전환, core 의존성 완전 제거)
 
 ---
 

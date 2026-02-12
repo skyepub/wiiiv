@@ -1,32 +1,20 @@
 package io.wiiiv.cli
 
-import io.wiiiv.blueprint.BlueprintRunner
+import io.wiiiv.cli.client.WiiivApiClient
+import io.wiiiv.cli.model.CliActionType
 import java.io.PrintStream
 import java.nio.charset.StandardCharsets
 import org.jline.terminal.TerminalBuilder
-import io.wiiiv.dacs.SimpleDACS
-import io.wiiiv.dacs.HybridDACS
-import io.wiiiv.execution.CompositeExecutor
-import io.wiiiv.execution.impl.FileExecutor
-import io.wiiiv.execution.impl.CommandExecutor
-import io.wiiiv.execution.impl.NoopExecutor
-import io.wiiiv.execution.impl.OpenAIProvider
-import io.wiiiv.governor.ActionType
-import io.wiiiv.governor.ConversationalGovernor
-import io.wiiiv.governor.NextAction
-import io.wiiiv.rag.RagPipeline
-import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
-import io.wiiiv.rag.vector.InMemoryVectorStore
 import kotlinx.coroutines.runBlocking
 
 /**
  * wiiiv Shell - 대화형 Governor 인터페이스
  *
- * ConversationalGovernor와 실시간으로 대화하는 REPL 환경
+ * wiiiv-server에 접속하여 SSE 스트리밍으로 대화하는 REPL 환경.
+ * core 의존성 없이 서버 API만으로 모든 기능을 수행한다.
  */
 fun main() = runBlocking {
     // JLine3 Terminal을 맨 처음 초기화 — 모든 출력보다 먼저
-    // System.out을 terminal.output()에 연결하여 터미널 인코딩 통일
     val terminal = TerminalBuilder.builder()
         .system(true)
         .encoding(StandardCharsets.UTF_8)
@@ -39,7 +27,6 @@ fun main() = runBlocking {
     val WHITE = "\u001B[97m"
     val DIM = "\u001B[2m"
     val RESET = "\u001B[0m"
-    val BOLD = "\u001B[1m"
 
     val line = "\u2500".repeat(59)
 
@@ -101,7 +88,7 @@ fun main() = runBlocking {
     println("${BRIGHT_CYAN}                  o8o   o8o   o8o${RESET}")
     println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
     println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
-    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v2.1  2025-${RESET}")
+    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v3.0  2025-${RESET}")
     println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
     println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
     println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")
@@ -113,80 +100,79 @@ fun main() = runBlocking {
 
     val pad = " ".repeat(9)
 
-    // LLM Provider 초기화
-    val modelName = "gpt-4o-mini"
-    val llmProvider = try {
-        val key = System.getenv("OPENAI_API_KEY") ?: ""
-        if (key.isNotBlank()) {
-            println("$pad${BRIGHT_CYAN}[INFO]${RESET} OpenAI API key detected - LLM mode")
-            OpenAIProvider.fromEnv(model = modelName)
-        } else {
-            println("$pad\u001B[33m[WARN]\u001B[0m OPENAI_API_KEY not set - basic mode")
-            null
-        }
+    // === 서버 접속 ===
+    val serverUrl = System.getenv("WIIIV_SERVER_URL") ?: "http://localhost:8235"
+    val client = WiiivApiClient(serverUrl)
+
+    println("$pad${BRIGHT_CYAN}[INFO]${RESET} Connecting to $serverUrl")
+
+    // 헬스 체크
+    if (!client.healthCheck()) {
+        println("$pad\u001B[31m[ERROR]\u001B[0m Cannot connect to wiiiv server at $serverUrl")
+        println("$pad       Start the server: ./gradlew :wiiiv-server:run")
+        return@runBlocking
+    }
+    println("$pad${BRIGHT_CYAN}[INFO]${RESET} Server connected")
+
+    // 로그인
+    try {
+        client.autoLogin()
+        println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated")
     } catch (e: Exception) {
-        println("$pad\u001B[33m[WARN]\u001B[0m LLM Provider init failed: ${e.message}")
-        null
+        println("$pad\u001B[31m[ERROR]\u001B[0m Login failed: ${e.message}")
+        client.close()
+        return@runBlocking
     }
 
-    // DACS 초기화
-    val dacsTypeName: String
-    val dacs = if (llmProvider != null) {
-        dacsTypeName = "HybridDACS"
-        println("$pad${BRIGHT_CYAN}[INFO]${RESET} HybridDACS (LLM + rule-based)")
-        HybridDACS(llmProvider, modelName)
-    } else {
-        dacsTypeName = "SimpleDACS"
-        println("$pad${BRIGHT_CYAN}[INFO]${RESET} SimpleDACS (rule-based)")
-        SimpleDACS.DEFAULT
+    // workspace 결정
+    val workspace = System.getenv("WIIIV_WORKSPACE")
+        ?: System.getProperty("user.dir")
+
+    // 세션 생성
+    val sessionResponse = try {
+        client.createSession(workspace)
+    } catch (e: Exception) {
+        println("$pad\u001B[31m[ERROR]\u001B[0m Session creation failed: ${e.message}")
+        client.close()
+        return@runBlocking
     }
 
-    // RAG Pipeline 초기화
-    val ragPipeline = if (llmProvider != null) {
-        try {
-            val embeddingProvider = OpenAIEmbeddingProvider.fromEnv()
-            val pipeline = RagPipeline(
-                embeddingProvider = embeddingProvider,
-                vectorStore = InMemoryVectorStore("wiiiv-shell-rag")
-            )
-            println("$pad${BRIGHT_CYAN}[INFO]${RESET} RAG enabled (OpenAI embeddings)")
-            pipeline
-        } catch (e: Exception) {
-            println("$pad\u001B[33m[WARN]\u001B[0m RAG init failed: ${e.message}")
-            null
+    val sessionId = sessionResponse.sessionId
+
+    // 서버 정보 조회
+    val serverInfo = try {
+        val state = client.getSessionState(sessionId)
+
+        if (state.serverInfo.llmAvailable) {
+            println("$pad${BRIGHT_CYAN}[LLM]${RESET} ${state.serverInfo.modelName ?: "unknown"}")
+        } else {
+            println("$pad\u001B[33m[WARN]\u001B[0m LLM not available (basic mode)")
         }
-    } else {
-        null
+
+        val dacsDetail = when (state.serverInfo.dacsTypeName) {
+            "HybridDACS" -> "HybridDACS (3 rule + 3 LLM)"
+            "SimpleDACS" -> "SimpleDACS (3 rule-based)"
+            else -> state.serverInfo.dacsTypeName
+        }
+        println("$pad${BRIGHT_CYAN}[DACS]${RESET} $dacsDetail")
+
+        if (state.serverInfo.ragAvailable) {
+            println("$pad${BRIGHT_CYAN}[RAG]${RESET} enabled")
+        }
+
+        state.serverInfo
+    } catch (e: Exception) {
+        println("$pad${DIM}[INFO] Server info not available${RESET}")
+        io.wiiiv.cli.client.ServerInfoDto(
+            modelName = null,
+            dacsTypeName = "unknown",
+            llmAvailable = false,
+            ragAvailable = false
+        )
     }
 
-    // Executor 초기화
-    val executor = CompositeExecutor(
-        executors = listOf(
-            FileExecutor(),
-            CommandExecutor(),
-            NoopExecutor(handleAll = false)
-        )
-    )
-    val blueprintRunner = BlueprintRunner.create(executor)
-
-    // ConversationalGovernor 생성
-    val governor = ConversationalGovernor.create(
-        id = "gov-shell",
-        dacs = dacs,
-        llmProvider = llmProvider,
-        model = if (llmProvider != null) modelName else null,
-        blueprintRunner = blueprintRunner,
-        ragPipeline = ragPipeline
-    )
-
-    // Progress Display 설정
-    val progressDisplay = ShellProgressDisplay()
-    governor.progressListener = progressDisplay
-
-    // 세션 시작
-    val session = governor.startSession()
     println()
-    println("$pad${BRIGHT_CYAN}[SESSION]${RESET} ID: ${session.sessionId}")
+    println("$pad${BRIGHT_CYAN}[SESSION]${RESET} ID: $sessionId")
     println()
     println("${pad}Type your message. 'exit' or 'quit' to end. '/help' for commands.")
     println("${pad}${DIM}Alt+Enter or Ctrl+J for newline${RESET}")
@@ -194,19 +180,16 @@ fun main() = runBlocking {
     println()
 
     val inputReader = ShellInputReader(terminal)
+    val progressDisplay = ShellProgressDisplay()
 
     // Shell 설정 및 컨텍스트
-    val shellSettings = ShellSettings()
+    val shellSettings = ShellSettings(workspace = workspace)
     val shellCtx = ShellContext(
-        governor = governor,
-        sessionId = session.sessionId,
-        session = session,
+        client = client,
+        sessionId = sessionId,
         inputReader = inputReader,
-        modelName = if (llmProvider != null) modelName else null,
-        dacsTypeName = dacsTypeName,
-        llmProviderPresent = llmProvider != null,
         settings = shellSettings,
-        ragPipeline = ragPipeline
+        serverInfo = serverInfo
     )
 
     // CommandDispatcher 초기화 (object init 트리거)
@@ -241,67 +224,83 @@ fun main() = runBlocking {
             val effectiveText = textPart.ifBlank { "이 이미지를 분석하고 설명해주세요." }
 
             if (detectedImages.isNotEmpty()) {
-                val sizeKB = detectedImages.sumOf { it.data.size } / 1024
+                val sizeKB = detectedImages.sumOf { it.sizeBytes } / 1024
                 println("      ${DIM}[image: ${detectedImages.size}장, ${sizeKB}KB]${RESET}")
             }
 
             progressDisplay.reset()
-            var response = governor.chat(session.sessionId, effectiveText, detectedImages)
-            progressDisplay.ensureNewline()
-            var continuations = 0
 
-            // auto-continue loop: nextAction이 CONTINUE_EXECUTION이면 자동 계속
-            do {
-                print("${c.CYAN}wiiiv>${c.RESET} ")
-                println(ShellRenderer.render(response.message))
-
-                // 추가 정보 출력
-                when (response.action) {
-                    ActionType.ASK -> {
-                        response.askingFor?.let {
-                            println("      (need: $it)")
-                        }
-                    }
-                    ActionType.CONFIRM -> {
-                        response.confirmationSummary?.let {
-                            intentCounter++
-                            println(ShellRenderer.renderConfirmation(it, intentCounter))
-                        }
-                    }
-                    ActionType.EXECUTE -> {
-                        println(ShellRenderer.renderExecutionResult(
-                            "", response.blueprint, response.executionResult
-                        ))
-                    }
-                    ActionType.CANCEL -> {
-                        println("      (session reset)")
-                    }
-                    else -> {}
-                }
-                println()
-
-                // auto-continue: ShellSettings 기반
-                val maxCont = shellSettings.maxContinue
-                if (shellSettings.autoContinue
-                    && response.nextAction == NextAction.CONTINUE_EXECUTION
-                    && continuations < maxCont
-                ) {
-                    continuations++
-                    val reason = response.message.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: ""
-                    println("      (auto-continue $continuations/$maxCont: $reason)")
-                    response = governor.chat(session.sessionId, "계속")
+            // SSE 스트리밍 채팅
+            client.chat(
+                sessionId = sessionId,
+                message = effectiveText,
+                images = if (detectedImages.isNotEmpty()) detectedImages else null,
+                autoContinue = shellSettings.autoContinue,
+                maxContinue = shellSettings.maxContinue,
+                onProgress = { event ->
+                    progressDisplay.onServerProgress(event)
+                },
+                onResponse = { response ->
                     progressDisplay.ensureNewline()
-                } else {
-                    break
+
+                    // 실행 결과 캐시
+                    if (response.executionSummary != null) {
+                        shellCtx.lastExecutionSummary = response.executionSummary
+                    }
+
+                    print("${c.CYAN}wiiiv>${c.RESET} ")
+                    println(ShellRenderer.render(response.message))
+
+                    // action별 추가 정보 출력
+                    val action = try {
+                        CliActionType.valueOf(response.action.uppercase())
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                    when (action) {
+                        CliActionType.ASK -> {
+                            response.askingFor?.let {
+                                println("      (need: $it)")
+                            }
+                        }
+                        CliActionType.CONFIRM -> {
+                            response.confirmationSummary?.let {
+                                intentCounter++
+                                println(ShellRenderer.renderConfirmation(it, intentCounter))
+                            }
+                        }
+                        CliActionType.EXECUTE -> {
+                            println(ShellRenderer.renderExecutionResult(
+                                "", response.executionSummary
+                            ))
+                        }
+                        CliActionType.CANCEL -> {
+                            println("      (session reset)")
+                        }
+                        else -> {}
+                    }
+                    println()
+                },
+                onError = { error ->
+                    progressDisplay.ensureNewline()
+                    println()
+                    println("[ERROR] $error")
+                    println()
                 }
-            } while (true)
+            )
         } catch (e: Exception) {
+            progressDisplay.ensureNewline()
             println()
             println("[ERROR] ${e.message}")
             println()
         }
     }
 
-    governor.endSession(session.sessionId)
+    // 세션 종료
+    try {
+        client.deleteSession(sessionId)
+    } catch (_: Exception) {}
+    client.close()
     inputReader.close()
 }

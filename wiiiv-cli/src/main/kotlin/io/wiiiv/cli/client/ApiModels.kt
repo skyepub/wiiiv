@@ -1,29 +1,43 @@
-package io.wiiiv.server.dto.session
+package io.wiiiv.cli.client
 
 import kotlinx.serialization.Serializable
 
-// === Request ===
+/**
+ * 서버 DTO의 클라이언트 측 복사본
+ *
+ * wiiiv-server의 DTO와 동일한 구조를 유지한다.
+ * 향후 wiiiv-dto 공유 모듈로 분리 가능.
+ */
+
+// === Generic API Response ===
+
+@Serializable
+data class ApiResponse<T>(
+    val success: Boolean,
+    val data: T? = null,
+    val error: ApiError? = null
+)
+
+@Serializable
+data class ApiError(
+    val code: String,
+    val message: String
+)
+
+// === Auth ===
+
+@Serializable
+data class LoginResponse(
+    val accessToken: String,
+    val userId: String
+)
+
+// === Session ===
 
 @Serializable
 data class CreateSessionRequest(
     val workspace: String? = null
 )
-
-@Serializable
-data class ChatRequest(
-    val message: String,
-    val images: List<ImageData>? = null,
-    val autoContinue: Boolean = true,
-    val maxContinue: Int = 10
-)
-
-@Serializable
-data class ImageData(
-    val base64: String,
-    val mimeType: String
-)
-
-// === Response ===
 
 @Serializable
 data class SessionResponse(
@@ -37,6 +51,29 @@ data class SessionResponse(
 data class SessionListResponse(
     val sessions: List<SessionResponse>,
     val total: Int
+)
+
+@Serializable
+data class DeleteSessionResponse(
+    val sessionId: String,
+    val deleted: Boolean,
+    val message: String
+)
+
+// === Chat ===
+
+@Serializable
+data class ChatRequest(
+    val message: String,
+    val images: List<ImageData>? = null,
+    val autoContinue: Boolean = true,
+    val maxContinue: Int = 10
+)
+
+@Serializable
+data class ImageData(
+    val base64: String,
+    val mimeType: String
 )
 
 @Serializable
@@ -61,13 +98,6 @@ data class ProgressEventDto(
     val detail: String? = null,
     val stepIndex: Int? = null,
     val totalSteps: Int? = null
-)
-
-@Serializable
-data class DeleteSessionResponse(
-    val sessionId: String,
-    val deleted: Boolean,
-    val message: String
 )
 
 // === Session State ===
@@ -183,4 +213,70 @@ data class StepSummaryDto(
     val exitCode: Int? = null,
     val error: String? = null,
     val artifacts: Map<String, String> = emptyMap()
+)
+
+// === RAG ===
+
+@Serializable
+data class IngestRequest(
+    val content: String,
+    val metadata: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class IngestResponse(
+    val documentId: String,
+    val chunkCount: Int
+)
+
+@Serializable
+data class SearchRequest(
+    val query: String,
+    val topK: Int = 5
+)
+
+@Serializable
+data class SearchResponse(
+    val results: List<SearchResultDto>,
+    val totalFound: Int
+)
+
+@Serializable
+data class SearchResultDto(
+    val content: String,
+    val score: Double,
+    val sourceId: String,
+    val chunkIndex: Int,
+    val metadata: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class SizeResponse(
+    val size: Int
+)
+
+@Serializable
+data class DocumentListResponse(
+    val documents: List<DocumentInfoDto>,
+    val total: Int
+)
+
+@Serializable
+data class DocumentInfoDto(
+    val documentId: String,
+    val chunkCount: Int,
+    val metadata: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class DeleteResponse(
+    val deleted: Int
+)
+
+// === Health ===
+
+@Serializable
+data class HealthResponse(
+    val status: String,
+    val version: String? = null
 )

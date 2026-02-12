@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# wiiiv - Interactive Conversational Governor Shell
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-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}"
+export WIIIV_SHELL_OPTS="-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8"
+DIST_DIR="$SCRIPT_DIR/wiiiv-cli/build/install/wiiiv-cli"
+
+# Set console to UTF-8
+chcp.com 65001 &>/dev/null
+
+# Parse arguments: filter --build/--help, pass rest to jar
+BUILD=false
+ARGS=()
+for arg in "$@"; do
+    case $arg in
+        --build)
+            BUILD=true
+            ;;
+        --help)
+            echo "Usage: wiiiv [user[@host[:port]]]"
+            echo ""
+            echo "Examples:"
+            echo "  wiiiv                          # local server, auto-login"
+            echo "  wiiiv admin                    # local server, login as admin"
+            echo "  wiiiv admin@192.168.1.10       # remote server"
+            echo "  wiiiv admin@192.168.1.10:9000  # remote server, custom port"
+            echo ""
+            echo "Options:"
+            echo "  --build    Force rebuild before running"
+            echo "  --help     Show this help"
+            exit 0
+            ;;
+        *)
+            ARGS+=("$arg")
+            ;;
+    esac
+done
+
+# Build if dist doesn't exist or --build requested
+if [ ! -d "$DIST_DIR/lib" ] || [ "$BUILD" = true ]; then
+    echo "Building wiiiv-cli..."
+    cd "$SCRIPT_DIR"
+    ./gradlew :wiiiv-cli:installDist --no-daemon -q
+fi
+
+exec "$DIST_DIR/bin/wiiiv-cli" "${ARGS[@]}"

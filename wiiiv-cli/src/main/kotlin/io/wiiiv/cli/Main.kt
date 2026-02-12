@@ -4,6 +4,7 @@ import io.wiiiv.cli.client.WiiivApiClient
 import io.wiiiv.cli.model.CliActionType
 import java.io.PrintStream
 import java.nio.charset.StandardCharsets
+import org.jline.terminal.Terminal
 import org.jline.terminal.TerminalBuilder
 import kotlinx.coroutines.runBlocking
 
@@ -13,7 +14,7 @@ import kotlinx.coroutines.runBlocking
  * wiiiv-server에 접속하여 SSE 스트리밍으로 대화하는 REPL 환경.
  * core 의존성 없이 서버 API만으로 모든 기능을 수행한다.
  */
-fun main() = runBlocking {
+fun main(args: Array<String>) = runBlocking {
     // JLine3 Terminal을 맨 처음 초기화 — 모든 출력보다 먼저
     val terminal = TerminalBuilder.builder()
         .system(true)
@@ -101,7 +102,12 @@ fun main() = runBlocking {
     val pad = " ".repeat(9)
 
     // === 서버 접속 ===
-    val serverUrl = System.getenv("WIIIV_SERVER_URL") ?: "http://localhost:8235"
+    val connArgs = ConnectionArgs.parse(args)
+    val serverUrl = if (connArgs.host != "localhost" || connArgs.port != 8235) {
+        connArgs.toServerUrl()
+    } else {
+        System.getenv("WIIIV_SERVER_URL") ?: connArgs.toServerUrl()
+    }
     val client = WiiivApiClient(serverUrl)
 
     println("$pad${BRIGHT_CYAN}[INFO]${RESET} Connecting to $serverUrl")
@@ -114,12 +120,8 @@ fun main() = runBlocking {
     }
     println("$pad${BRIGHT_CYAN}[INFO]${RESET} Server connected")
 
-    // 로그인
-    try {
-        client.autoLogin()
-        println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated")
-    } catch (e: Exception) {
-        println("$pad\u001B[31m[ERROR]\u001B[0m Login failed: ${e.message}")
+    // 인증
+    if (!authenticate(client, connArgs, terminal, pad)) {
         client.close()
         return@runBlocking
     }
@@ -303,4 +305,112 @@ fun main() = runBlocking {
     } catch (_: Exception) {}
     client.close()
     inputReader.close()
+}
+
+/**
+ * 인증 플로우.
+ *
+ * - isAutoLogin → autoLogin() → 토큰 저장
+ * - username 있음 → 저장된 토큰 시도 → 실패 시 비밀번호 프롬프트
+ *
+ * @return true 인증 성공, false 실패
+ */
+private suspend fun authenticate(
+    client: WiiivApiClient,
+    connArgs: ConnectionArgs,
+    terminal: Terminal,
+    pad: String
+): Boolean {
+    val BRIGHT_CYAN = "\u001B[96m"
+    val RESET = "\u001B[0m"
+    val RED = "\u001B[31m"
+
+    if (connArgs.isAutoLogin) {
+        return try {
+            val token = client.autoLogin()
+            CredentialStore.saveToken(connArgs.credentialKey(), "auto", token)
+            println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated")
+            true
+        } catch (e: Exception) {
+            println("$pad${RED}[ERROR]${RESET} Login failed: ${e.message}")
+            false
+        }
+    }
+
+    val username = connArgs.username!!
+    val hostKey = connArgs.credentialKey()
+
+    // 저장된 토큰 시도
+    val saved = CredentialStore.getToken(hostKey)
+    if (saved != null && saved.username == username) {
+        client.setToken(saved.token)
+        if (client.validateToken()) {
+            println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated as $username (saved credential)")
+            return true
+        }
+        // 만료 — 삭제 후 비밀번호 프롬프트로 진행
+        CredentialStore.removeToken(hostKey)
+    }
+
+    // 비밀번호 프롬프트
+    val password = readPassword(terminal, "${pad}Password: ")
+    if (password == null) {
+        println()
+        println("$pad${RED}[ERROR]${RESET} Login cancelled")
+        return false
+    }
+    println()
+
+    return try {
+        val token = client.login(username, password)
+        CredentialStore.saveToken(hostKey, username, token)
+        println("$pad${BRIGHT_CYAN}[INFO]${RESET} Authenticated as $username")
+        true
+    } catch (e: Exception) {
+        println("$pad${RED}[ERROR]${RESET} Login failed: ${e.message}")
+        false
+    }
+}
+
+/**
+ * JLine3 Terminal raw mode로 에코 없이 비밀번호 입력을 받는다.
+ *
+ * @return 비밀번호 문자열, Ctrl+C 시 null
+ */
+private fun readPassword(terminal: Terminal, prompt: String): String? {
+    print(prompt)
+    System.out.flush()
+
+    val attrs = terminal.attributes
+    try {
+        terminal.enterRawMode()
+        val reader = terminal.reader()
+        val buf = StringBuilder()
+
+        while (true) {
+            val ch = reader.read()
+            when {
+                ch == -1 || ch == 3 -> { // EOF 또는 Ctrl+C
+                    return null
+                }
+                ch == 13 || ch == 10 -> { // Enter
+                    return buf.toString()
+                }
+                ch == 127 || ch == 8 -> { // Backspace / Delete
+                    if (buf.isNotEmpty()) {
+                        buf.deleteCharAt(buf.length - 1)
+                        print("\b \b")
+                        System.out.flush()
+                    }
+                }
+                ch >= 32 -> { // 일반 문자
+                    buf.append(ch.toChar())
+                    print("*")
+                    System.out.flush()
+                }
+            }
+        }
+    } finally {
+        terminal.attributes = attrs
+    }
 }

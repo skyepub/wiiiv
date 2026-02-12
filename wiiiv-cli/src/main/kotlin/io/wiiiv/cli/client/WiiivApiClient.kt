@@ -42,6 +42,26 @@ class WiiivApiClient(
 
     private var token: String? = null
 
+    /** 저장된 토큰을 복원한다. */
+    fun setToken(savedToken: String) {
+        token = savedToken
+    }
+
+    /** 현재 토큰을 반환한다 (저장용). */
+    fun getToken(): String? = token
+
+    /** GET /auth/me 로 토큰 유효성을 검증한다. */
+    suspend fun validateToken(): Boolean {
+        return try {
+            val response = httpClient.get("$baseUrl/api/v2/auth/me") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            response.status == HttpStatusCode.OK
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     // === Auth ===
 
     suspend fun autoLogin(): String {

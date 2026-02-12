@@ -12,7 +12,9 @@ import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -320,6 +322,48 @@ class WiiivApiClientTest {
         }
 
         assertTrue(client.healthCheck())
+    }
+
+    // === Token management ===
+
+    @Test
+    fun `setToken and getToken should work`() {
+        val client = createMockClient { request ->
+            respond("", HttpStatusCode.OK)
+        }
+
+        assertNull(client.getToken())
+        client.setToken("my-saved-token")
+        assertEquals("my-saved-token", client.getToken())
+    }
+
+    @Test
+    fun `validateToken should return true on 200`() = runBlocking {
+        val client = createMockClient { request ->
+            assertEquals("/api/v2/auth/me", request.url.encodedPath)
+            respond(
+                content = """{"success":true,"data":{"userId":"admin","username":"admin"}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+
+        client.setToken("valid-token")
+        assertTrue(client.validateToken())
+    }
+
+    @Test
+    fun `validateToken should return false on 401`() = runBlocking {
+        val client = createMockClient { request ->
+            respond(
+                content = """{"error":"Unauthorized"}""",
+                status = HttpStatusCode.Unauthorized,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+
+        client.setToken("expired-token")
+        assertFalse(client.validateToken())
     }
 
     // === Error handling ===

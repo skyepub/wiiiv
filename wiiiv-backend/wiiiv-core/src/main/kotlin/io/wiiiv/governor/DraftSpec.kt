@@ -122,7 +122,7 @@ data class DraftSpec(
             // workspace 하위, /tmp, 상대 경로 등은 안전
             targetPath?.let { isSystemPath(it) } ?: false
         }
-        TaskType.API_WORKFLOW -> true
+        TaskType.API_WORKFLOW -> false  // API 호출은 외부 서비스 읽기 — DACS 불필요
         else -> {
             // 특정 경로 패턴만 위험 (시스템 경로)
             targetPath?.let { isSystemPath(it) } ?: false
@@ -157,7 +157,13 @@ data class DraftSpec(
             else -> emptyList()
         }
 
-        val paths = listOfNotNull(targetPath)
+        val paths = when (taskType) {
+            TaskType.API_WORKFLOW -> {
+                // API 워크플로우: domain을 논리적 경로 스코프로 사용
+                listOfNotNull(domain?.let { "api://$it" } ?: "api://external")
+            }
+            else -> listOfNotNull(targetPath)
+        }
 
         return Spec(
             id = "spec-${UUID.randomUUID().toString().take(8)}",
@@ -175,7 +181,12 @@ data class DraftSpec(
      */
     private fun buildDescription(): String = buildString {
         intent?.let { append(it) }
-        domain?.let { append(" - Domain: $it") }
+        if (taskType == TaskType.API_WORKFLOW) {
+            domain?.let { append(" - API Workflow: $it domain") }
+            append(" - Operation: External API call (read-only HTTP request)")
+        } else {
+            domain?.let { append(" - Domain: $it") }
+        }
         techStack?.let { append(" - Tech: ${it.joinToString(", ")}") }
         scale?.let { append(" - Scale: $it") }
     }

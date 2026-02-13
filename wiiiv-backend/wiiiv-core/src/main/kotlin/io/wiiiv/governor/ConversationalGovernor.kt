@@ -736,11 +736,17 @@ class ConversationalGovernor(
         )
 
         // nextAction = CONTINUE_EXECUTION → caller가 자동 계속
+        // 사용자에게는 간단한 상태만, 전체 결과는 세션 히스토리에 이미 기록됨
+        val briefStatus = if (executionResult?.isSuccess == true) {
+            "호출 성공 (${executionResult.successCount} steps) — 결과 분석 중..."
+        } else {
+            "호출 실패 — 재시도 판단 중..."
+        }
         return ConversationResponse(
             action = ActionType.EXECUTE,
             message = "API 실행 중 (Turn $iterationIndex)...\n" +
-                "호출: ${decision.calls.map { "${it.method} ${it.url}" }}\n" +
-                "결과: $resultSummary",
+                "호출: ${decision.calls.map { "[${it.method} ${it.url}]" }.joinToString(", ")}\n" +
+                briefStatus,
             sessionId = session.sessionId,
             blueprint = blueprint,
             executionResult = executionResult,
@@ -1433,7 +1439,7 @@ class ConversationalGovernor(
                     if (output != null) {
                         val statusCode = output.json["statusCode"]?.jsonPrimitive?.contentOrNull
                         val body = output.json["body"]?.jsonPrimitive?.contentOrNull
-                        append("\n  [$stepId] HTTP $statusCode: ${body?.take(500) ?: "empty"}")
+                        append("\n  [$stepId] HTTP $statusCode: ${body?.take(4000) ?: "empty"}")
                     }
                 }
             } else {

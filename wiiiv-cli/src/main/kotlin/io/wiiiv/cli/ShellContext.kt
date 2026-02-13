@@ -10,10 +10,20 @@ import io.wiiiv.cli.client.WiiivApiClient
 data class ShellSettings(
     var autoContinue: Boolean = true,
     var maxContinue: Int = 10,
-    var verbose: Boolean = false,
+    var verbose: Int = 1,
     var color: Boolean = true,
     var workspace: String? = null
-)
+) {
+    companion object {
+        val VERBOSE_NAMES = arrayOf("quiet", "normal", "detailed", "debug")
+
+        fun verboseName(level: Int): String =
+            VERBOSE_NAMES.getOrElse(level) { "unknown" }
+
+        fun verboseFromName(name: String): Int? =
+            VERBOSE_NAMES.indexOfFirst { it == name.lowercase() }.takeIf { it >= 0 }
+    }
+}
 
 /**
  * 슬래시 명령 핸들러에 전달할 컨텍스트

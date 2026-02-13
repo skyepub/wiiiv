@@ -198,7 +198,7 @@ fun Route.sessionRoutes() {
                     val bridge = SseProgressBridge()
 
                     // Channel 소비 코루틴 — SSE 이벤트를 writer로 출력
-                    val writerJob = launch {
+                    val writerJob = launch(kotlinx.coroutines.Dispatchers.IO) {
                         for (event in bridge.channel) {
                             val (eventType, data) = when (event) {
                                 is SseEvent.Progress -> "progress" to sseJson.encodeToString(

@@ -25,10 +25,11 @@ object WiiivRegistry {
     // === Executors ===
     private val fileExecutor = FileExecutor()
     private val commandExecutor = CommandExecutor()
+    private val apiExecutor = ApiExecutor()
     private val noopExecutor = NoopExecutor(handleAll = false)  // NoopStep만 처리
 
     val compositeExecutor = CompositeExecutor(
-        executors = listOf(fileExecutor, commandExecutor, noopExecutor)
+        executors = listOf(fileExecutor, commandExecutor, apiExecutor, noopExecutor)
     )
 
     val executorRunner = ExecutionRunner.create(compositeExecutor)

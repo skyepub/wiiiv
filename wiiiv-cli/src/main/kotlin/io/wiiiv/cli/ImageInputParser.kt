@@ -32,8 +32,20 @@ object ImageInputParser {
         val images = mutableListOf<LocalImage>()
         var remaining = input
 
-        // 1. 단일 따옴표로 감싼 경로 추출: '/path/to/file.png'
-        val quotedPattern = Regex("'(/[^']+)'")
+        // 1. 쌍따옴표로 감싼 경로 추출: "C:\Users\...\file.png"
+        val doubleQuotedPattern = Regex(""""([^"]+)"""")
+        val doubleQuotedMatches = doubleQuotedPattern.findAll(remaining).toList().reversed()
+        for (match in doubleQuotedMatches) {
+            val path = match.groupValues[1]
+            val image = tryLoadImage(path)
+            if (image != null) {
+                images.add(image)
+                remaining = remaining.removeRange(match.range)
+            }
+        }
+
+        // 2. 단일 따옴표로 감싼 경로 추출: '/path/to/file.png' 또는 'C:\...\file.png'
+        val quotedPattern = Regex("'([^']+)'")
         val quotedMatches = quotedPattern.findAll(remaining).toList().reversed()
         for (match in quotedMatches) {
             val path = match.groupValues[1]
@@ -44,7 +56,19 @@ object ImageInputParser {
             }
         }
 
-        // 2. 이스케이프된 공백이 있는 절대 경로: /path/to/my\ file.png
+        // 3. Windows 절대 경로: C:\Users\...\file.png (공백 없는 경로)
+        val windowsPattern = Regex("""[A-Za-z]:[\\\/][^\s'"]+""")
+        val windowsMatches = windowsPattern.findAll(remaining).toList().reversed()
+        for (match in windowsMatches) {
+            val path = match.value
+            val image = tryLoadImage(path)
+            if (image != null) {
+                images.add(image)
+                remaining = remaining.removeRange(match.range)
+            }
+        }
+
+        // 4. 이스케이프된 공백이 있는 Unix 절대 경로: /path/to/my\ file.png
         val escapedPattern = Regex("""(/(?:[^\s'"]|\\[ ])+)""")
         val escapedMatches = escapedPattern.findAll(remaining).toList().reversed()
         for (match in escapedMatches) {

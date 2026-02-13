@@ -9,8 +9,11 @@ import java.util.TimerTask
  * Shell 진행 표시 — 스피너 애니메이션
  *
  * 서버에서 수신한 SSE progress 이벤트를 표시한다.
+ * verboseLevel: 0=quiet(스피너 없음), 1=normal, 2=detailed, 3=debug(줄바꿈 로그)
  */
-class ShellProgressDisplay {
+class ShellProgressDisplay(
+    var verboseLevel: Int = 1
+) {
     private var startTime = System.currentTimeMillis()
     private var hasActiveProgress = false
     private val c = ShellColors
@@ -48,8 +51,13 @@ class ShellProgressDisplay {
             stopSpinner()
             val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
             val timeStr = String.format("%.1fs", elapsed)
-            print("\r${c.BRIGHT_GREEN}  > ${c.RESET}${c.DIM}완료${stepInfo}${detail}  [${timeStr}]${c.RESET}    ")
-            println()
+            if (verboseLevel >= 2) {
+                // level 2-3: 줄바꿈 로그
+                println("  ${c.BRIGHT_GREEN}> 완료${stepInfo}${detail}  [${timeStr}]${c.RESET}")
+            } else {
+                print("\r${c.BRIGHT_GREEN}  > ${c.RESET}${c.DIM}완료${stepInfo}${detail}  [${timeStr}]${c.RESET}    ")
+                println()
+            }
             hasActiveProgress = false
             return
         }
@@ -61,11 +69,16 @@ class ShellProgressDisplay {
         currentDetail = detail
         hasActiveProgress = true
 
-        // 스피너 시작 (아직 안 돌고 있으면)
-        startSpinner()
-
-        // 즉시 한번 표시
-        renderFrame()
+        if (verboseLevel >= 2) {
+            // level 2-3: phase 변경마다 줄바꿈 로그 (스피너 없음)
+            val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+            val timeStr = String.format("%.1fs", elapsed)
+            println("  ${color}> ${label}${stepInfo}${detail}  [${timeStr}]${c.RESET}")
+        } else {
+            // level 1: 스피너 애니메이션
+            startSpinner()
+            renderFrame()
+        }
     }
 
     private fun renderFrame() {

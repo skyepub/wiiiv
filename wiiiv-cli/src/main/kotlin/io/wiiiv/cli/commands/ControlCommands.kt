@@ -2,6 +2,7 @@ package io.wiiiv.cli.commands
 
 import io.wiiiv.cli.ShellColors
 import io.wiiiv.cli.ShellContext
+import io.wiiiv.cli.ShellSettings
 import io.wiiiv.cli.client.ControlRequest
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -79,7 +80,7 @@ object ControlCommands {
             println()
             println("  ${c.WHITE}autocontinue${c.RESET}  ${if (settings.autoContinue) "on" else "off"}")
             println("  ${c.WHITE}maxcontinue${c.RESET}   ${settings.maxContinue}")
-            println("  ${c.WHITE}verbose${c.RESET}       ${if (settings.verbose) "on" else "off"}")
+            println("  ${c.WHITE}verbose${c.RESET}       ${settings.verbose} (${ShellSettings.verboseName(settings.verbose)})")
             println("  ${c.WHITE}color${c.RESET}         ${if (settings.color) "on" else "off"}")
             println("  ${c.WHITE}workspace${c.RESET}     ${settings.workspace ?: "${c.DIM}(not set)${c.RESET}"}")
             println()
@@ -107,10 +108,39 @@ object ControlCommands {
                 }
             }
             "verbose" -> {
-                when (value) {
-                    "on", "true" -> { settings.verbose = true; println("  verbose = on") }
-                    "off", "false" -> { settings.verbose = false; println("  verbose = off") }
-                    else -> println("  ${c.RED}Usage: /set verbose <on|off>${c.RESET}")
+                if (value == null) {
+                    // 값 없이 실행: 현재 레벨 + 전체 레벨 설명 표시
+                    println()
+                    println("  verbose = ${settings.verbose} (${ShellSettings.verboseName(settings.verbose)})")
+                    println()
+                    for (i in 0..3) {
+                        val marker = if (i == settings.verbose) " ${c.BRIGHT_CYAN}← current${c.RESET}" else ""
+                        val desc = when (i) {
+                            0 -> "최종 답변만"
+                            1 -> "진행 상태 + 최종 답변"
+                            2 -> "중간 결과 + 실행 상세"
+                            3 -> "raw 데이터 전체"
+                            else -> ""
+                        }
+                        println("  ${c.WHITE}$i${c.RESET}  ${ShellSettings.VERBOSE_NAMES[i].padEnd(10)} $desc$marker")
+                    }
+                    println()
+                    return
+                }
+
+                // 숫자, 이름, on/off로 설정
+                val level = when (value) {
+                    "off" -> 0
+                    "on" -> 2
+                    else -> value.toIntOrNull()
+                        ?: ShellSettings.verboseFromName(value)
+                }
+
+                if (level != null && level in 0..3) {
+                    settings.verbose = level
+                    println("  verbose = $level (${ShellSettings.verboseName(level)})")
+                } else {
+                    println("  ${c.RED}Usage: /set verbose <0-3|on|off|quiet|normal|detailed|debug>${c.RESET}")
                 }
             }
             "color" -> {

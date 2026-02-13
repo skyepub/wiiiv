@@ -2,6 +2,7 @@ package io.wiiiv.cli.commands
 
 import io.wiiiv.cli.ShellColors
 import io.wiiiv.cli.ShellContext
+import io.wiiiv.cli.ShellSettings
 import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -68,7 +69,7 @@ object StatusCommands {
 
                 // Settings summary
                 println()
-                println("  ${c.BRIGHT_CYAN}[SETTINGS]${c.RESET} autocontinue=${if (ctx.settings.autoContinue) "on" else "off"} maxcontinue=${ctx.settings.maxContinue} verbose=${if (ctx.settings.verbose) "on" else "off"} color=${if (ctx.settings.color) "on" else "off"}")
+                println("  ${c.BRIGHT_CYAN}[SETTINGS]${c.RESET} autocontinue=${if (ctx.settings.autoContinue) "on" else "off"} maxcontinue=${ctx.settings.maxContinue} verbose=${ctx.settings.verbose}(${ShellSettings.verboseName(ctx.settings.verbose)}) color=${if (ctx.settings.color) "on" else "off"}")
                 println()
             } catch (e: Exception) {
                 println("  ${c.RED}[ERROR]${c.RESET} ${e.message}")
@@ -96,8 +97,8 @@ object StatusCommands {
 
                 val timeFormat = SimpleDateFormat("HH:mm:ss")
                 for (msg in history.messages) {
-                    // SYSTEM messages only in verbose mode
-                    if (msg.role == "SYSTEM" && !ctx.settings.verbose) continue
+                    // SYSTEM messages only in verbose mode (level 2+)
+                    if (msg.role == "SYSTEM" && ctx.settings.verbose < 2) continue
 
                     val ts = timeFormat.format(Date(msg.timestamp))
                     val roleColor = when (msg.role) {

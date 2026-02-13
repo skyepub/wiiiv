@@ -172,10 +172,10 @@ fun main(args: Array<String>) = runBlocking {
     println()
 
     val inputReader = ShellInputReader(terminal)
-    val progressDisplay = ShellProgressDisplay()
 
     // Shell 설정 및 컨텍스트
     val shellSettings = ShellSettings(workspace = workspace)
+    val progressDisplay = ShellProgressDisplay(verboseLevel = shellSettings.verbose)
     val shellCtx = ShellContext(
         client = client,
         sessionId = sessionId,
@@ -215,11 +215,12 @@ fun main(args: Array<String>) = runBlocking {
         try {
             val effectiveText = textPart.ifBlank { "이 이미지를 분석하고 설명해주세요." }
 
-            if (detectedImages.isNotEmpty()) {
+            if (detectedImages.isNotEmpty() && shellSettings.verbose >= 1) {
                 val sizeKB = detectedImages.sumOf { it.sizeBytes } / 1024
                 println("      ${DIM}[image: ${detectedImages.size}장, ${sizeKB}KB]${RESET}")
             }
 
+            progressDisplay.verboseLevel = shellSettings.verbose
             progressDisplay.reset()
 
             // SSE 스트리밍 채팅
@@ -233,6 +234,8 @@ fun main(args: Array<String>) = runBlocking {
                     progressDisplay.onServerProgress(event)
                 },
                 onResponse = { response ->
+                    val vLevel = shellSettings.verbose
+
                     progressDisplay.ensureNewline()
 
                     // 실행 결과 캐시
@@ -240,16 +243,72 @@ fun main(args: Array<String>) = runBlocking {
                         shellCtx.lastExecutionSummary = response.executionSummary
                     }
 
-                    print("${c.CYAN}wiiiv>${c.RESET} ")
-                    println(ShellRenderer.render(response.message))
-
-                    // action별 추가 정보 출력
                     val action = try {
                         CliActionType.valueOf(response.action.uppercase())
                     } catch (_: Exception) {
                         null
                     }
 
+                    // ── level 0 (quiet): 스피너 + 최종 답변만 ──
+                    if (vLevel == 0) {
+                        if (!response.isFinal) return@chat
+                        val cleaned = filterMessageByVerbose(response.message, 0)
+                        print("${c.CYAN}wiiiv>${c.RESET} ")
+                        println(ShellRenderer.render(cleaned))
+                        println()
+                        return@chat
+                    }
+
+                    // ── level 2 (detailed): 응답 메타데이터 표시 ──
+                    if (vLevel == 2) {
+                        println("${c.DIM}  [${response.action}${if (!response.isFinal) " (intermediate)" else ""}]${c.RESET}")
+                    }
+
+                    // ── level 3 (debug): raw 데이터 전체 덤프 (모든 필드) ──
+                    if (vLevel >= 3) {
+                        val line53 = "\u2500".repeat(53)
+                        println("${c.DIM}── raw response $line53${c.RESET}")
+                        println("${c.DIM}  action       = ${response.action}${c.RESET}")
+                        println("${c.DIM}  isFinal      = ${response.isFinal}${c.RESET}")
+                        println("${c.DIM}  sessionId    = ${response.sessionId}${c.RESET}")
+                        println("${c.DIM}  askingFor    = ${response.askingFor ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  blueprintId  = ${response.blueprintId ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  execSuccess  = ${response.executionSuccess ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  execSteps    = ${response.executionStepCount ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  error        = ${response.error ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  nextAction   = ${response.nextAction ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  confirmation = ${response.confirmationSummary ?: "(null)"}${c.RESET}")
+                        println("${c.DIM}  message:${c.RESET}")
+                        for (msgLine in response.message.lines()) {
+                            println("${c.DIM}    $msgLine${c.RESET}")
+                        }
+                        if (response.executionSummary != null) {
+                            val summary = response.executionSummary
+                            println("${c.DIM}  executionSummary:${c.RESET}")
+                            println("${c.DIM}    blueprintId  = ${summary.blueprintId}${c.RESET}")
+                            println("${c.DIM}    totalDuration= ${summary.totalDurationMs}ms${c.RESET}")
+                            println("${c.DIM}    success/fail = ${summary.successCount}/${summary.failureCount}${c.RESET}")
+                            summary.steps.forEachIndexed { idx, step ->
+                                println("${c.DIM}    step[$idx] ${step.type} (${step.stepId})${c.RESET}")
+                                println("${c.DIM}      params   = ${step.params}${c.RESET}")
+                                println("${c.DIM}      success  = ${step.success}  duration=${step.durationMs}ms  exitCode=${step.exitCode ?: "-"}${c.RESET}")
+                                step.stdout?.let { println("${c.DIM}      stdout   = $it${c.RESET}") }
+                                step.stderr?.let { println("${c.DIM}      stderr   = $it${c.RESET}") }
+                                step.error?.let { println("${c.DIM}      error    = $it${c.RESET}") }
+                                if (step.artifacts.isNotEmpty()) println("${c.DIM}      artifacts= ${step.artifacts}${c.RESET}")
+                            }
+                        } else {
+                            println("${c.DIM}  executionSummary: (null)${c.RESET}")
+                        }
+                        println("${c.DIM}${"─".repeat(70)}${c.RESET}")
+                    }
+
+                    // ── level 1-3: 메시지 출력 ──
+                    val displayMessage = filterMessageByVerbose(response.message, vLevel)
+                    print("${c.CYAN}wiiiv>${c.RESET} ")
+                    println(ShellRenderer.render(displayMessage))
+
+                    // action별 추가 정보 출력
                     when (action) {
                         CliActionType.ASK -> {
                             response.askingFor?.let {
@@ -263,9 +322,25 @@ fun main(args: Array<String>) = runBlocking {
                             }
                         }
                         CliActionType.EXECUTE -> {
-                            println(ShellRenderer.renderExecutionResult(
-                                "", response.executionSummary
-                            ))
+                            if (vLevel >= 2) {
+                                // level 2+: 전체 실행 상세 출력
+                                println(ShellRenderer.renderExecutionResult(
+                                    "", response.executionSummary
+                                ))
+                            } else {
+                                // level 1: 간략한 실행 결과 요약
+                                response.executionSummary?.let { summary ->
+                                    val status = if (summary.failureCount == 0) {
+                                        "${c.BRIGHT_GREEN}성공${c.RESET}"
+                                    } else {
+                                        "${c.RED}${summary.failureCount}개 실패${c.RESET}"
+                                    }
+                                    val time = if (summary.totalDurationMs > 0) {
+                                        " ${c.DIM}(${summary.totalDurationMs}ms)${c.RESET}"
+                                    } else ""
+                                    println("      ${c.DIM}[실행: ${summary.steps.size} steps, $status$time]${c.RESET}")
+                                }
+                            }
                         }
                         CliActionType.CANCEL -> {
                             println("      (session reset)")
@@ -403,4 +478,50 @@ private fun readPassword(terminal: Terminal, prompt: String): String? {
     } finally {
         terminal.attributes = attrs
     }
+}
+
+/**
+ * verbose 레벨에 따라 메시지 내 API Workflow Summary 필터링
+ *
+ * - level 0: Summary 블록 전체 제거 (최종 답변만)
+ * - level 1: Summary 헤더 + iteration 결과 첫 줄만 (step 상세/JSON 제거)
+ * - level 2: Summary 전체 포함 (서버가 이미 200자 truncate)
+ * - level 3: 원본 그대로 (필터 없음)
+ */
+private fun filterMessageByVerbose(message: String, verboseLevel: Int): String {
+    // level 3: 필터 없이 전부
+    if (verboseLevel >= 3) return message
+
+    val marker = "=== API Workflow Summary ==="
+    val markerIdx = message.indexOf(marker)
+    if (markerIdx < 0) return message
+
+    val mainMessage = message.substring(0, markerIdx).trimEnd()
+    val summaryBlock = message.substring(markerIdx)
+
+    // level 0: Summary 완전 제거
+    if (verboseLevel == 0) return mainMessage
+
+    // level 2: Summary 전체 포함 (서버 측에서 이미 200자 truncate)
+    if (verboseLevel >= 2) return message
+
+    // level 1: Summary 헤더 + iteration 요약만 (step 상세/JSON 제거)
+    val filtered = summaryBlock.lines().filter { line ->
+        val trimmed = line.trim()
+        trimmed.startsWith("=== API Workflow") ||
+            trimmed.startsWith("Total iterations:") ||
+            trimmed.startsWith("[Iteration ") ||
+            trimmed.startsWith("Result:")
+    }.joinToString("\n") { line ->
+        // "Result:" 행에서 step 상세 부분 제거 — 첫 번째 결과 요약만
+        if (line.trim().startsWith("Result:")) {
+            val content = line.substringAfter("Result:").trim()
+            val brief = content.substringBefore("\n").substringBefore("[step-").trim()
+            val indent = line.substringBefore("Result:")
+            if (brief.isNotEmpty()) "${indent}Result: $brief"
+            else "${indent}Result: ${content.take(80)}"
+        } else line
+    }
+
+    return "$mainMessage\n\n$filtered"
 }

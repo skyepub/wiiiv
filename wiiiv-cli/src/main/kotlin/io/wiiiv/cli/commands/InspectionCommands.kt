@@ -119,10 +119,10 @@ object InspectionCommands {
 
             println("    ${i + 1}. ${step.type.padEnd(14)} $status  ${c.DIM}$duration${c.RESET}$artifacts")
 
-            // stdout/stderr in verbose mode or on failure
-            if (ctx.settings.verbose || !step.success) {
+            // stdout/stderr in verbose mode (level 2+) or on failure
+            if (ctx.settings.verbose >= 2 || !step.success) {
                 step.stdout?.takeIf { it.isNotBlank() }?.let { out ->
-                    val display = if (ctx.settings.verbose) out else out.take(200)
+                    val display = if (ctx.settings.verbose >= 3) out else out.take(200)
                     println("       ${c.DIM}stdout: \"$display\"${c.RESET}")
                 }
                 step.stderr?.takeIf { it.isNotBlank() }?.let { err ->

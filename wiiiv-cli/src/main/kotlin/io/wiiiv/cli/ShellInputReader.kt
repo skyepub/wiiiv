@@ -36,6 +36,9 @@ class ShellInputReader(private val terminal: Terminal) {
     private var lastRawBuffer: String = ""
 
     init {
+        // JLine Macro 클래스를 미리 로딩 — Git Bash/mintty에서 간헐적 NoClassDefFoundError 방지
+        try { Class.forName("org.jline.reader.Macro") } catch (_: Throwable) {}
+
         lineReader = LineReaderBuilder.builder()
             .terminal(terminal)
             .parser(WindowsSafeParser())

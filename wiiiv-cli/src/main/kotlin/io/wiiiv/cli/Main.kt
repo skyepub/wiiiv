@@ -28,7 +28,8 @@ fun main(args: Array<String>) = runBlocking {
     val DIM = "\u001B[2m"
     val RESET = "\u001B[0m"
 
-    val line = "\u2500".repeat(59)
+    val termWidth = try { terminal.width } catch (_: Exception) { 80 }
+    val line = "\u2500".repeat(minOf(termWidth - 1, 59))
     val pad = " ".repeat(9)
 
     // === 서버 접속 + 인증 (로고 전) ===
@@ -77,7 +78,7 @@ fun main(args: Array<String>) = runBlocking {
         System.out.flush()
     }
 
-    println("${DIM}$line${RESET}")
+    println(" ${DIM}$line${RESET}")
 
     val steps = 12
     val minV = 35
@@ -104,16 +105,24 @@ fun main(args: Array<String>) = runBlocking {
     Thread.sleep(200)
 
     print(UP7)
+    val wide = termWidth >= 62
     println("${BRIGHT_CYAN}                  o8o   o8o   o8o${RESET}")
     println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
     println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
-    println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v2.2  2025-${RESET}")
-    println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
-    println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
+    if (wide) {
+        println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}v2.2${RESET}")
+        println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
+        println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
+    } else {
+        println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}")
+        println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
+        println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}")
+    }
     println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")
 
     println()
-    println("  ${WHITE}- A Natural Language-Based Multi-Decision Execution System${RESET}")
+    if (!wide) println("  ${WHITE}v2.2${RESET} ${DIM}skytree@wiiiv.io${RESET}")
+    println("  ${DIM}Natural Language Multi-Decision System${RESET}")
     println()
 
     // workspace 결정
@@ -168,7 +177,7 @@ fun main(args: Array<String>) = runBlocking {
     println()
     println("${pad}Type your message. 'exit' or 'quit' to end. '/help' for commands.")
     println("${pad}${DIM}Alt+Enter or Ctrl+J for newline${RESET}")
-    println("  ${DIM}$line${RESET}")
+    println(" ${DIM}$line${RESET}")
     println()
 
     val inputReader = ShellInputReader(terminal)

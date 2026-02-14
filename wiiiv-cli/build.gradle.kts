@@ -20,7 +20,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
     // JLine3 — multiline terminal input
-    implementation("org.jline:jline:3.25.1")
+    implementation("org.jline:jline:3.28.0")
 
     // SLF4J NOP — suppress logging warnings from Ktor/HTTP clients
     implementation("org.slf4j:slf4j-nop:2.0.9")

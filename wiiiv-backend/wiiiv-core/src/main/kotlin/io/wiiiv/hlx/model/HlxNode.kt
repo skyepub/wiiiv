@@ -23,7 +23,10 @@ enum class HlxNodeType {
     ACT,
 
     @SerialName("repeat")
-    REPEAT
+    REPEAT,
+
+    @SerialName("subworkflow")
+    SUBWORKFLOW
 }
 
 /**
@@ -187,5 +190,27 @@ sealed class HlxNode {
         override val aiRequired: Boolean = true,
         override val determinismLevel: DeterminismLevel? = null,
         override val type: HlxNodeType = HlxNodeType.REPEAT
+    ) : HlxNode()
+
+    /**
+     * SubWorkflow - 다른 등록된 워크플로우를 호출한다
+     *
+     * HLX 모듈화: 워크플로우 안에서 다른 워크플로우를 서브 워크플로우로 호출.
+     * 자식 워크플로우는 독립 context에서 실행되며,
+     * inputMapping/outputMapping으로 명시적 변수 전달.
+     */
+    @Serializable
+    data class SubWorkflow(
+        override val id: String,
+        override val description: String,
+        val workflowRef: String,
+        val inputMapping: Map<String, String> = emptyMap(),
+        val outputMapping: Map<String, String> = emptyMap(),
+        override val input: String? = null,
+        override val output: String? = null,
+        override val onError: String? = null,
+        override val aiRequired: Boolean = false,
+        override val determinismLevel: DeterminismLevel? = null,
+        override val type: HlxNodeType = HlxNodeType.SUBWORKFLOW
     ) : HlxNode()
 }

@@ -97,13 +97,14 @@ object WiiivRegistry {
         ragPipeline = ragPipeline
     )
 
-    // === HLX Runner (Phase 4: Executor/Gate 연동) ===
+    // === HLX Runner (Phase 4: Executor/Gate 연동, Phase 5: SubWorkflow) ===
     val hlxRunner: HlxRunner? = llmProvider?.let { provider ->
         HlxRunner.createWithExecutor(
             llmProvider = provider,
             executor = compositeExecutor,
             gate = permissionGate,
-            model = "gpt-4o-mini"
+            model = "gpt-4o-mini",
+            workflowResolver = { id -> getHlxWorkflow(id)?.workflow }
         )
     }
 

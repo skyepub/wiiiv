@@ -1273,3 +1273,363 @@ class HlxRunnerPhase4Test {
         assertEquals(1, mockExecutor.executedSteps.size)
     }
 }
+
+// ==================== Phase 5: SubWorkflow 테스트 ====================
+
+class HlxRunnerSubWorkflowTest {
+
+    private val childWorkflow = HlxWorkflow(
+        id = "child-workflow",
+        name = "Child Workflow",
+        description = "자식 워크플로우",
+        nodes = listOf(
+            HlxNode.Transform(
+                id = "child-step1",
+                description = "자식 변환",
+                input = "childInput",
+                output = "childOutput"
+            )
+        )
+    )
+
+    // ==================== 기본 실행 ====================
+
+    @Test
+    fun `should execute SubWorkflow basic call`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("child-step1" to """{ "result": "child result" }""")
+        )
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "child-workflow") childWorkflow else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "자식 워크플로우 호출",
+                workflowRef = "child-workflow"
+            )
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(1, result.nodeRecords.size)
+        assertEquals("sub1", result.nodeRecords[0].nodeId)
+        assertEquals(HlxNodeType.SUBWORKFLOW, result.nodeRecords[0].nodeType)
+        assertEquals(HlxStatus.SUCCESS, result.nodeRecords[0].status)
+    }
+
+    @Test
+    fun `should pass inputMapping to child workflow`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("child-step1" to """{ "result": "processed parent data" }""")
+        )
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "child-workflow") childWorkflow else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "입력 매핑 테스트",
+                workflowRef = "child-workflow",
+                inputMapping = mapOf("parentData" to "childInput")
+            )
+        )
+
+        val initialVars = mapOf<String, JsonElement>(
+            "parentData" to JsonPrimitive("hello from parent")
+        )
+
+        val result = runner.run(workflow, initialVars)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        // 프롬프트에 childInput 변수가 포함되어야 함
+        assertTrue(provider.callHistory.any { it.prompt.contains("childInput") })
+    }
+
+    @Test
+    fun `should collect outputMapping from child workflow`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("child-step1" to """{ "result": "child output value" }""")
+        )
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "child-workflow") childWorkflow else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "출력 매핑 테스트",
+                workflowRef = "child-workflow",
+                inputMapping = mapOf("parentData" to "childInput"),
+                outputMapping = mapOf("childOutput" to "parentResult")
+            )
+        )
+
+        val initialVars = mapOf<String, JsonElement>(
+            "parentData" to JsonPrimitive("input data")
+        )
+
+        val result = runner.run(workflow, initialVars)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertNotNull(result.context.variables["parentResult"])
+    }
+
+    // ==================== 변수 격리 ====================
+
+    @Test
+    fun `should isolate child context from parent`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("child-step1" to """{ "result": "child modified" }""")
+        )
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "child-workflow") childWorkflow else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "격리 테스트",
+                workflowRef = "child-workflow",
+                inputMapping = mapOf("parentData" to "childInput")
+                // outputMapping 없음 → childOutput은 부모에 전달 안 됨
+            )
+        )
+
+        val initialVars = mapOf<String, JsonElement>(
+            "parentData" to JsonPrimitive("parent value"),
+            "parentOnly" to JsonPrimitive("should remain")
+        )
+
+        val result = runner.run(workflow, initialVars)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        // 부모 변수 유지
+        assertEquals("parent value", result.context.variables["parentData"]?.jsonPrimitive?.content)
+        assertEquals("should remain", result.context.variables["parentOnly"]?.jsonPrimitive?.content)
+        // 자식의 childOutput은 부모에 없어야 함
+        assertNull(result.context.variables["childOutput"])
+    }
+
+    // ==================== 에러 처리 ====================
+
+    @Test
+    fun `should fail when workflowRef not found`() = runBlocking {
+        val provider = ScriptedLlmProvider(emptyMap())
+        val resolver: (String) -> HlxWorkflow? = { null }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "존재하지 않는 워크플로우",
+                workflowRef = "nonexistent-workflow"
+            )
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("not found"))
+    }
+
+    @Test
+    fun `should fail when resolver is null`() = runBlocking {
+        val provider = ScriptedLlmProvider(emptyMap())
+        // workflowResolver = null (기본값)
+        val runner = HlxRunner.create(provider)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "리졸버 없음",
+                workflowRef = "any-workflow"
+            )
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("WorkflowResolver not configured"))
+    }
+
+    @Test
+    fun `should fail when child workflow fails`() = runBlocking {
+        val failingChild = HlxWorkflow(
+            id = "failing-child",
+            name = "Failing Child",
+            description = "실패하는 자식",
+            nodes = listOf(
+                HlxNode.Observe(
+                    id = "fail-step",
+                    description = "실패할 노드",
+                    output = "data"
+                )
+            )
+        )
+        val provider = ScriptedLlmProvider(
+            mapOf("fail-step" to """invalid json""")
+        )
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "failing-child") failingChild else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "실패하는 자식 호출",
+                workflowRef = "failing-child"
+            )
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("failed"))
+    }
+
+    // ==================== 순환 방지 ====================
+
+    @Test
+    fun `should fail on depth limit exceeded`() = runBlocking {
+        // 자기 자신을 호출하는 워크플로우
+        val selfRefWorkflow = HlxWorkflow(
+            id = "self-ref",
+            name = "Self Referencing",
+            description = "자기 참조",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub-self",
+                    description = "자기 자신 호출",
+                    workflowRef = "self-ref"
+                )
+            )
+        )
+        val provider = ScriptedLlmProvider(emptyMap())
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "self-ref") selfRefWorkflow else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver, maxSubWorkflowDepth = 3)
+
+        val result = runner.run(selfRefWorkflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        // 순환 참조 또는 depth 초과로 실패해야 함
+        assertTrue(
+            result.error!!.contains("Circular") || result.error!!.contains("depth"),
+            "Expected circular or depth error but got: ${result.error}"
+        )
+    }
+
+    @Test
+    fun `should detect circular reference`() = runBlocking {
+        // A → B → A 순환
+        val workflowA = HlxWorkflow(
+            id = "wf-a",
+            name = "Workflow A",
+            description = "A",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub-b",
+                    description = "B 호출",
+                    workflowRef = "wf-b"
+                )
+            )
+        )
+        val workflowB = HlxWorkflow(
+            id = "wf-b",
+            name = "Workflow B",
+            description = "B",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub-a",
+                    description = "A 호출",
+                    workflowRef = "wf-a"
+                )
+            )
+        )
+        val provider = ScriptedLlmProvider(emptyMap())
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            when (id) {
+                "wf-a" -> workflowA
+                "wf-b" -> workflowB
+                else -> null
+            }
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val result = runner.run(workflowA)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("Circular"))
+    }
+
+    // ==================== 하위 호환 ====================
+
+    @Test
+    fun `should work without resolver for existing workflows`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf(
+                "s1" to """{ "result": "observed" }""",
+                "s2" to """{ "result": "transformed" }"""
+            )
+        )
+        // resolver 없이 기존 create()
+        val runner = HlxRunner.create(provider)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Observe(id = "s1", description = "관찰", output = "data"),
+            HlxNode.Transform(id = "s2", description = "변환", input = "data", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(2, result.nodeRecords.size)
+    }
+
+    // ==================== 복합 ====================
+
+    @Test
+    fun `should execute Observe then SubWorkflow then Act mixed workflow`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf(
+                "obs1" to """{ "result": ["item1", "item2"] }""",
+                "child-step1" to """{ "result": "child processed" }""",
+                "act1" to """{ "result": { "sent": true } }"""
+            )
+        )
+        val resolver: (String) -> HlxWorkflow? = { id ->
+            if (id == "child-workflow") childWorkflow else null
+        }
+        val runner = HlxRunner.create(provider, workflowResolver = resolver)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Observe(id = "obs1", description = "데이터 조회", output = "data"),
+            HlxNode.SubWorkflow(
+                id = "sub1",
+                description = "서브워크플로우로 처리",
+                workflowRef = "child-workflow",
+                inputMapping = mapOf("data" to "childInput"),
+                outputMapping = mapOf("childOutput" to "processedData")
+            ),
+            HlxNode.Act(id = "act1", description = "결과 발송", input = "processedData", output = "sendResult")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(3, result.nodeRecords.size)
+        assertTrue(result.nodeRecords.all { it.status == HlxStatus.SUCCESS })
+        assertNotNull(result.context.variables["processedData"])
+        assertNotNull(result.context.variables["sendResult"])
+    }
+}

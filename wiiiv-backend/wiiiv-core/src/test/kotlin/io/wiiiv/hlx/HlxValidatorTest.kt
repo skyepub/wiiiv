@@ -286,6 +286,59 @@ class HlxValidatorTest {
         assertTrue(errors.any { it.message.contains("branch") })
     }
 
+    // ==================== SubWorkflow 검증 ====================
+
+    @Test
+    fun `should fail for SubWorkflow with blank workflowRef`() {
+        val workflow = HlxWorkflow(
+            id = "wf1", name = "test", description = "test",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub1", description = "빈 워크플로우 참조",
+                    workflowRef = ""
+                )
+            )
+        )
+
+        val errors = HlxValidator.validate(workflow)
+        assertTrue(errors.any { it.message.contains("workflowRef") })
+    }
+
+    @Test
+    fun `should pass validation for valid SubWorkflow`() {
+        val workflow = HlxWorkflow(
+            id = "wf1", name = "test", description = "test",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub1", description = "유효한 서브워크플로우",
+                    workflowRef = "child-workflow",
+                    inputMapping = mapOf("a" to "b"),
+                    outputMapping = mapOf("c" to "d")
+                )
+            )
+        )
+
+        val errors = HlxValidator.validate(workflow)
+        assertTrue(errors.isEmpty(), "Expected no errors but got: $errors")
+    }
+
+    @Test
+    fun `should validate SubWorkflow onError`() {
+        val workflow = HlxWorkflow(
+            id = "wf1", name = "test", description = "test",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub1", description = "onError 검증",
+                    workflowRef = "child-workflow",
+                    onError = "invalid_format"
+                )
+            )
+        )
+
+        val errors = HlxValidator.validate(workflow)
+        assertTrue(errors.any { it.message.contains("onError") })
+    }
+
     // ==================== 복합 오류 ====================
 
     @Test

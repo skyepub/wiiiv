@@ -458,6 +458,64 @@ class HlxParserTest {
         assertTrue(result is HlxParseResult.ValidationError)
     }
 
+    // ==================== SubWorkflow 파싱 ====================
+
+    @Test
+    fun `should parse SubWorkflow node`() {
+        val json = """
+        {
+            "id": "wf1", "name": "test", "description": "test wf",
+            "nodes": [{
+                "id": "sub1", "type": "subworkflow",
+                "description": "자식 워크플로우 호출",
+                "workflowRef": "child-workflow-id",
+                "inputMapping": { "parentVar": "childVar" },
+                "outputMapping": { "childResult": "parentResult" }
+            }]
+        }
+        """.trimIndent()
+
+        val workflow = HlxParser.parse(json)
+        val node = workflow.nodes[0] as HlxNode.SubWorkflow
+
+        assertEquals(HlxNodeType.SUBWORKFLOW, node.type)
+        assertEquals("sub1", node.id)
+        assertEquals("child-workflow-id", node.workflowRef)
+        assertEquals(mapOf("parentVar" to "childVar"), node.inputMapping)
+        assertEquals(mapOf("childResult" to "parentResult"), node.outputMapping)
+        assertFalse(node.aiRequired)
+    }
+
+    @Test
+    fun `should round-trip SubWorkflow node`() {
+        val original = HlxWorkflow(
+            id = "rt-sub",
+            name = "Round Trip SubWorkflow",
+            description = "서브워크플로우 라운드트립",
+            nodes = listOf(
+                HlxNode.SubWorkflow(
+                    id = "sub1",
+                    description = "서브워크플로우",
+                    workflowRef = "child-wf",
+                    inputMapping = mapOf("a" to "b"),
+                    outputMapping = mapOf("c" to "d"),
+                    onError = "retry:2 then skip"
+                )
+            )
+        )
+
+        val jsonStr = HlxParser.toJson(original)
+        val parsed = HlxParser.parse(jsonStr)
+
+        assertEquals(1, parsed.nodes.size)
+        val node = parsed.nodes[0] as HlxNode.SubWorkflow
+        assertEquals("sub1", node.id)
+        assertEquals("child-wf", node.workflowRef)
+        assertEquals(mapOf("a" to "b"), node.inputMapping)
+        assertEquals(mapOf("c" to "d"), node.outputMapping)
+        assertEquals("retry:2 then skip", node.onError)
+    }
+
     // ==================== 모든 TransformHint 값 ====================
 
     @Test

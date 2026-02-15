@@ -88,6 +88,16 @@ data class OnErrorPolicy(
     val fallback: OnErrorFallback = OnErrorFallback.FAIL
 )
 
+// ==================== WorkflowResolver ====================
+
+/**
+ * 워크플로우 ID로 HlxWorkflow를 조회하는 함수형 인터페이스.
+ *
+ * wiiiv-core는 wiiiv-server(WiiivRegistry)에 의존할 수 없으므로,
+ * 의존성 역전으로 서브워크플로우 조회를 가능하게 한다.
+ */
+typealias WorkflowResolver = (workflowId: String) -> HlxWorkflow?
+
 // ==================== HlxRunner ====================
 
 /**
@@ -103,15 +113,27 @@ data class OnErrorPolicy(
 class HlxRunner(
     private val nodeExecutor: HlxNodeExecutor,
     private val maxRetries: Int = 3,
-    private val retryDelayMs: Long = 1000
+    private val retryDelayMs: Long = 1000,
+    private val workflowResolver: WorkflowResolver? = null,
+    private val maxSubWorkflowDepth: Int = 10
 ) {
 
     /**
-     * 워크플로우 실행
+     * 워크플로우 실행 (외부 API)
      */
     suspend fun run(
         workflow: HlxWorkflow,
         initialVariables: Map<String, JsonElement> = emptyMap()
+    ): HlxExecutionResult = run(workflow, initialVariables, depth = 0, visited = emptySet())
+
+    /**
+     * 워크플로우 실행 (내부 — depth/visited 추적)
+     */
+    private suspend fun run(
+        workflow: HlxWorkflow,
+        initialVariables: Map<String, JsonElement>,
+        depth: Int,
+        visited: Set<String>
     ): HlxExecutionResult {
         val startTime = System.currentTimeMillis()
         val records = mutableListOf<HlxNodeExecutionRecord>()
@@ -134,7 +156,7 @@ class HlxRunner(
             val node = workflow.nodes[currentIndex]
             context.meta.copy(currentNode = node.id).let { /* meta is data class, need mutable approach */ }
 
-            val flowControl = executeNodeWithPolicy(node, context, records)
+            val flowControl = executeNodeWithPolicy(node, context, records, depth, visited)
 
             when (flowControl) {
                 is FlowControl.Continue, is FlowControl.Skip -> {
@@ -202,7 +224,9 @@ class HlxRunner(
     private suspend fun executeNodeWithPolicy(
         node: HlxNode,
         context: HlxContext,
-        records: MutableList<HlxNodeExecutionRecord>
+        records: MutableList<HlxNodeExecutionRecord>,
+        depth: Int = 0,
+        visited: Set<String> = emptySet()
     ): FlowControl {
         val policy = parseOnError(node.onError)
         var lastError: String? = null
@@ -215,7 +239,7 @@ class HlxRunner(
                 retryCount = attempt
             }
 
-            val flowControl = executeNode(node, context, records, retryCount)
+            val flowControl = executeNode(node, context, records, retryCount, depth, visited)
 
             when (flowControl) {
                 is FlowControl.Failed -> {
@@ -264,7 +288,9 @@ class HlxRunner(
         node: HlxNode,
         context: HlxContext,
         records: MutableList<HlxNodeExecutionRecord>,
-        retryCount: Int
+        retryCount: Int,
+        depth: Int = 0,
+        visited: Set<String> = emptySet()
     ): FlowControl {
         val nodeStart = System.currentTimeMillis()
         val inputValue = node.input?.let { context.variables[it] }
@@ -286,7 +312,10 @@ class HlxRunner(
                 executeDecideNode(node, context, records, nodeStart, inputValue, retryCount)
             }
             is HlxNode.Repeat -> {
-                executeRepeatNode(node, context, records, nodeStart, retryCount)
+                executeRepeatNode(node, context, records, nodeStart, retryCount, depth, visited)
+            }
+            is HlxNode.SubWorkflow -> {
+                executeSubWorkflowNode(node, context, records, nodeStart, retryCount, depth, visited)
             }
         }
     }
@@ -419,7 +448,9 @@ class HlxRunner(
         context: HlxContext,
         records: MutableList<HlxNodeExecutionRecord>,
         nodeStart: Long,
-        retryCount: Int
+        retryCount: Int,
+        depth: Int = 0,
+        visited: Set<String> = emptySet()
     ): FlowControl {
         val overVar = node.over ?: return FlowControl.Failed("Repeat node '${node.id}' missing 'over'")
         val asVar = node.asVar ?: return FlowControl.Failed("Repeat node '${node.id}' missing 'as'")
@@ -456,7 +487,7 @@ class HlxRunner(
 
             // body 노드들 순차 실행
             for (bodyNode in node.body) {
-                val flowControl = executeNodeWithPolicy(bodyNode, context.copy(iteration = iteration), records)
+                val flowControl = executeNodeWithPolicy(bodyNode, context.copy(iteration = iteration), records, depth, visited)
                 when (flowControl) {
                     is FlowControl.Continue, is FlowControl.Skip -> continue
                     is FlowControl.Failed -> {
@@ -497,6 +528,151 @@ class HlxRunner(
         )
 
         return FlowControl.Continue
+    }
+
+    /**
+     * SubWorkflow 노드 실행
+     *
+     * 1. depth 검사 (maxSubWorkflowDepth 초과 시 Failed)
+     * 2. 순환 참조 검사 (visited set에 workflowRef 존재 시 Failed)
+     * 3. workflowResolver로 자식 워크플로우 조회 (null이면 Failed)
+     * 4. inputMapping: 부모 context에서 자식 초기 변수 구성
+     * 5. 재귀 호출: run(childWorkflow, childVars, depth+1, visited + workflowRef)
+     * 6. outputMapping: 자식 context에서 부모 context로 변수 복사
+     * 7. 자식 결과에 따른 FlowControl 반환
+     */
+    private suspend fun executeSubWorkflowNode(
+        node: HlxNode.SubWorkflow,
+        context: HlxContext,
+        records: MutableList<HlxNodeExecutionRecord>,
+        nodeStart: Long,
+        retryCount: Int,
+        depth: Int,
+        visited: Set<String>
+    ): FlowControl {
+        // 1. depth 검사
+        if (depth >= maxSubWorkflowDepth) {
+            val error = "SubWorkflow depth limit exceeded: $depth >= $maxSubWorkflowDepth"
+            records.add(
+                HlxNodeExecutionRecord(
+                    nodeId = node.id,
+                    nodeType = HlxNodeType.SUBWORKFLOW,
+                    status = HlxStatus.FAILED,
+                    durationMs = System.currentTimeMillis() - nodeStart,
+                    error = error,
+                    retryCount = retryCount
+                )
+            )
+            return FlowControl.Failed(error)
+        }
+
+        // 2. 순환 참조 검사
+        if (node.workflowRef in visited) {
+            val error = "Circular SubWorkflow reference detected: '${node.workflowRef}' already in call chain: $visited"
+            records.add(
+                HlxNodeExecutionRecord(
+                    nodeId = node.id,
+                    nodeType = HlxNodeType.SUBWORKFLOW,
+                    status = HlxStatus.FAILED,
+                    durationMs = System.currentTimeMillis() - nodeStart,
+                    error = error,
+                    retryCount = retryCount
+                )
+            )
+            return FlowControl.Failed(error)
+        }
+
+        // 3. workflowResolver로 자식 워크플로우 조회
+        if (workflowResolver == null) {
+            val error = "WorkflowResolver not configured. Cannot resolve SubWorkflow '${node.workflowRef}'"
+            records.add(
+                HlxNodeExecutionRecord(
+                    nodeId = node.id,
+                    nodeType = HlxNodeType.SUBWORKFLOW,
+                    status = HlxStatus.FAILED,
+                    durationMs = System.currentTimeMillis() - nodeStart,
+                    error = error,
+                    retryCount = retryCount
+                )
+            )
+            return FlowControl.Failed(error)
+        }
+
+        val childWorkflow = workflowResolver.invoke(node.workflowRef)
+        if (childWorkflow == null) {
+            val error = "SubWorkflow '${node.workflowRef}' not found"
+            records.add(
+                HlxNodeExecutionRecord(
+                    nodeId = node.id,
+                    nodeType = HlxNodeType.SUBWORKFLOW,
+                    status = HlxStatus.FAILED,
+                    durationMs = System.currentTimeMillis() - nodeStart,
+                    error = error,
+                    retryCount = retryCount
+                )
+            )
+            return FlowControl.Failed(error)
+        }
+
+        // 4. inputMapping: 부모 context → 자식 초기 변수
+        val childVars = mutableMapOf<String, JsonElement>()
+        for ((parentVar, childVar) in node.inputMapping) {
+            context.variables[parentVar]?.let { childVars[childVar] = it }
+        }
+
+        // 5. 재귀 호출
+        val childResult = run(childWorkflow, childVars, depth + 1, visited + node.workflowRef)
+
+        // 6. outputMapping: 자식 context → 부모 context
+        for ((childVar, parentVar) in node.outputMapping) {
+            childResult.context.variables[childVar]?.let { context.variables[parentVar] = it }
+        }
+
+        val durationMs = System.currentTimeMillis() - nodeStart
+
+        // 7. 자식 결과에 따른 FlowControl 반환
+        return when (childResult.status) {
+            HlxExecutionStatus.COMPLETED, HlxExecutionStatus.ENDED_EARLY -> {
+                records.add(
+                    HlxNodeExecutionRecord(
+                        nodeId = node.id,
+                        nodeType = HlxNodeType.SUBWORKFLOW,
+                        status = HlxStatus.SUCCESS,
+                        durationMs = durationMs,
+                        retryCount = retryCount
+                    )
+                )
+                FlowControl.Continue
+            }
+            HlxExecutionStatus.FAILED -> {
+                val error = "SubWorkflow '${node.workflowRef}' failed: ${childResult.error}"
+                records.add(
+                    HlxNodeExecutionRecord(
+                        nodeId = node.id,
+                        nodeType = HlxNodeType.SUBWORKFLOW,
+                        status = HlxStatus.FAILED,
+                        durationMs = durationMs,
+                        error = error,
+                        retryCount = retryCount
+                    )
+                )
+                FlowControl.Failed(error)
+            }
+            HlxExecutionStatus.ABORTED -> {
+                val error = "SubWorkflow '${node.workflowRef}' aborted: ${childResult.error}"
+                records.add(
+                    HlxNodeExecutionRecord(
+                        nodeId = node.id,
+                        nodeType = HlxNodeType.SUBWORKFLOW,
+                        status = HlxStatus.FAILED,
+                        durationMs = durationMs,
+                        error = error,
+                        retryCount = retryCount
+                    )
+                )
+                FlowControl.Failed(error)
+            }
+        }
     }
 
     /**
@@ -555,10 +731,12 @@ class HlxRunner(
             llmProvider: LlmProvider,
             model: String? = null,
             maxRetries: Int = 3,
-            retryDelayMs: Long = 1000
+            retryDelayMs: Long = 1000,
+            workflowResolver: WorkflowResolver? = null,
+            maxSubWorkflowDepth: Int = 10
         ): HlxRunner {
             val nodeExecutor = HlxNodeExecutor(llmProvider, model)
-            return HlxRunner(nodeExecutor, maxRetries, retryDelayMs)
+            return HlxRunner(nodeExecutor, maxRetries, retryDelayMs, workflowResolver, maxSubWorkflowDepth)
         }
 
         /**
@@ -572,10 +750,12 @@ class HlxRunner(
             gate: Gate? = null,
             model: String? = null,
             maxRetries: Int = 3,
-            retryDelayMs: Long = 1000
+            retryDelayMs: Long = 1000,
+            workflowResolver: WorkflowResolver? = null,
+            maxSubWorkflowDepth: Int = 10
         ): HlxRunner {
             val nodeExecutor = HlxNodeExecutor(llmProvider, model, executor, gate)
-            return HlxRunner(nodeExecutor, maxRetries, retryDelayMs)
+            return HlxRunner(nodeExecutor, maxRetries, retryDelayMs, workflowResolver, maxSubWorkflowDepth)
         }
     }
 }

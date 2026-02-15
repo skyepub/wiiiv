@@ -19,6 +19,7 @@ object HlxNodeSerializer : JsonContentPolymorphicSerializer<HlxNode>(HlxNode::cl
             "decide" -> HlxNode.Decide.serializer()
             "act" -> HlxNode.Act.serializer()
             "repeat" -> HlxNode.Repeat.serializer()
+            "subworkflow" -> HlxNode.SubWorkflow.serializer()
             else -> throw IllegalArgumentException(
                 "Unknown HLX node type: ${element.jsonObject["type"]}"
             )

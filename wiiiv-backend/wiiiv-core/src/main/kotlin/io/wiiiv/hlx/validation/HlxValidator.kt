@@ -82,6 +82,7 @@ object HlxValidator {
             if (node is HlxNode.Repeat) {
                 collectNodeIds(node.body, ids)
             }
+            // SubWorkflow는 body가 없으므로 추가 수집 불필요
         }
     }
 
@@ -144,6 +145,11 @@ object HlxValidator {
                     }
                     // 재귀 검증
                     validateNodes(node.body, allIds, "$nodePath.body", errors)
+                }
+                is HlxNode.SubWorkflow -> {
+                    if (node.workflowRef.isBlank()) {
+                        errors.add(HlxValidationError("$nodePath.workflowRef", "SubWorkflow node 'workflowRef' must not be blank"))
+                    }
                 }
                 is HlxNode.Observe, is HlxNode.Transform, is HlxNode.Act -> {
                     // 추가 타입별 검증 없음

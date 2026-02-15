@@ -416,8 +416,22 @@ wiiiv rag size                   # 저장소 크기
   - [x] HlxRunnerPhase4Test (10개: 기본실행 3 + Gate통제 3 + 에러처리 3 + 하위호환 1)
   - [x] Act 노드 Executor 연동 (LLM→Step→Gate→Executor 흐름)
   - [x] 하위 호환: executor=null 시 LLM-only 경로 유지
+- [x] HLX Phase 5: SubWorkflow (서브 워크플로우)
+  - [x] HlxNodeType.SUBWORKFLOW enum 추가
+  - [x] HlxNode.SubWorkflow data class (workflowRef, inputMapping, outputMapping)
+  - [x] HlxNodeSerializer "subworkflow" 매핑 추가
+  - [x] HlxValidator SubWorkflow 검증 (workflowRef 비어있지 않은지)
+  - [x] WorkflowResolver typealias (의존성 역전: core → server)
+  - [x] HlxRunner depth/visited 기반 순환 참조 방지
+  - [x] executeSubWorkflowNode() (inputMapping → 재귀 호출 → outputMapping)
+  - [x] 컨텍스트 격리: 자식 워크플로우 독립 context에서 실행
+  - [x] WiiivRegistry workflowResolver 전달
+  - [x] HlxRunnerSubWorkflowTest (9개: 기본실행 3 + 격리 1 + 에러 3 + 순환방지 2)
+  - [x] HlxValidatorTest SubWorkflow (3개: workflowRef 검증, 정상 통과, onError 검증)
+  - [x] HlxParserTest SubWorkflow (2개: JSON 파싱, 왕복 직렬화)
+  - [x] 하위 호환: workflowResolver=null 시 기존 워크플로우 정상 동작
 
-**테스트 현황: 710+ 통과**
+**테스트 현황: 720+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -444,10 +458,11 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | ParallelExecutionTest | 14 |
 | wiiiv-core | RagTest | 33 |
 | wiiiv-core | RagExecutorTest | 13 |
-| wiiiv-core | HlxParserTest | 20 |
-| wiiiv-core | HlxValidatorTest | 17 |
+| wiiiv-core | HlxParserTest | 22 |
+| wiiiv-core | HlxValidatorTest | 20 |
 | wiiiv-core | HlxRunnerTest | 28 |
 | wiiiv-core | HlxRunnerPhase4Test | 10 |
+| wiiiv-core | HlxRunnerSubWorkflowTest | 9 |
 | **wiiiv-server** | **AuthRoutesTest** | **6** |
 | **wiiiv-server** | **DecisionRoutesTest** | **8** |
 | **wiiiv-server** | **BlueprintRoutesTest** | **8** |
@@ -523,6 +538,13 @@ DACS는 Gate가 아니다:
   - [x] HlxRunner.createWithExecutor() 팩토리
   - [x] WiiivRegistry createWithExecutor 전환
   - [x] HlxRunnerPhase4Test 10개 테스트
+- [x] HLX Phase 5: SubWorkflow (서브 워크플로우)
+  - [x] HlxNode.SubWorkflow 모델 + Serializer
+  - [x] HlxValidator SubWorkflow 검증
+  - [x] WorkflowResolver 의존성 역전
+  - [x] HlxRunner 서브워크플로우 실행 (depth/visited 순환 방지)
+  - [x] WiiivRegistry workflowResolver 연동
+  - [x] 테스트 14개 (Runner 9 + Validator 3 + Parser 2)
 - [ ] 배포 자동화 (Docker, CI/CD)
 
 ---

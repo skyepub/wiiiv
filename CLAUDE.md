@@ -116,6 +116,7 @@ RetryPolicy (재시도 규칙)
 | ExecutionRunner Spec | v1.0 |
 | RetryPolicy Spec | v1.0 |
 | Prompt Specification | v1.0 |
+| HLX Standard | v1.0 |
 | wiiiv API Reference | v2.0 |
 | wiiiv CLI Reference | v2.0 |
 
@@ -135,7 +136,11 @@ wiiiv/
 │   │       ├── gate/        # Gate 계층
 │   │       ├── governor/    # Governor 계층
 │   │       ├── dacs/        # DACS 계층
-│   │       └── rag/         # RAG 계층 (벡터 검색)
+│   │       ├── rag/         # RAG 계층 (벡터 검색)
+│   │       └── hlx/         # HLX 계층 (워크플로우 표준)
+│   │           ├── model/   # 데이터 모델 (HlxNode, HlxWorkflow 등)
+│   │           ├── parser/  # JSON 파서
+│   │           └── validation/ # 구조 검증기
 │   └── wiiiv-server/        # HTTP 서버 (Ktor/Netty, 현 wiiiv-api)
 │       └── src/main/kotlin/io/wiiiv/server/
 │           ├── config/      # 서버 설정 (Auth, CORS, Routing)
@@ -362,8 +367,15 @@ wiiiv rag size                   # 저장소 크기
   - [x] RAG 통합 (ragPipeline으로 API 스펙 검색)
   - [x] MockApiServer (임베디드 Ktor Netty, E2E 테스트용)
   - [x] ApiWorkflowE2ETest (6개 시나리오: 단일호출, 2단계, 다단계쓰기, 에러복구, 중복방지, 단일완료)
+- [x] HLX Phase 1: Core Model + Parser + Validator
+  - [x] HlxNode sealed class (5노드: Observe/Transform/Decide/Act/Repeat)
+  - [x] HlxNodeSerializer (JSON "type" 기반 다형성 직렬화)
+  - [x] HlxWorkflow, HlxTrigger, HlxContext 데이터 모델
+  - [x] HlxParser (parse/parseOrNull/parseAndValidate/toJson)
+  - [x] HlxValidator (7가지 구조 검증 규칙)
+  - [x] HlxParserTest (20개), HlxValidatorTest (17개)
 
-**테스트 현황: 570+ 통과**
+**테스트 현황: 670+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -390,6 +402,8 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | ParallelExecutionTest | 14 |
 | wiiiv-core | RagTest | 33 |
 | wiiiv-core | RagExecutorTest | 13 |
+| wiiiv-core | HlxParserTest | 20 |
+| wiiiv-core | HlxValidatorTest | 17 |
 | **wiiiv-server** | **AuthRoutesTest** | **6** |
 | **wiiiv-server** | **DecisionRoutesTest** | **8** |
 | **wiiiv-server** | **BlueprintRoutesTest** | **8** |
@@ -446,6 +460,8 @@ DACS는 Gate가 아니다:
 - [x] DecisionRoutes 하드코딩 제거 (intent 기반 동적 step 생성)
 - [x] MockEmbedding → RealEmbedding 스위치 (OpenAIEmbeddingProvider)
 - [x] LlmGovernor E2E 테스트 (성공 + 거부 시나리오)
+- [ ] HLX Phase 2: Execution Engine (HlxRunner, LLM 노드 실행, WiiivRegistry 등록)
+- [ ] HLX Phase 3: Server + CLI 연동 (/api/v2/workflows, CLI /hlx 명령어)
 - [ ] 배포 자동화 (Docker, CI/CD)
 
 ---

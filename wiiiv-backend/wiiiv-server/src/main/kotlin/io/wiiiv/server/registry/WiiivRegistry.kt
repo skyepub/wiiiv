@@ -7,6 +7,7 @@ import io.wiiiv.execution.*
 import io.wiiiv.execution.impl.*
 import io.wiiiv.gate.*
 import io.wiiiv.governor.*
+import io.wiiiv.hlx.runner.HlxRunner
 import io.wiiiv.rag.RagPipeline
 import io.wiiiv.rag.embedding.MockEmbeddingProvider
 import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
@@ -93,6 +94,11 @@ object WiiivRegistry {
         blueprintRunner = blueprintRunner,
         ragPipeline = ragPipeline
     )
+
+    // === HLX Runner ===
+    val hlxRunner: HlxRunner? = llmProvider?.let { provider ->
+        HlxRunner.create(provider, model = "gpt-4o-mini")
+    }
 
     // === Session Manager ===
     val sessionManager = SessionManager(conversationalGovernor)

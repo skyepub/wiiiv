@@ -140,7 +140,8 @@ wiiiv/
 │   │       └── hlx/         # HLX 계층 (워크플로우 표준)
 │   │           ├── model/   # 데이터 모델 (HlxNode, HlxWorkflow 등)
 │   │           ├── parser/  # JSON 파서
-│   │           └── validation/ # 구조 검증기
+│   │           ├── validation/ # 구조 검증기
+│   │           └── runner/  # 실행 엔진 (HlxRunner, HlxNodeExecutor, HlxPrompt)
 │   └── wiiiv-server/        # HTTP 서버 (Ktor/Netty, 현 wiiiv-api)
 │       └── src/main/kotlin/io/wiiiv/server/
 │           ├── config/      # 서버 설정 (Auth, CORS, Routing)
@@ -374,8 +375,17 @@ wiiiv rag size                   # 저장소 크기
   - [x] HlxParser (parse/parseOrNull/parseAndValidate/toJson)
   - [x] HlxValidator (7가지 구조 검증 규칙)
   - [x] HlxParserTest (20개), HlxValidatorTest (17개)
+- [x] HLX Phase 2: Execution Engine
+  - [x] HlxPrompt (노드 타입별 LLM 프롬프트 템플릿)
+  - [x] HlxNodeExecutor (개별 노드 LLM 실행기, JSON 추출)
+  - [x] HlxRunner (워크플로우 실행 엔진, FlowControl, OnErrorPolicy)
+  - [x] 결과 모델 (HlxExecutionResult, HlxNodeExecutionRecord, HlxExecutionStatus)
+  - [x] Decide 분기 (JumpTo/EndWorkflow), Repeat 반복 (중첩 지원)
+  - [x] onError 정책 (retry:N, skip, abort, retry:N then skip/decide)
+  - [x] WiiivRegistry hlxRunner 등록
+  - [x] HlxRunnerTest (28개)
 
-**테스트 현황: 670+ 통과**
+**테스트 현황: 700+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -404,6 +414,7 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | RagExecutorTest | 13 |
 | wiiiv-core | HlxParserTest | 20 |
 | wiiiv-core | HlxValidatorTest | 17 |
+| wiiiv-core | HlxRunnerTest | 28 |
 | **wiiiv-server** | **AuthRoutesTest** | **6** |
 | **wiiiv-server** | **DecisionRoutesTest** | **8** |
 | **wiiiv-server** | **BlueprintRoutesTest** | **8** |
@@ -460,7 +471,7 @@ DACS는 Gate가 아니다:
 - [x] DecisionRoutes 하드코딩 제거 (intent 기반 동적 step 생성)
 - [x] MockEmbedding → RealEmbedding 스위치 (OpenAIEmbeddingProvider)
 - [x] LlmGovernor E2E 테스트 (성공 + 거부 시나리오)
-- [ ] HLX Phase 2: Execution Engine (HlxRunner, LLM 노드 실행, WiiivRegistry 등록)
+- [x] HLX Phase 2: Execution Engine (HlxRunner, LLM 노드 실행, WiiivRegistry 등록)
 - [ ] HLX Phase 3: Server + CLI 연동 (/api/v2/workflows, CLI /hlx 명령어)
 - [ ] 배포 자동화 (Docker, CI/CD)
 

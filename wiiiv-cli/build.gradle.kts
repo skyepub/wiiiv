@@ -5,6 +5,42 @@ plugins {
     id("com.github.johnrengelman.shadow")
 }
 
+val wiiivVersion: String by rootProject.extra
+
+val generateBuildInfo by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/buildinfo")
+    val buildNumberFile = rootProject.file("build-number.txt")
+    inputs.file(buildNumberFile)
+    outputs.dir(outputDir)
+    mustRunAfter(":incrementBuildNumber")
+    doLast {
+        val buildNumber = buildNumberFile.readText().trim().toIntOrNull() ?: 1
+        val dir = outputDir.get().asFile.resolve("io/wiiiv/cli")
+        dir.mkdirs()
+        dir.resolve("BuildInfo.kt").writeText(
+            """
+            |package io.wiiiv.cli
+            |
+            |object BuildInfo {
+            |    const val VERSION = "$wiiivVersion"
+            |    const val BUILD_NUMBER = $buildNumber
+            |    const val FULL_VERSION = "v$wiiivVersion.$buildNumber"
+            |}
+            """.trimMargin()
+        )
+    }
+}
+
+tasks.named("compileKotlin") {
+    dependsOn(generateBuildInfo)
+}
+
+sourceSets {
+    main {
+        java.srcDir(layout.buildDirectory.dir("generated/buildinfo"))
+    }
+}
+
 dependencies {
     // Ktor Client
     val ktorVersion = "2.3.7"

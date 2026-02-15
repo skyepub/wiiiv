@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JAVA_HOME="${JAVA_HOME:-C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot}"
-JAR_PATH="$SCRIPT_DIR/wiiiv-backend/wiiiv-server/build/libs/wiiiv-server-2.1.0-SNAPSHOT-all.jar"
+JAR_PATH="$SCRIPT_DIR/wiiiv-backend/wiiiv-server/build/libs/wiiiv-server-2.2.0-SNAPSHOT-all.jar"
 PORT=8235
 BUILD=false
 

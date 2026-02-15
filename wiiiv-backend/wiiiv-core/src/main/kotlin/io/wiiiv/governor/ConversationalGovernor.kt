@@ -123,9 +123,9 @@ class ConversationalGovernor(
 
         // LLM으로 다음 행동 결정
         if (images.isNotEmpty()) {
-            emitProgress(ProgressPhase.IMAGE_ANALYZING, "${images.size}개 이미지 분석 중...")
+            emitProgress(ProgressPhase.IMAGE_ANALYZING, "Analyzing ${images.size} image(s)...")
         }
-        emitProgress(ProgressPhase.LLM_THINKING, "다음 행동 결정 중...")
+        emitProgress(ProgressPhase.LLM_THINKING, "Deciding next action...")
         val governorAction = try {
             decideAction(session, userMessage, images)
         } catch (e: Exception) {
@@ -385,7 +385,7 @@ class ConversationalGovernor(
 
         // 4. DACS (risky이고 첫 실행일 때만)
         if (draftSpec.isRisky() && session.context.executionHistory.isEmpty()) {
-            emitProgress(ProgressPhase.DACS_EVALUATING, "DACS 합의 평가 중...")
+            emitProgress(ProgressPhase.DACS_EVALUATING, "DACS consensus evaluation...")
             val dacsResponse = evaluateDACS(session, spec, draftSpec)
             if (dacsResponse != null) return dacsResponse
         }
@@ -489,7 +489,7 @@ class ConversationalGovernor(
 
             // 1. 파일 생성 (필수)
             val fileBlueprint = blueprint.copy(steps = fileSteps)
-            emitProgress(ProgressPhase.EXECUTING, "파일 생성 중...", 0, fileSteps.size)
+            emitProgress(ProgressPhase.EXECUTING, "Creating files...", 0, fileSteps.size)
             val fileResult = try {
                 blueprintRunner.execute(fileBlueprint)
             } catch (e: Exception) {
@@ -515,7 +515,7 @@ class ConversationalGovernor(
             // 2. 명령 실행 (선택 — 실패해도 전체 성공)
             var cmdResult: BlueprintExecutionResult? = null
             if (cmdSteps.isNotEmpty()) {
-                emitProgress(ProgressPhase.COMMAND_RUNNING, "빌드/테스트 실행 중...")
+                emitProgress(ProgressPhase.COMMAND_RUNNING, "Running build/test...")
                 val cmdBlueprint = blueprint.copy(steps = cmdSteps)
                 cmdResult = try {
                     blueprintRunner.execute(cmdBlueprint)
@@ -543,7 +543,7 @@ class ConversationalGovernor(
         }
 
         // 일반 실행 (PROJECT_CREATE 외)
-        emitProgress(ProgressPhase.EXECUTING, "실행 중...", 0, blueprint.steps.size)
+        emitProgress(ProgressPhase.EXECUTING, "Executing...", 0, blueprint.steps.size)
         val executionResult = if (blueprintRunner != null) {
             try {
                 blueprintRunner.execute(blueprint)
@@ -758,7 +758,7 @@ class ConversationalGovernor(
      * DraftSpec에서 Blueprint 생성
      */
     private suspend fun createBlueprintFromDraftSpec(draftSpec: DraftSpec, spec: Spec, workspace: String? = null): Blueprint {
-        emitProgress(ProgressPhase.BLUEPRINT_CREATING, "Blueprint 생성 중...")
+        emitProgress(ProgressPhase.BLUEPRINT_CREATING, "Creating Blueprint...")
         val now = Instant.now().toString()
         val steps = createSteps(draftSpec, workspace)
 
@@ -1131,11 +1131,12 @@ class ConversationalGovernor(
         val lower = userMessage.lowercase()
 
         return when {
-            lower in listOf("안녕", "hello", "hi", "안녕하세요") -> {
-                session.addGovernorMessage("안녕하세요! wiiiv Governor입니다. 무엇을 도와드릴까요?")
+            lower in listOf("안녕", "안녕하세요") -> {
+                val greetingMessage = "저는 wiiiv Governor입니다.\n요청을 명확한 작업으로 정의하고, 필요한 경우 검증과 설계를 거쳐 안전하게 실행까지 연결합니다.\n무엇을 도와드릴까요?"
+                session.addGovernorMessage(greetingMessage)
                 ConversationResponse(
                     action = ActionType.REPLY,
-                    message = "안녕하세요! wiiiv Governor입니다. 무엇을 도와드릴까요?",
+                    message = greetingMessage,
                     sessionId = session.sessionId
                 )
             }

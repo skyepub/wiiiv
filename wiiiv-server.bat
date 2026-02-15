@@ -6,7 +6,7 @@ setlocal enabledelayedexpansion
 
 set SCRIPT_DIR=%~dp0
 set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot
-set JAR_PATH=%SCRIPT_DIR%wiiiv-backend\wiiiv-server\build\libs\wiiiv-server-2.1.0-SNAPSHOT-all.jar
+set JAR_PATH=%SCRIPT_DIR%wiiiv-backend\wiiiv-server\build\libs\wiiiv-server-2.2.0-SNAPSHOT-all.jar
 set PORT=8235
 set BUILD=false
 

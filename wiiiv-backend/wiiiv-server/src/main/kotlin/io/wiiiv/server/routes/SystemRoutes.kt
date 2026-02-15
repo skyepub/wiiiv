@@ -7,6 +7,7 @@ import io.ktor.server.routing.*
 import io.wiiiv.server.dto.common.ApiResponse
 import io.wiiiv.server.dto.system.*
 import io.wiiiv.server.registry.WiiivRegistry
+import io.wiiiv.BuildInfo
 
 /**
  * System Introspection Routes
@@ -45,7 +46,7 @@ fun Route.systemRoutes() {
             call.respond(
                 ApiResponse.success(
                     SystemInfo(
-                        version = "2.0.0-SNAPSHOT",
+                        version = BuildInfo.FULL_VERSION,
                         uptime = uptime,
                         status = "running"
                     )

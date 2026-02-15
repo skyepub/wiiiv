@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JAVA_HOME="${JAVA_HOME:-C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot}"
-JAR_PATH="$SCRIPT_DIR/wiiiv-cli/build/libs/wiiiv-cli-2.1.0-SNAPSHOT-all.jar"
+JAR_PATH="$SCRIPT_DIR/wiiiv-cli/build/libs/wiiiv-cli-2.2.0-SNAPSHOT-all.jar"
 BUILD=false
 
 # 인자 파싱

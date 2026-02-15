@@ -38,13 +38,13 @@ class ShellProgressDisplay(
         val detail = event.detail?.let { " — $it" } ?: ""
 
         val (color, label) = when (phase) {
-            CliProgressPhase.LLM_THINKING -> c.BRIGHT_CYAN to "LLM 판단 중"
-            CliProgressPhase.DACS_EVALUATING -> c.YELLOW to "DACS 합의 평가"
-            CliProgressPhase.BLUEPRINT_CREATING -> c.BRIGHT_BLUE to "Blueprint 생성"
-            CliProgressPhase.EXECUTING -> c.GREEN to "실행 중"
-            CliProgressPhase.COMMAND_RUNNING -> c.DIM to "명령 실행"
-            CliProgressPhase.IMAGE_ANALYZING -> c.BRIGHT_CYAN to "이미지 분석"
-            CliProgressPhase.DONE -> c.BRIGHT_GREEN to "완료"
+            CliProgressPhase.LLM_THINKING -> c.BRIGHT_CYAN to "Thinking"
+            CliProgressPhase.DACS_EVALUATING -> c.YELLOW to "DACS Evaluating"
+            CliProgressPhase.BLUEPRINT_CREATING -> c.BRIGHT_BLUE to "Blueprint Creating"
+            CliProgressPhase.EXECUTING -> c.GREEN to "Executing"
+            CliProgressPhase.COMMAND_RUNNING -> c.DIM to "Command Running"
+            CliProgressPhase.IMAGE_ANALYZING -> c.BRIGHT_CYAN to "Image Analyzing"
+            CliProgressPhase.DONE -> c.BRIGHT_GREEN to "Done"
         }
 
         if (phase == CliProgressPhase.DONE) {
@@ -53,9 +53,9 @@ class ShellProgressDisplay(
             val timeStr = String.format("%.1fs", elapsed)
             if (verboseLevel >= 2) {
                 // level 2-3: 줄바꿈 로그
-                println("  ${c.BRIGHT_GREEN}> 완료${stepInfo}${detail}  [${timeStr}]${c.RESET}")
+                println("  ${c.BRIGHT_GREEN}> Done${stepInfo}${detail}  [${timeStr}]${c.RESET}")
             } else {
-                print("\r${c.BRIGHT_GREEN}  > ${c.RESET}${c.DIM}완료${stepInfo}${detail}  [${timeStr}]${c.RESET}    ")
+                print("\r${c.BRIGHT_GREEN}  > ${c.RESET}${c.DIM}Done${stepInfo}${detail}  [${timeStr}]${c.RESET}    ")
                 println()
             }
             hasActiveProgress = false

@@ -4,12 +4,23 @@ plugins {
     id("com.github.johnrengelman.shadow") version "8.1.1" apply false
 }
 
+val wiiivVersion by extra("2.2")
+
 allprojects {
     group = "io.wiiiv"
-    version = "2.1.0-SNAPSHOT"
+    version = "2.2.0-SNAPSHOT"
 
     repositories {
         mavenCentral()
+    }
+}
+
+val incrementBuildNumber by tasks.registering {
+    doLast {
+        val file = rootProject.file("build-number.txt")
+        val current = if (file.exists()) file.readText().trim().toIntOrNull() ?: 1 else 1
+        file.writeText("${current + 1}")
+        println("Build number: $current -> ${current + 1}")
     }
 }
 
@@ -31,5 +42,11 @@ subprojects {
 
     tasks.withType<Test> {
         useJUnitPlatform()
+    }
+
+    plugins.withId("com.github.johnrengelman.shadow") {
+        tasks.named("shadowJar") {
+            dependsOn(":incrementBuildNumber")
+        }
     }
 }

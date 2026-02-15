@@ -10,6 +10,8 @@ import io.wiiiv.rag.retrieval.SimpleRetriever
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.rag.vector.VectorEntry
 import io.wiiiv.rag.vector.VectorStore
+import org.apache.pdfbox.Loader
+import org.apache.pdfbox.text.PDFTextStripper
 import java.io.File
 import java.util.UUID
 
@@ -87,15 +89,20 @@ class RagPipeline(
                 )
             }
 
-            // 2. 임베딩
+            // 2. 임베딩 (batchSize 단위로 분할하여 API 토큰 한도 초과 방지)
             val texts = chunks.map { it.content }
-            val embeddingResponse = embeddingProvider.embedBatch(texts)
+            val allEmbeddings = mutableListOf<io.wiiiv.rag.embedding.Embedding>()
+
+            for (batch in texts.chunked(batchSize)) {
+                val response = embeddingProvider.embedBatch(batch)
+                allEmbeddings.addAll(response.embeddings)
+            }
 
             // 3. 벡터 저장
             val entries = chunks.mapIndexed { index, chunk ->
                 VectorEntry(
                     id = chunk.id,
-                    vector = embeddingResponse.embeddings[index].vector,
+                    vector = allEmbeddings[index].vector,
                     content = chunk.content,
                     sourceId = document.id,
                     chunkIndex = chunk.index,
@@ -166,7 +173,11 @@ class RagPipeline(
             )
         }
 
-        val content = file.readText()
+        val content = if (file.extension.lowercase() == "pdf") {
+            extractPdfText(file)
+        } else {
+            file.readText()
+        }
         val document = Document(
             content = content,
             title = file.name,
@@ -184,7 +195,7 @@ class RagPipeline(
      */
     suspend fun ingestDirectory(
         directory: File,
-        extensions: Set<String> = setOf("txt", "md", "json"),
+        extensions: Set<String> = setOf("txt", "md", "json", "pdf"),
         recursive: Boolean = true
     ): BatchIngestionResult {
         if (!directory.isDirectory) {
@@ -253,6 +264,15 @@ class RagPipeline(
      */
     suspend fun size(): Int {
         return vectorStore.size()
+    }
+
+    /**
+     * PDF 파일에서 텍스트 추출
+     */
+    private fun extractPdfText(file: File): String {
+        Loader.loadPDF(file).use { document ->
+            return PDFTextStripper().getText(document)
+        }
     }
 }
 

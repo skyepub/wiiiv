@@ -8,6 +8,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import io.ktor.client.request.forms.*
 import io.ktor.utils.io.*
 import io.wiiiv.cli.model.LocalImage
 import kotlinx.serialization.json.Json
@@ -240,6 +241,21 @@ class WiiivApiClient(
         return parseData(response)
     }
 
+    suspend fun ragIngestFile(file: java.io.File): IngestResponse {
+        val response = httpClient.submitFormWithBinaryData(
+            url = "$baseUrl/api/v2/rag/ingest/file",
+            formData = formData {
+                append("file", file.readBytes(), Headers.build {
+                    append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
+                    append(HttpHeaders.ContentType, ContentType.Application.OctetStream.toString())
+                })
+            }
+        ) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
     suspend fun ragDelete(documentId: String): Int {
         val response = httpClient.delete("$baseUrl/api/v2/rag/$documentId") {
             header(HttpHeaders.Authorization, "Bearer $token")
@@ -256,6 +272,16 @@ class WiiivApiClient(
             response.status == HttpStatusCode.OK
         } catch (_: Exception) {
             false
+        }
+    }
+
+    suspend fun getServerVersion(): String? {
+        return try {
+            val response = httpClient.get("$baseUrl/api/v2/system/info")
+            val info: SystemInfoDto = parseData(response)
+            info.version
+        } catch (_: Exception) {
+            null
         }
     }
 

@@ -51,6 +51,9 @@ fun main(args: Array<String>) = runBlocking {
     }
     println("$pad${BRIGHT_CYAN}[INFO]${RESET} Server connected")
 
+    // 서버 버전 조회
+    val serverVersion = client.getServerVersion() ?: "v2.2"
+
     // 인증 (출력 줄 수 반환, -1이면 실패)
     val authLines = authenticate(client, connArgs, terminal, pad)
     if (authLines < 0) {
@@ -110,7 +113,7 @@ fun main(args: Array<String>) = runBlocking {
     println("${BRIGHT_CYAN}                  `\"'   `\"'   `\"'${RESET}")
     println("${CYAN}oooo oooo    ooo oooo  oooo  oooo  oooo    ooo${RESET}")
     if (wide) {
-        println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}${BuildInfo.FULL_VERSION}${RESET}")
+        println("${CYAN} `88. `88.  .8'  `888  `888  `888   `88.  .8'${RESET}   ${WHITE}$serverVersion${RESET}")
         println("${CYAN}  `88..]88..8'    888   888   888    `88..8'${RESET}")
         println("${CYAN}   `888'`888'     888   888   888     `888'${RESET}  ${DIM}skytree@wiiiv.io${RESET}")
     } else {
@@ -121,7 +124,7 @@ fun main(args: Array<String>) = runBlocking {
     println("${CYAN}    `8'  `8'     o888o o888o o888o     `8'${RESET}")
 
     println()
-    if (!wide) println("  ${WHITE}${BuildInfo.FULL_VERSION}${RESET} ${DIM}skytree@wiiiv.io${RESET}")
+    if (!wide) println("  ${WHITE}$serverVersion${RESET} ${DIM}skytree@wiiiv.io${RESET}")
     println("  ${DIM}Natural Language Multi-Decision System${RESET}")
     println()
 

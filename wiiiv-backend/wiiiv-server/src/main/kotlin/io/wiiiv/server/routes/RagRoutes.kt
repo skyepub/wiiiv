@@ -1,6 +1,7 @@
 package io.wiiiv.server.routes
 
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.request.*
@@ -11,6 +12,7 @@ import io.wiiiv.server.dto.common.ApiResponse
 import io.wiiiv.server.dto.rag.*
 import io.wiiiv.server.registry.WiiivRegistry
 import io.wiiiv.rag.Document
+import java.io.File
 
 /**
  * RAG Routes - 벡터 검색 기반 문서 검색
@@ -66,6 +68,63 @@ fun Route.ragRoutes() {
                             )
                         )
                     )
+                }
+            }
+
+            // Ingest file (multipart upload — PDF, txt, md, json)
+            post("/ingest/file") {
+                val multipart = call.receiveMultipart()
+                var fileName: String? = null
+                var fileBytes: ByteArray? = null
+
+                multipart.forEachPart { part ->
+                    when (part) {
+                        is PartData.FileItem -> {
+                            fileName = part.originalFileName
+                            fileBytes = part.streamProvider().readBytes()
+                        }
+                        else -> {}
+                    }
+                    part.dispose()
+                }
+
+                if (fileBytes == null || fileName == null) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        ApiResponse.error<IngestResponse>(
+                            ApiError(code = "NO_FILE", message = "File is required")
+                        )
+                    )
+                    return@post
+                }
+
+                val tempFile = File.createTempFile("rag-", "-$fileName")
+                try {
+                    tempFile.writeBytes(fileBytes!!)
+                    val result = WiiivRegistry.ragPipeline.ingestFile(tempFile, mapOf("originalName" to fileName!!))
+
+                    if (result.success) {
+                        call.respond(
+                            HttpStatusCode.Created,
+                            ApiResponse.success(
+                                IngestResponse(
+                                    documentId = result.documentId,
+                                    title = result.title,
+                                    chunkCount = result.chunkCount,
+                                    success = true
+                                )
+                            )
+                        )
+                    } else {
+                        call.respond(
+                            HttpStatusCode.InternalServerError,
+                            ApiResponse.error<IngestResponse>(
+                                ApiError(code = "INGEST_FAILED", message = result.error ?: "Ingestion failed")
+                            )
+                        )
+                    }
+                } finally {
+                    tempFile.delete()
                 }
             }
 

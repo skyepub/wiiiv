@@ -45,6 +45,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
+    // PDF parsing (for RAG)
+    implementation("org.apache.pdfbox:pdfbox:3.0.4")
+
     // Ktor Client (for RAG embedding providers)
     implementation("io.ktor:ktor-client-core:2.3.7")
     implementation("io.ktor:ktor-client-cio:2.3.7")

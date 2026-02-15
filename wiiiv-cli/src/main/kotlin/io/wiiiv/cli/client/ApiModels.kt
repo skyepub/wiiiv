@@ -273,6 +273,15 @@ data class DeleteResponse(
     val deleted: Int
 )
 
+// === System ===
+
+@Serializable
+data class SystemInfoDto(
+    val version: String,
+    val uptime: Long,
+    val status: String
+)
+
 // === Health ===
 
 @Serializable

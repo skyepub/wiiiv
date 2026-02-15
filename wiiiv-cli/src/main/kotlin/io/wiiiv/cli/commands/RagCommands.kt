@@ -147,10 +147,16 @@ object RagCommands {
 
         println("  ${c.DIM}Ingesting ${file.name} (${file.length()} bytes)...${c.RESET}")
 
+        val binaryExtensions = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx")
+        val isBinary = file.extension.lowercase() in binaryExtensions
+
         try {
-            val content = file.readText()
             val result = runBlocking {
-                ctx.client.ragIngest(content, file.name)
+                if (isBinary) {
+                    ctx.client.ragIngestFile(file)
+                } else {
+                    ctx.client.ragIngest(file.readText(), file.name)
+                }
             }
             println("  ${c.GREEN}OK${c.RESET} Document ${c.DIM}${result.documentId}${c.RESET} — ${result.chunkCount} chunks")
         } catch (e: Exception) {

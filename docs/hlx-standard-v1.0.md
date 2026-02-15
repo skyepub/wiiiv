@@ -1,8 +1,8 @@
-# SkyFlow Node Specification v1.0
+# HLX Standard v1.0
 
-> **LLM-Orchestrated Structured Execution Graph**
+> **HLX — Human-Level eXecutable Workflow Standard**
 >
-> 인간과 LLM이 공유하는 실행 언어
+> 인간 수준에서 정의하고 실행하는 워크플로우 언어
 >
 > **Open Standard**
 >
@@ -12,37 +12,39 @@
 
 ## 1. 개요
 
-### 1.1 SkyFlow란
+### 1.1 HLX란
 
-SkyFlow는 **인간-LLM 공유 실행 문서**이다.
+HLX(Human-Level eXecutable Workflow Standard)는 **인간 수준에서 정의 가능한 실행 구조**이다.
 
 - 코드가 아니다
 - n8n 복제품이 아니다
 - 단순 자동화 툴이 아니다
 
-SkyFlow는:
+HLX는:
 
-> LLM이 실행하는 구조화된 실행 언어
+> 인간이 읽고, LLM이 실행하고, 저장하고 재실행하는 워크플로우 표준
 
-.blp 파일은:
+.hlx 파일은:
 
 - 실행 파일이면서
 - 문서이면서
 - 설명이면서
 - 실행 지시서이다
 
+"Human-Level"의 의미: LLM은 도구이다. 핵심은 인간 수준에서 정의 가능한 실행 구조이다. LLM은 인간 수준에서 동작하므로 자연스럽게 이 구조를 실행할 수 있다.
+
 ### 1.2 오픈 표준 선언
 
-.blp는 **오픈 표준**이다.
+.hlx는 **오픈 표준**이다.
 
-- 누구나 .blp를 생성하고 실행할 수 있다
+- 누구나 .hlx를 생성하고 실행할 수 있다
 - 특정 런타임에 종속되지 않는다
 - JSON Schema로 검증 가능하다
 - 커뮤니티가 플러그인과 도구를 자유롭게 만들 수 있다
 
-wiiiv/SkyFlow는 .blp의 참조 구현(Reference Implementation)이다.
+wiiiv는 HLX의 참조 구현(Reference Implementation)이다.
 
-### 1.3 .blp의 4가지 필수 속성
+### 1.3 .hlx의 4가지 필수 속성
 
 | 속성 | 의미 |
 |------|------|
@@ -54,14 +56,14 @@ wiiiv/SkyFlow는 .blp의 참조 구현(Reference Implementation)이다.
 ### 1.4 wiiiv와의 관계
 
 ```
-SkyFlow (.blp)
+HLX (.hlx)
   = 5개 노드로 구성된 실행 그래프
-  = LLM이 읽고 실행하는 구조화된 언어
-  = 단독 제품으로도 동작
+  = 인간 수준에서 정의하고 LLM이 실행하는 오픈 표준
+  = 단독으로도 동작하는 워크플로우 포맷
 
 wiiiv
-  = SkyFlow + Governance(DACS) + Gate + RAG + Audit
-  = 엔터프라이즈 실행 안정성 레이어
+  = HLX + Governance(DACS) + Gate + RAG + Audit
+  = HLX의 참조 구현 + 엔터프라이즈 실행 안정성 레이어
 ```
 
 ### 1.5 설계 철학
@@ -268,7 +270,7 @@ onError 값 예시:
 
 ### 4.1 정의
 
-.blp는 선언형 구조이고, context는 실행 시점 상태이다.
+.hlx는 선언형 구조이고, context는 실행 시점 상태이다.
 
 ```json
 {
@@ -315,7 +317,7 @@ suspended → 일시 중단 (resume 가능)
 
 ---
 
-## 5. .blp 파일 형식
+## 5. .hlx 파일 형식
 
 ### 5.1 형식
 
@@ -330,7 +332,7 @@ JSON 데이터 포맷이다. 실행 언어가 아니다.
 
 ```json
 {
-  "$schema": "https://skyflow.dev/schema/blp-v1.0.json",
+  "$schema": "https://hlx.dev/schema/hlx-v1.0.json",
   "version": "1.0",
   "id": "process77",
   "name": "미결제 주문 알림 발송",
@@ -395,7 +397,7 @@ Trigger (HTTP / CLI / Cron / Webhook)
         ↓
 Execution Engine
         ↓
-Workflow Graph (.blp)
+Workflow Graph (.hlx)
 ```
 
 | type | 설명 |
@@ -412,7 +414,7 @@ Workflow Graph (.blp)
 ### 6.1 실행 흐름
 
 ```
-1. .blp 파일 로드
+1. .hlx 파일 로드
 2. Execution Context 초기화
 3. 첫 번째 노드부터 순차 실행:
    a. LLM에게 현재 노드 + context 제공
@@ -455,23 +457,23 @@ Level 2: Workflow Layer (실행 중 판단)
 ### 7.1 CLI 실행
 
 ```bash
-skyflow run process77.blp
-skyflow run process77.blp --dry-run     # 실행하지 않고 계획만 표시
-skyflow run process77.blp --step        # 노드 하나씩 확인하며 실행
+hlx run process77.hlx
+hlx run process77.hlx --dry-run     # 실행하지 않고 계획만 표시
+hlx run process77.hlx --step        # 노드 하나씩 확인하며 실행
 ```
 
 ### 7.2 wiiiv 내장 실행
 
 ```
 사용자: "작업77 실행해줘"
-wiiiv → .blp 로드 → Governor 승인 → LLM 노드별 실행
+wiiiv → .hlx 로드 → Governor 승인 → LLM 노드별 실행
 ```
 
 ### 7.3 HTTP API 실행
 
 ```
 POST /api/v2/workflows/{id}/run
-→ Trigger Layer → Execution Engine → .blp 해석 → 실행
+→ Trigger Layer → Execution Engine → .hlx 해석 → 실행
 ```
 
 ---
@@ -494,7 +496,7 @@ AI가 개입한 모든 노드는 다음을 기록한다:
 
 ### 8.2 재현성
 
-동일 .blp + 동일 입력 데이터 + 동일 모델로 재실행 시:
+동일 .hlx + 동일 입력 데이터 + 동일 모델로 재실행 시:
 - 구조는 동일하게 실행된다 (노드 순서 고정)
 - 개별 노드 내 판단은 미세하게 다를 수 있다 (LLM 본성)
 - Audit 기록을 통해 이전 실행과 비교 가능하다
@@ -535,12 +537,12 @@ Act/Observe 노드의 `target`은 플러그인으로 확장 가능하다:
 |------|------|------|
 | Node Meta Model 코드 구현 | 미착수 | Kotlin data class 정의 |
 | Execution Engine 구현 | 미착수 | AI-Aware Node Runner |
-| .blp 파서 | 미착수 | JSON → 내부 모델 변환 |
+| .hlx 파서 | 미착수 | JSON → 내부 모델 변환 |
 | Workflow Repository | 미착수 | 저장/조회/버전 관리 |
 | Context Manager | 미착수 | 변수 스코프, 상태 관리 |
 | Audit Logger | 미착수 | AI 판단 기록 |
 | Plugin System | 미착수 | 동적 Executor 로딩 |
-| CLI (skyflow) | 미착수 | 독립 실행 도구 |
+| CLI (hlx) | 미착수 | 독립 실행 도구 |
 | Web UI 시각화 | 미착수 | 노드 그래프 표시 |
 
 ---
@@ -552,10 +554,10 @@ Act/Observe 노드의 `target`은 플러그인으로 확장 가능하다:
 | LangGraph | X (코드) | O | X | X |
 | n8n/Zapier | O | X (결정론적) | O | X |
 | CrewAI/AutoGen | X | O | X | X |
-| **SkyFlow** | **O** | **O** | **O** | **O** |
+| **HLX** | **O** | **O** | **O** | **O** |
 
 ---
 
-*SkyFlow Node Specification v1.0*
+*HLX — Human-Level eXecutable Workflow Standard v1.0*
 *하늘나무 / SKYTREE*
 *2026-02-15*

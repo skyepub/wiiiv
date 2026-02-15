@@ -233,4 +233,223 @@ Governor → DACS(veto) → HLX 생성 → HlxRunner
 
 ---
 
+## 8. Blueprint의 폐기와 Step의 잔존
+
+### 8.1 "Blueprint 제거"의 정확한 의미
+
+Blueprint 제거는 **전체 삭제가 아니다**. 정확한 분리는 다음과 같다:
+
+| 구분 | 대상 | 운명 |
+|------|------|------|
+| Blueprint (계획 계층) | 계획 언어, 구조, 오케스트레이션 | **HLX로 대체** |
+| BlueprintRunner | 계획 실행기 | **HlxRunner로 대체** |
+| Blueprint Step (단일 행동 DTO) | 실행 단위 데이터 구조 | **Act의 IR로 재활용** |
+
+Blueprint이라는 **용어**는 "계획 계층" 의미로 은퇴한다. 그러나 Blueprint Step은 **행동의 중간 표현(IR)**으로서 살아남는다.
+
+### 8.2 Step이 살아남는 이유: "독자 있는 IR"
+
+"독자 없는 번역은 존재 이유가 없다." 이것은 Blueprint(계획 계층)을 폐기하는 근거였다.
+
+그런데 Step은 독자가 있다:
+
+| 독자 | Step에서 읽는 것 | 용도 |
+|------|-----------------|------|
+| **Gate** | type, params | ALLOW/DENY 정책 판단 |
+| **Executor** | type, params | 실제 행동 실행 |
+| **Audit** | 전체 Step | 실행 기록 보존 |
+| **Retry/Idempotency** | Step 단위 | 재시도/중복 방지 |
+
+독자가 4명이다. 번역할 가치가 있고, 이미 만들어져 있으니 새로 만들 이유가 없다.
+
+### 8.3 새 IR을 만들지 않는 이유: 유지비
+
+ActionCommitted 같은 새 IR 타입을 만들면 다음 비용이 발생한다:
+
+- 타입 정의 + 직렬화
+- 기존 Gate/Executor와의 호환 레이어
+- 테스트
+- 문서화
+- 버전 관리
+
+Step은 이 모든 것을 이미 갖추고 있다. 같은 역할을 하는 새 타입을 만드는 것은 비용만 늘리고 가치는 없다.
+
+### 8.4 관심사 분리
+
+| 계층 | 역할 | 담당 |
+|------|------|------|
+| **HLX** | 계획 (인지 흐름) | "무엇을 어떤 순서로 할 것인가" |
+| **Step** | 행동 (실행 단위) | "구체적으로 어떤 행동을 할 것인가" |
+
+HLX는 Observe/Transform/Decide/Act/Repeat의 인지 모델로 **흐름**을 정의한다.
+Step은 FILE_READ, COMMAND_EXECUTE, API_CALL 같은 타입과 파라미터로 **행동**을 정의한다.
+
+계획과 행동의 분리. 이것이 HLX와 Step의 관계이다.
+
+---
+
+## 9. Act 노드의 내부 실행 모델
+
+### 9.1 실행 흐름
+
+```
+Act 노드의 description (자연어)
+  │
+  ▼
+LLM 해석 → StepCandidate 생성
+  │          (아직 미승인 상태의 Step)
+  ▼
+commit (HlxRunner가 "이 행동을 실행하겠다"고 결정)
+  │
+  ▼
+Gate 체크 (ALLOW / DENY)
+  │
+  ▼ (ALLOW인 경우)
+Executor 실행
+  │
+  ▼
+Audit 기록
+```
+
+### 9.2 각 단계의 의미
+
+| 단계 | 설명 | 성격 |
+|------|------|------|
+| LLM 해석 | Act의 자연어 기술을 구체적 Step으로 변환 | 확률적 |
+| StepCandidate | LLM이 생성한 미승인 Step | 후보 |
+| commit | HlxRunner가 실행을 결정하는 순간 | 결정적 경계 |
+| Gate | 정책 기반 ALLOW/DENY | 결정적 |
+| Executor | 실제 외부 행동 수행 | 결정적 |
+| Audit | 실행 기록 보존 | 기록 |
+
+### 9.3 commit의 의미
+
+commit은 "LLM의 확률적 해석"과 "시스템의 결정적 실행" 사이의 경계이다.
+
+- commit **이전**: LLM이 자유롭게 해석하고 판단한다 (확률의 영역)
+- commit **이후**: Gate와 Executor가 규칙에 따라 실행한다 (결정의 영역)
+
+이것은 wiiiv의 "확률론적 판단을 구조적으로 신뢰 가능하게"라는 철학의 구체적 구현이다.
+
+### 9.4 CommittedStep (향후)
+
+commit의 순간을 명시적으로 표현하는 래퍼는 향후 Audit 계층 구현 시 추가한다:
+
+```kotlin
+data class CommittedStep(
+    val step: BlueprintStep,       // 기존 Step 그대로
+    val committedAt: Instant,      // 커밋 시점
+    val committedBy: String        // 어떤 Act 노드가 커밋했는지
+)
+```
+
+**지금은 필수가 아니다.** 최소 구현에서는 `Step → Gate → Executor` 흐름만으로 충분하며, commit 메타데이터는 Audit이 필요해질 때 확장한다.
+
+---
+
+## 10. 안정성과 멱등성 모델
+
+### 10.1 LLM 비결정성의 구조적 봉쇄
+
+| 수준 | 봉쇄 방법 | 설명 |
+|------|----------|------|
+| **계획 수준** | HLX 고정 구조 | 노드 순서/타입이 고정되어 LLM 변동이 노드 내부로 한정 |
+| **행동 수준** | Step IR | LLM 해석 결과가 Step이라는 정형 구조로 변환되어 Gate/Executor가 처리 |
+| **통제 수준** | Gate | LLM이 뭐라고 판단하든 정책 위반은 차단 |
+
+### 10.2 멱등성
+
+| 계층 | 멱등성 수준 | 근거 |
+|------|-----------|------|
+| HLX 구조 | **높음** | 같은 .hlx 파일은 항상 같은 노드 순서로 실행 |
+| 노드 내 LLM 해석 | **낮음** | LLM 본성 (같은 입력에 다른 출력 가능) |
+| Step 실행 | **높음** | 같은 Step은 항상 같은 Executor 동작 |
+| Gate 판단 | **결정적** | 규칙 기반, 입력이 같으면 결과 동일 |
+
+HLX는 LLM이 흔들리는 지점(노드 내 해석)을 최소화하고, 흔들리지 않는 지점(구조, 실행, 통제)을 최대화한다.
+
+### 10.3 Blueprint 대비 멱등성 향상
+
+```
+Blueprint:
+  사용자 요청 → [LLM이 전체 계획 생성] → 실행
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+               매번 다른 구조 가능 (전체가 흔들림)
+
+HLX:
+  사용자 요청 → 고정된 HLX 구조 → [LLM이 각 노드만 해석] → 실행
+                                  ^^^^^^^^^^^^^^^^^^^^^^
+                                  노드 내부만 흔들림 (구조는 고정)
+```
+
+---
+
+## 11. Governed HLX Runtime 선언
+
+### 11.1 전환
+
+wiiiv는 **"Blueprint 기반 실행 엔진"**에서 **"Governed HLX Runtime"**으로 진화한다.
+
+이것은 단순한 기능 교체가 아니라 아키텍처 패러다임의 전환이다:
+
+| | Blueprint 시대 | Governed HLX Runtime |
+|---|---|---|
+| 계획 | 일회성, 비영속 | 영속, 재사용, 버전 관리 |
+| 구조 | LLM이 매번 전체 생성 | 고정 구조, LLM은 노드 내부만 |
+| 통제 | Gate가 독립 계층 | Gate가 Act 내부에 내장 |
+| 실행 | BlueprintRunner | HlxRunner |
+| 행동 표현 | Blueprint Step | Step (Act의 IR로 재활용) |
+| 멱등성 | 낮음 | 구조적으로 높음 |
+| 모듈화 | 불가 | 재실행/외부호출/조합/공유 가능 |
+
+### 11.2 최종 아키텍처 (확정)
+
+```
+Governor → DACS(veto) → HLX 생성 → HlxRunner
+  판단       합의/거부      계획(영속)     실행
+                                        ├─ Observe   → LLM
+                                        ├─ Transform → LLM
+                                        ├─ Decide    → LLM
+                                        ├─ Act       → LLM → Step → Gate → Executor → Audit
+                                        └─ Repeat    → 반복 제어
+```
+
+### 11.3 용어 정리 (확정)
+
+| 용어 | 정의 | 상태 |
+|------|------|------|
+| **HLX** | 워크플로우 계획 (인지 흐름 정의) | 활성 |
+| **Step** | 행동 IR (실행 단위 데이터 구조) | 활성 (Blueprint Step에서 계승) |
+| **Blueprint** | 계획 계층 (용어) | **은퇴** |
+| **BlueprintRunner** | 계획 실행기 | **HlxRunner로 대체** |
+| **Governor** | 판단 주체 | 유지 |
+| **DACS** | 합의 엔진 (veto) | 유지 |
+| **Gate** | 정책 강제 (Act 내부) | 유지 (위치 변경) |
+| **Executor** | 행동 실행 | 유지 |
+
+---
+
+## 12. 철학적 일관성 검증
+
+이 진화가 wiiiv의 핵심 철학과 일치하는지 검증한다.
+
+### 12.1 "독자 없는 번역은 존재 이유가 없다"
+
+- Blueprint(계획 계층): 독자 없음 → **제거** ✓
+- Step(행동 IR): 독자 4명 (Gate, Executor, Audit, Retry) → **유지** ✓
+
+### 12.2 "확률론적 판단을 구조적으로 신뢰 가능하게"
+
+- HLX: LLM 비결정성을 노드 내부로 봉쇄 → **향상** ✓
+- Step: 확률적 해석을 정형 구조로 변환 → **경계 명확** ✓
+- Gate: 확률적 판단과 무관하게 경계 강제 → **유지** ✓
+
+### 12.3 "wiiiv는 에이전트가 아니다"
+
+- Gate 통제 유지: LLM이 마음대로 행동할 수 없음 → **유지** ✓
+- DACS veto 유지: 의도 수준에서 거부 가능 → **유지** ✓
+- HLX 고정 구조: LLM이 임의로 계획을 바꿀 수 없음 → **강화** ✓
+
+---
+
 *wiiiv / 하늘나무 / SKYTREE*

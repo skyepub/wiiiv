@@ -264,6 +264,71 @@ class WiiivApiClient(
         return data.deleted
     }
 
+    // === HLX Workflows ===
+
+    suspend fun hlxCreate(workflowJson: String): HlxWorkflowDto {
+        val response = httpClient.post("$baseUrl/api/v2/workflows") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"workflow":${jsonParser.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), kotlinx.serialization.json.JsonPrimitive(workflowJson))}}""")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxList(): HlxWorkflowListDto {
+        val response = httpClient.get("$baseUrl/api/v2/workflows") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxGet(id: String): HlxWorkflowDetailDto {
+        val response = httpClient.get("$baseUrl/api/v2/workflows/$id") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxValidate(id: String): HlxValidateDto {
+        val response = httpClient.post("$baseUrl/api/v2/workflows/$id/validate") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxDelete(id: String): HlxDeleteDto {
+        val response = httpClient.delete("$baseUrl/api/v2/workflows/$id") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxExecute(id: String, variables: Map<String, String> = emptyMap()): HlxExecutionDto {
+        val varsJson = variables.entries.joinToString(",") { (k, v) ->
+            "\"$k\":\"$v\""
+        }
+        val response = httpClient.post("$baseUrl/api/v2/workflows/$id/execute") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"variables":{$varsJson}}""")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxExecutions(workflowId: String): HlxExecutionListDto {
+        val response = httpClient.get("$baseUrl/api/v2/workflows/$workflowId/executions") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
+    suspend fun hlxExecution(executionId: String): HlxExecutionDto {
+        val response = httpClient.get("$baseUrl/api/v2/workflows/executions/$executionId") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return parseData(response)
+    }
+
     // === Health ===
 
     suspend fun healthCheck(): Boolean {

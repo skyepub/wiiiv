@@ -27,6 +27,7 @@ fun Application.configureRouting() {
             executionRoutes()
             systemRoutes()
             ragRoutes()
+            hlxRoutes()
             sessionRoutes()
         }
     }

@@ -393,4 +393,200 @@ class WiiivApiClientTest {
         }
         assertTrue(ex.message?.contains("Session not found") == true)
     }
+
+    // === HLX ===
+
+    @Test
+    fun `hlxCreate should return workflow dto`() = runBlocking {
+        val client = createMockClient { request ->
+            when {
+                request.url.encodedPath == "/api/v2/auth/auto-login" ->
+                    respond(
+                        content = """{"success":true,"data":{"accessToken":"tok","userId":"u1"}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                request.url.encodedPath == "/api/v2/workflows" && request.method == HttpMethod.Post ->
+                    respond(
+                        content = """{
+                            "success":true,
+                            "data":{
+                                "id":"wf-1","name":"Test WF","description":"A test",
+                                "version":"1.0","nodeCount":2,"createdAt":"2025-01-01T00:00:00Z"
+                            }
+                        }""",
+                        status = HttpStatusCode.Created,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                else -> error("Unexpected: ${request.url.encodedPath}")
+            }
+        }
+
+        client.autoLogin()
+        val result = client.hlxCreate("{}")
+        assertEquals("wf-1", result.id)
+        assertEquals("Test WF", result.name)
+        assertEquals(2, result.nodeCount)
+    }
+
+    @Test
+    fun `hlxList should return workflow list`() = runBlocking {
+        val client = createMockClient { request ->
+            when {
+                request.url.encodedPath == "/api/v2/auth/auto-login" ->
+                    respond(
+                        content = """{"success":true,"data":{"accessToken":"tok","userId":"u1"}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                request.url.encodedPath == "/api/v2/workflows" && request.method == HttpMethod.Get ->
+                    respond(
+                        content = """{
+                            "success":true,
+                            "data":{
+                                "workflows":[
+                                    {"id":"wf-1","name":"WF1","description":"First","version":"1.0","nodeCount":3,"createdAt":"2025-01-01T00:00:00Z"}
+                                ],
+                                "total":1
+                            }
+                        }""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                else -> error("Unexpected: ${request.url.encodedPath}")
+            }
+        }
+
+        client.autoLogin()
+        val result = client.hlxList()
+        assertEquals(1, result.total)
+        assertEquals("wf-1", result.workflows[0].id)
+    }
+
+    @Test
+    fun `hlxGet should return workflow detail`() = runBlocking {
+        val client = createMockClient { request ->
+            when {
+                request.url.encodedPath == "/api/v2/auth/auto-login" ->
+                    respond(
+                        content = """{"success":true,"data":{"accessToken":"tok","userId":"u1"}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                request.url.encodedPath == "/api/v2/workflows/wf-1" ->
+                    respond(
+                        content = """{
+                            "success":true,
+                            "data":{
+                                "id":"wf-1","name":"WF1","description":"Test",
+                                "version":"1.0",
+                                "nodes":[{"id":"n1","type":"observe","description":"Observe"}],
+                                "trigger":"manual",
+                                "createdAt":"2025-01-01T00:00:00Z",
+                                "rawJson":"{}"
+                            }
+                        }""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                else -> error("Unexpected: ${request.url.encodedPath}")
+            }
+        }
+
+        client.autoLogin()
+        val result = client.hlxGet("wf-1")
+        assertEquals("wf-1", result.id)
+        assertEquals(1, result.nodes.size)
+        assertEquals("observe", result.nodes[0].type)
+    }
+
+    @Test
+    fun `hlxValidate should return validation result`() = runBlocking {
+        val client = createMockClient { request ->
+            when {
+                request.url.encodedPath == "/api/v2/auth/auto-login" ->
+                    respond(
+                        content = """{"success":true,"data":{"accessToken":"tok","userId":"u1"}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                request.url.encodedPath == "/api/v2/workflows/wf-1/validate" ->
+                    respond(
+                        content = """{"success":true,"data":{"valid":true,"errors":[]}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                else -> error("Unexpected: ${request.url.encodedPath}")
+            }
+        }
+
+        client.autoLogin()
+        val result = client.hlxValidate("wf-1")
+        assertTrue(result.valid)
+        assertTrue(result.errors.isEmpty())
+    }
+
+    @Test
+    fun `hlxExecute should return execution result`() = runBlocking {
+        val client = createMockClient { request ->
+            when {
+                request.url.encodedPath == "/api/v2/auth/auto-login" ->
+                    respond(
+                        content = """{"success":true,"data":{"accessToken":"tok","userId":"u1"}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                request.url.encodedPath == "/api/v2/workflows/wf-1/execute" ->
+                    respond(
+                        content = """{
+                            "success":true,
+                            "data":{
+                                "executionId":"exec-1","workflowId":"wf-1",
+                                "status":"COMPLETED",
+                                "nodeRecords":[
+                                    {"nodeId":"n1","nodeType":"observe","status":"success","durationMs":100}
+                                ],
+                                "totalDurationMs":150
+                            }
+                        }""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                else -> error("Unexpected: ${request.url.encodedPath}")
+            }
+        }
+
+        client.autoLogin()
+        val result = client.hlxExecute("wf-1")
+        assertEquals("exec-1", result.executionId)
+        assertEquals("COMPLETED", result.status)
+        assertEquals(1, result.nodeRecords.size)
+        assertEquals(150L, result.totalDurationMs)
+    }
+
+    @Test
+    fun `hlxDelete should return delete result`() = runBlocking {
+        val client = createMockClient { request ->
+            when {
+                request.url.encodedPath == "/api/v2/auth/auto-login" ->
+                    respond(
+                        content = """{"success":true,"data":{"accessToken":"tok","userId":"u1"}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                request.url.encodedPath == "/api/v2/workflows/wf-1" && request.method == HttpMethod.Delete ->
+                    respond(
+                        content = """{"success":true,"data":{"id":"wf-1","deleted":true}}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                else -> error("Unexpected: ${request.url.encodedPath} ${request.method}")
+            }
+        }
+
+        client.autoLogin()
+        val result = client.hlxDelete("wf-1")
+        assertEquals("wf-1", result.id)
+        assertTrue(result.deleted)
+    }
 }

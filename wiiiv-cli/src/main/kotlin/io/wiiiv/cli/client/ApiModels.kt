@@ -289,3 +289,91 @@ data class HealthResponse(
     val status: String,
     val version: String? = null
 )
+
+// === HLX Workflow ===
+
+@Serializable
+data class HlxWorkflowDto(
+    val id: String,
+    val name: String,
+    val description: String,
+    val version: String,
+    val nodeCount: Int,
+    val createdAt: String
+)
+
+@Serializable
+data class HlxWorkflowDetailDto(
+    val id: String,
+    val name: String,
+    val description: String,
+    val version: String,
+    val nodes: List<HlxNodeSummaryDto>,
+    val trigger: String? = null,
+    val createdAt: String,
+    val rawJson: String
+)
+
+@Serializable
+data class HlxNodeSummaryDto(
+    val id: String,
+    val type: String,
+    val description: String
+)
+
+@Serializable
+data class HlxWorkflowListDto(
+    val workflows: List<HlxWorkflowDto>,
+    val total: Int
+)
+
+@Serializable
+data class HlxValidateDto(
+    val valid: Boolean,
+    val errors: List<String> = emptyList()
+)
+
+@Serializable
+data class HlxDeleteDto(
+    val id: String,
+    val deleted: Boolean
+)
+
+// === HLX Execution ===
+
+@Serializable
+data class HlxExecutionDto(
+    val executionId: String,
+    val workflowId: String,
+    val status: String,
+    val nodeRecords: List<HlxNodeRecordSummaryDto>,
+    val totalDurationMs: Long,
+    val variables: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
+    val error: String? = null
+)
+
+@Serializable
+data class HlxNodeRecordSummaryDto(
+    val nodeId: String,
+    val nodeType: String,
+    val status: String,
+    val durationMs: Long,
+    val error: String? = null,
+    val selectedBranch: String? = null,
+    val iterationCount: Int? = null
+)
+
+@Serializable
+data class HlxExecutionListDto(
+    val executions: List<HlxExecutionSummaryDto>,
+    val total: Int
+)
+
+@Serializable
+data class HlxExecutionSummaryDto(
+    val executionId: String,
+    val workflowId: String,
+    val status: String,
+    val totalDurationMs: Long,
+    val executedAt: String
+)

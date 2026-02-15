@@ -7,6 +7,8 @@ import io.wiiiv.execution.*
 import io.wiiiv.execution.impl.*
 import io.wiiiv.gate.*
 import io.wiiiv.governor.*
+import io.wiiiv.hlx.model.HlxWorkflow
+import io.wiiiv.hlx.runner.HlxExecutionResult
 import io.wiiiv.hlx.runner.HlxRunner
 import io.wiiiv.rag.RagPipeline
 import io.wiiiv.rag.embedding.MockEmbeddingProvider
@@ -108,6 +110,10 @@ object WiiivRegistry {
     private val decisionStore = ConcurrentHashMap<String, DecisionRecord>()
     private val executionStore = ConcurrentHashMap<String, ExecutionRecord>()
 
+    // === HLX Storage ===
+    private val hlxWorkflowStore = ConcurrentHashMap<String, HlxWorkflowEntry>()
+    private val hlxExecutionStore = ConcurrentHashMap<String, HlxExecutionEntry>()
+
     // === Blueprint Operations ===
     fun storeBlueprint(blueprint: Blueprint) {
         blueprintStore[blueprint.id] = blueprint
@@ -143,6 +149,18 @@ object WiiivRegistry {
     }
 
     fun listExecutions(): List<ExecutionRecord> = executionStore.values.toList()
+
+    // === HLX Workflow Operations ===
+    fun storeHlxWorkflow(entry: HlxWorkflowEntry) { hlxWorkflowStore[entry.id] = entry }
+    fun getHlxWorkflow(id: String): HlxWorkflowEntry? = hlxWorkflowStore[id]
+    fun listHlxWorkflows(): List<HlxWorkflowEntry> = hlxWorkflowStore.values.toList()
+    fun deleteHlxWorkflow(id: String): Boolean = hlxWorkflowStore.remove(id) != null
+
+    // === HLX Execution Operations ===
+    fun storeHlxExecution(entry: HlxExecutionEntry) { hlxExecutionStore[entry.executionId] = entry }
+    fun getHlxExecution(id: String): HlxExecutionEntry? = hlxExecutionStore[id]
+    fun listHlxExecutions(workflowId: String): List<HlxExecutionEntry> =
+        hlxExecutionStore.values.filter { it.workflowId == workflowId }
 
     // === Executor Info ===
     fun getExecutorInfos(): List<ExecutorInfo> = listOf(
@@ -223,4 +241,18 @@ data class ExecutionRecord(
     val startedAt: String,
     val completedAt: String? = null,
     val runnerResult: RunnerResult? = null
+)
+
+data class HlxWorkflowEntry(
+    val id: String,
+    val workflow: HlxWorkflow,
+    val rawJson: String,
+    val createdAt: String
+)
+
+data class HlxExecutionEntry(
+    val executionId: String,
+    val workflowId: String,
+    val result: HlxExecutionResult,
+    val executedAt: String
 )

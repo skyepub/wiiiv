@@ -3,6 +3,7 @@ package io.wiiiv.cli
 import io.wiiiv.cli.commands.ControlCommands
 import io.wiiiv.cli.commands.HelpCommands
 import io.wiiiv.cli.commands.InspectionCommands
+import io.wiiiv.cli.commands.HlxCommands
 import io.wiiiv.cli.commands.RagCommands
 import io.wiiiv.cli.commands.StatusCommands
 
@@ -46,6 +47,9 @@ object CommandDispatcher {
 
         // RAG
         register("/rag <cmd>", "RAG vector store (size/list/search/ingest/remove)") { args, ctx -> RagCommands.handleRag(args, ctx) }
+
+        // HLX
+        register("/hlx <cmd>", "HLX workflow (list/get/create/validate/run/delete)") { args, ctx -> HlxCommands.handleHlx(args, ctx) }
     }
 
     private fun register(name: String, description: String, handler: (List<String>, ShellContext) -> Unit) {

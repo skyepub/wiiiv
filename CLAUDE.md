@@ -235,6 +235,19 @@ wiiiv/
 | DELETE | `/api/v2/rag/{documentId}` | 문서 삭제 |
 | DELETE | `/api/v2/rag` | 저장소 초기화 |
 
+### HLX Workflow (워크플로우 관리/실행)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/api/v2/workflows` | 워크플로우 등록 (.hlx JSON 업로드) |
+| GET | `/api/v2/workflows` | 워크플로우 목록 |
+| GET | `/api/v2/workflows/{id}` | 워크플로우 상세 |
+| POST | `/api/v2/workflows/{id}/validate` | 워크플로우 검증 |
+| DELETE | `/api/v2/workflows/{id}` | 워크플로우 삭제 |
+| POST | `/api/v2/workflows/{id}/execute` | 워크플로우 실행 (동기) |
+| GET | `/api/v2/workflows/{id}/executions` | 워크플로우별 실행 이력 |
+| GET | `/api/v2/workflows/executions/{executionId}` | 실행 결과 상세 |
+
 ### Session (대화형 세션)
 
 | Method | Path | 설명 |
@@ -278,6 +291,7 @@ wiiiv/
 | `wiiiv system` | health, info, executors, gates, personas | 시스템 정보 |
 | `wiiiv config` | show, set, get, reset | CLI 설정 |
 | `wiiiv rag` | ingest, search, list, delete, clear, size | RAG 벡터 검색 |
+| `/hlx` | list, get, create, validate, run, delete, executions, result | HLX 워크플로우 |
 
 ### 사용 예시
 ```bash
@@ -309,6 +323,16 @@ wiiiv rag search "검색 쿼리" --top-k 5
 wiiiv rag list                   # 수집된 문서 목록
 wiiiv rag delete <document-id>   # 문서 삭제
 wiiiv rag size                   # 저장소 크기
+
+# HLX (대화형 세션 내 슬래시 명령)
+/hlx list                        # 워크플로우 목록
+/hlx get <id>                    # 워크플로우 상세
+/hlx create <file>               # .hlx 파일로 워크플로우 등록
+/hlx validate <id>               # 워크플로우 검증
+/hlx run <id> [--var k=v]        # 워크플로우 실행
+/hlx executions <id>             # 실행 이력
+/hlx result <execution-id>       # 실행 결과 상세
+/hlx delete <id>                 # 워크플로우 삭제
 ```
 
 ### 세션 저장 위치
@@ -430,7 +454,8 @@ wiiiv rag size                   # 저장소 크기
 | **wiiiv-server** | **SessionStateRoutesTest** | **17** |
 | **wiiiv-server** | **WiringVerificationTest** | **5** |
 | **wiiiv-cli** | **E2EIntegrationTest** | **8** |
-| **wiiiv-cli** | **WiiivApiClientTest** | **12** |
+| **wiiiv-server** | **HlxRoutesTest** | **14** |
+| **wiiiv-cli** | **WiiivApiClientTest** | **18** |
 
 ---
 
@@ -472,7 +497,17 @@ DACS는 Gate가 아니다:
 - [x] MockEmbedding → RealEmbedding 스위치 (OpenAIEmbeddingProvider)
 - [x] LlmGovernor E2E 테스트 (성공 + 거부 시나리오)
 - [x] HLX Phase 2: Execution Engine (HlxRunner, LLM 노드 실행, WiiivRegistry 등록)
-- [ ] HLX Phase 3: Server + CLI 연동 (/api/v2/workflows, CLI /hlx 명령어)
+- [x] HLX Phase 3: Server + CLI 연동
+  - [x] HlxDto (서버 DTO: Request/Response 모델)
+  - [x] WiiivRegistry HLX 저장소 (HlxWorkflowEntry, HlxExecutionEntry)
+  - [x] HlxRoutes (REST API: CRUD + validate + execute + executions)
+  - [x] Routing.kt에 hlxRoutes() 등록
+  - [x] HlxRoutesTest (14개 서버 테스트)
+  - [x] CLI ApiModels HLX DTO 추가
+  - [x] WiiivApiClient HLX API 메서드 (hlxCreate/List/Get/Validate/Delete/Execute/Executions)
+  - [x] HlxCommands CLI 슬래시 명령 (/hlx list/get/create/validate/run/delete/executions/result)
+  - [x] CommandDispatcher /hlx 등록
+  - [x] WiiivApiClientTest HLX 테스트 (6개)
 - [ ] 배포 자동화 (Docker, CI/CD)
 
 ---

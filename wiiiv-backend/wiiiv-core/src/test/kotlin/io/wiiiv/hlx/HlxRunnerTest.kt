@@ -1,10 +1,13 @@
 package io.wiiiv.hlx
 
-import io.wiiiv.execution.LlmAction
+import io.wiiiv.execution.*
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
 import io.wiiiv.execution.impl.LlmResponse
 import io.wiiiv.execution.impl.LlmUsage
+import io.wiiiv.gate.Gate
+import io.wiiiv.gate.GateContext
+import io.wiiiv.gate.GateResult
 import io.wiiiv.hlx.model.*
 import io.wiiiv.hlx.runner.*
 import kotlinx.coroutines.runBlocking
@@ -969,5 +972,304 @@ class HlxRunnerTest {
 
         val json = HlxNodeExecutor.extractJson(response)
         assertEquals(42, json.jsonObject["result"]?.jsonPrimitive?.int)
+    }
+}
+
+// ==================== Phase 4: Mock Executor / Gate ====================
+
+/**
+ * 테스트용 Mock Executor
+ *
+ * 모든 step을 수락하고 설정된 결과를 반환한다.
+ */
+class MockExecutor(
+    private val shouldFail: Boolean = false,
+    private val failMessage: String = "Mock execution failed"
+) : Executor {
+    val executedSteps = mutableListOf<ExecutionStep>()
+
+    override suspend fun execute(step: ExecutionStep, context: ExecutionContext): ExecutionResult {
+        executedSteps.add(step)
+        return if (shouldFail) {
+            ExecutionResult.Failure(
+                error = ExecutionError(
+                    category = ErrorCategory.UNKNOWN,
+                    code = "MOCK_FAIL",
+                    message = failMessage
+                ),
+                meta = ExecutionMeta.now(step.stepId)
+            )
+        } else {
+            ExecutionResult.Success(
+                output = StepOutput(
+                    stepId = step.stepId,
+                    stdout = "mock output for ${step.stepId}",
+                    json = mapOf("executed" to JsonPrimitive(true))
+                ),
+                meta = ExecutionMeta.now(step.stepId)
+            )
+        }
+    }
+
+    override suspend fun cancel(executionId: String, reason: CancelReason): Boolean = true
+    override fun canHandle(step: ExecutionStep): Boolean = true
+}
+
+/**
+ * 테스트용 Mock Gate
+ */
+class MockGate(
+    private val shouldAllow: Boolean = true,
+    private val denyCode: String = "MOCK_DENY"
+) : Gate {
+    override val id: String = "mock-gate"
+    override val name: String = "Mock Gate"
+    val checkedContexts = mutableListOf<GateContext>()
+
+    override fun check(context: GateContext): GateResult {
+        checkedContexts.add(context)
+        return if (shouldAllow) {
+            GateResult.Allow(gateId = id)
+        } else {
+            GateResult.Deny(gateId = id, code = denyCode)
+        }
+    }
+}
+
+// ==================== Phase 4: Act + Executor 테스트 ====================
+
+class HlxRunnerPhase4Test {
+
+    // ==================== 기본 실행 ====================
+
+    @Test
+    fun `should execute Act with executor - COMMAND type`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "COMMAND", "params": { "command": "echo", "args": "hello" } } }""")
+        )
+        val mockExecutor = MockExecutor()
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "셸 명령 실행", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(1, mockExecutor.executedSteps.size)
+        assertTrue(mockExecutor.executedSteps[0] is ExecutionStep.CommandStep)
+        assertNotNull(result.context.variables["result"])
+    }
+
+    @Test
+    fun `should execute Act with executor - FILE_READ type`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "FILE_READ", "params": { "path": "/tmp/test.txt" } } }""")
+        )
+        val mockExecutor = MockExecutor()
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "파일 읽기", output = "fileContent")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(1, mockExecutor.executedSteps.size)
+        assertTrue(mockExecutor.executedSteps[0] is ExecutionStep.FileStep)
+    }
+
+    @Test
+    fun `should execute Act with executor - API_CALL type`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "API_CALL", "params": { "url": "https://api.example.com/data", "method": "GET" } } }""")
+        )
+        val mockExecutor = MockExecutor()
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "API 호출", output = "apiResult")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(1, mockExecutor.executedSteps.size)
+        assertTrue(mockExecutor.executedSteps[0] is ExecutionStep.ApiCallStep)
+    }
+
+    // ==================== Gate 통제 ====================
+
+    @Test
+    fun `should allow execution when gate allows`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "COMMAND", "params": { "command": "ls" } } }""")
+        )
+        val mockExecutor = MockExecutor()
+        val mockGate = MockGate(shouldAllow = true)
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor, gate = mockGate)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "게이트 통과 테스트", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(1, mockGate.checkedContexts.size)
+        assertEquals("COMMAND", mockGate.checkedContexts[0].action)
+        assertEquals(1, mockExecutor.executedSteps.size)
+    }
+
+    @Test
+    fun `should deny execution when gate denies`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "COMMAND", "params": { "command": "rm -rf /" } } }""")
+        )
+        val mockExecutor = MockExecutor()
+        val mockGate = MockGate(shouldAllow = false, denyCode = "DANGEROUS_COMMAND")
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor, gate = mockGate)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "위험한 명령", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("Gate denied"))
+        assertTrue(result.error!!.contains("DANGEROUS_COMMAND"))
+        // Executor는 호출되지 않아야 함
+        assertEquals(0, mockExecutor.executedSteps.size)
+    }
+
+    @Test
+    fun `should execute without gate when gate is null`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "NOOP", "params": { "action": "test" } } }""")
+        )
+        val mockExecutor = MockExecutor()
+        // gate = null (기본값)
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "게이트 없이 실행", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(1, mockExecutor.executedSteps.size)
+    }
+
+    // ==================== 에러 처리 ====================
+
+    @Test
+    fun `should fail on unknown step type`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "UNKNOWN_TYPE", "params": {} } }""")
+        )
+        val mockExecutor = MockExecutor()
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "잘못된 타입", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("Unknown step type"))
+        assertEquals(0, mockExecutor.executedSteps.size)
+    }
+
+    @Test
+    fun `should fail when executor fails`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "step": { "type": "COMMAND", "params": { "command": "fail-cmd" } } }""")
+        )
+        val mockExecutor = MockExecutor(shouldFail = true, failMessage = "Command not found")
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "실패할 명령", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("Executor failed"))
+        assertTrue(result.error!!.contains("Command not found"))
+    }
+
+    @Test
+    fun `should fail when step field is missing`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "result": "no step field" }""")
+        )
+        val mockExecutor = MockExecutor()
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "step 필드 누락", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.FAILED, result.status)
+        assertTrue(result.error!!.contains("missing 'step' field"))
+        assertEquals(0, mockExecutor.executedSteps.size)
+    }
+
+    // ==================== 하위 호환 ====================
+
+    @Test
+    fun `should use LLM-only path when executor is null`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf("act1" to """{ "result": { "sent": true } }""")
+        )
+        // executor=null → 기존 create() 팩토리
+        val runner = HlxRunner.create(provider)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Act(id = "act1", description = "LLM-only 알림 발송", output = "sendResult")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertNotNull(result.context.variables["sendResult"])
+        // LLM-only 경로에서는 "result" 필드를 추출
+        val sendResult = result.context.variables["sendResult"]!!.jsonObject
+        assertEquals(true, sendResult["sent"]?.jsonPrimitive?.boolean)
+    }
+
+    @Test
+    fun `should mix Observe-Transform with Act-Executor in workflow`() = runBlocking {
+        val provider = ScriptedLlmProvider(
+            mapOf(
+                "obs1" to """{ "result": ["item1", "item2"] }""",
+                "trans1" to """{ "result": ["item1"] }""",
+                "act1" to """{ "step": { "type": "COMMAND", "params": { "command": "notify", "args": "item1" } } }"""
+            )
+        )
+        val mockExecutor = MockExecutor()
+        val runner = HlxRunner.createWithExecutor(provider, mockExecutor)
+
+        val workflow = simpleWorkflow(
+            HlxNode.Observe(id = "obs1", description = "관찰", output = "data"),
+            HlxNode.Transform(id = "trans1", description = "변환", input = "data", output = "filtered"),
+            HlxNode.Act(id = "act1", description = "실행", input = "filtered", output = "result")
+        )
+
+        val result = runner.run(workflow)
+
+        assertEquals(HlxExecutionStatus.COMPLETED, result.status)
+        assertEquals(3, result.nodeRecords.size)
+        assertTrue(result.nodeRecords.all { it.status == HlxStatus.SUCCESS })
+        // Observe/Transform은 LLM-only, Act만 Executor 사용
+        assertEquals(1, mockExecutor.executedSteps.size)
     }
 }

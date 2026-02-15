@@ -408,8 +408,16 @@ wiiiv rag size                   # 저장소 크기
   - [x] onError 정책 (retry:N, skip, abort, retry:N then skip/decide)
   - [x] WiiivRegistry hlxRunner 등록
   - [x] HlxRunnerTest (28개)
+- [x] HLX Phase 4: Act 노드 ↔ Gate/Executor 연동
+  - [x] HlxPrompt.actExecution() (구조화된 Step JSON 요청 프롬프트)
+  - [x] HlxNodeExecutor executor/gate 주입, executeActWithExecutor()
+  - [x] HlxRunner.createWithExecutor() 팩토리 메서드
+  - [x] WiiivRegistry hlxRunner를 createWithExecutor()로 변경
+  - [x] HlxRunnerPhase4Test (10개: 기본실행 3 + Gate통제 3 + 에러처리 3 + 하위호환 1)
+  - [x] Act 노드 Executor 연동 (LLM→Step→Gate→Executor 흐름)
+  - [x] 하위 호환: executor=null 시 LLM-only 경로 유지
 
-**테스트 현황: 700+ 통과**
+**테스트 현황: 710+ 통과**
 
 | 모듈 | 테스트 | 개수 |
 |------|--------|------|
@@ -439,6 +447,7 @@ wiiiv rag size                   # 저장소 크기
 | wiiiv-core | HlxParserTest | 20 |
 | wiiiv-core | HlxValidatorTest | 17 |
 | wiiiv-core | HlxRunnerTest | 28 |
+| wiiiv-core | HlxRunnerPhase4Test | 10 |
 | **wiiiv-server** | **AuthRoutesTest** | **6** |
 | **wiiiv-server** | **DecisionRoutesTest** | **8** |
 | **wiiiv-server** | **BlueprintRoutesTest** | **8** |
@@ -508,6 +517,12 @@ DACS는 Gate가 아니다:
   - [x] HlxCommands CLI 슬래시 명령 (/hlx list/get/create/validate/run/delete/executions/result)
   - [x] CommandDispatcher /hlx 등록
   - [x] WiiivApiClientTest HLX 테스트 (6개)
+- [x] HLX Phase 4: Act 노드 ↔ Gate/Executor 연동
+  - [x] HlxPrompt.actExecution() 구조화된 Step 프롬프트
+  - [x] HlxNodeExecutor executor/gate 연동 (executeActWithExecutor)
+  - [x] HlxRunner.createWithExecutor() 팩토리
+  - [x] WiiivRegistry createWithExecutor 전환
+  - [x] HlxRunnerPhase4Test 10개 테스트
 - [ ] 배포 자동화 (Docker, CI/CD)
 
 ---

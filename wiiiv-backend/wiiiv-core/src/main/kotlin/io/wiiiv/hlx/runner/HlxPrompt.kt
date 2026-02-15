@@ -79,7 +79,7 @@ object HlxPrompt {
     }
 
     /**
-     * Act 노드 프롬프트 생성
+     * Act 노드 프롬프트 생성 (LLM-only 경로)
      */
     fun act(node: HlxNode.Act, context: HlxContext): String {
         return buildString {
@@ -95,6 +95,41 @@ object HlxPrompt {
             appendLine("## Response Format")
             appendLine("Return ONLY valid JSON in this format:")
             appendLine("""{ "result": <action result> }""")
+        }
+    }
+
+    /**
+     * Act 노드 실행 프롬프트 생성 (Executor 연동 경로)
+     *
+     * LLM에게 구조화된 BlueprintStep JSON을 요청한다.
+     * Available Action Types 목록을 제공하여 LLM이 적절한 step type을 선택하도록 유도한다.
+     */
+    fun actExecution(node: HlxNode.Act, context: HlxContext): String {
+        return buildString {
+            appendLine(ROLE)
+            appendLine()
+            appendLine("## Node")
+            appendLine("- Type: act (execution mode)")
+            appendLine("- ID: ${node.id}")
+            appendLine("- Description: ${node.description}")
+            node.target?.let { appendLine("- Target: $it") }
+            appendLine()
+            appendContextVariables(this, node.input, context)
+            appendLine("## Available Action Types")
+            appendLine("- COMMAND: Execute a shell command. Params: command (required), args, workingDir, timeoutMs")
+            appendLine("- FILE_READ: Read a file. Params: path (required)")
+            appendLine("- FILE_WRITE: Write a file. Params: path (required), content (required)")
+            appendLine("- FILE_DELETE: Delete a file. Params: path (required)")
+            appendLine("- FILE_MKDIR: Create a directory. Params: path (required)")
+            appendLine("- API_CALL: Make an HTTP request. Params: url (required), method (GET/POST/PUT/DELETE/PATCH), body, header:<name>")
+            appendLine("- NOOP: Do nothing (test/placeholder). Params: any key-value pairs")
+            appendLine()
+            appendLine("## Response Format")
+            appendLine("Return ONLY valid JSON in this format:")
+            appendLine("""{ "step": { "type": "<ACTION_TYPE>", "params": { <key-value pairs> } } }""")
+            appendLine()
+            appendLine("Example:")
+            appendLine("""{ "step": { "type": "COMMAND", "params": { "command": "echo", "args": "hello world" } } }""")
         }
     }
 

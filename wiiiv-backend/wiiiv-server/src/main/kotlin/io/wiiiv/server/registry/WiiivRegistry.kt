@@ -97,9 +97,14 @@ object WiiivRegistry {
         ragPipeline = ragPipeline
     )
 
-    // === HLX Runner ===
+    // === HLX Runner (Phase 4: Executor/Gate 연동) ===
     val hlxRunner: HlxRunner? = llmProvider?.let { provider ->
-        HlxRunner.create(provider, model = "gpt-4o-mini")
+        HlxRunner.createWithExecutor(
+            llmProvider = provider,
+            executor = compositeExecutor,
+            gate = permissionGate,
+            model = "gpt-4o-mini"
+        )
     }
 
     // === Session Manager ===

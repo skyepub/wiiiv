@@ -1,6 +1,8 @@
 package io.wiiiv.hlx.runner
 
+import io.wiiiv.execution.Executor
 import io.wiiiv.execution.impl.LlmProvider
+import io.wiiiv.gate.Gate
 import io.wiiiv.hlx.model.*
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.*
@@ -547,7 +549,7 @@ class HlxRunner(
         }
 
         /**
-         * HlxRunner 생성 팩토리
+         * HlxRunner 생성 팩토리 (LLM-only)
          */
         fun create(
             llmProvider: LlmProvider,
@@ -556,6 +558,23 @@ class HlxRunner(
             retryDelayMs: Long = 1000
         ): HlxRunner {
             val nodeExecutor = HlxNodeExecutor(llmProvider, model)
+            return HlxRunner(nodeExecutor, maxRetries, retryDelayMs)
+        }
+
+        /**
+         * HlxRunner 생성 팩토리 (Executor/Gate 연동)
+         *
+         * Act 노드에서 Executor/Gate를 사용하여 실제 세상을 변경할 수 있다.
+         */
+        fun createWithExecutor(
+            llmProvider: LlmProvider,
+            executor: Executor,
+            gate: Gate? = null,
+            model: String? = null,
+            maxRetries: Int = 3,
+            retryDelayMs: Long = 1000
+        ): HlxRunner {
+            val nodeExecutor = HlxNodeExecutor(llmProvider, model, executor, gate)
             return HlxRunner(nodeExecutor, maxRetries, retryDelayMs)
         }
     }

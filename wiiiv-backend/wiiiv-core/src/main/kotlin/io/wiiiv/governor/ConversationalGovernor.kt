@@ -230,25 +230,41 @@ class ConversationalGovernor(
     /**
      * RAG 검색 — 사용자 메시지 + DraftSpec 기반
      *
+     * 다중 쿼리 전략: 원문 메시지와 결합 쿼리를 함께 검색하여
+     * 추상적 질문("날씨 API?")과 구체적 질문("wttr.in API") 모두 커버한다.
+     *
      * 검색 실패 시 1회 재시도한다. 임베딩 API가 일시적으로 불안정할 수 있기 때문.
-     * 재시도까지 실패하면 null을 반환하되, 로그를 남긴다.
      */
     private suspend fun consultRag(userMessage: String, draftSpec: DraftSpec): String? {
         if (ragPipeline == null) return null
         if (ragPipeline.size() == 0) return null  // 문서가 없으면 스킵
 
-        val query = buildString {
-            append(userMessage)
-            draftSpec.intent?.let { append(" $it") }
-            draftSpec.domain?.let { append(" $it") }
-        }.trim()
+        // 다중 쿼리 생성: 원문 + 결합 쿼리로 검색 범위 확대
+        val queries = buildList {
+            // Query 1: 원문 메시지 (가장 구체적 — 사용자 키워드 보존)
+            if (userMessage.isNotBlank()) add(userMessage.trim())
 
-        if (query.isBlank()) return null
+            // Query 2: 원문 + intent + domain 결합 (의미 확장)
+            val combined = buildString {
+                append(userMessage)
+                draftSpec.intent?.let { append(" $it") }
+                draftSpec.domain?.let { append(" $it") }
+            }.trim()
+            if (combined.isNotBlank() && combined != userMessage.trim()) {
+                add(combined)
+            }
+        }.distinct()
+
+        if (queries.isEmpty()) return null
 
         // 1회 재시도 (임베딩 API 일시 장애 대응)
         repeat(2) { attempt ->
             try {
-                val result = ragPipeline.search(query, topK = 5)
+                val result = if (queries.size == 1) {
+                    ragPipeline.search(queries.first(), topK = 5)
+                } else {
+                    ragPipeline.searchMulti(queries, topK = 5)
+                }
                 if (result.isNotEmpty()) return result.toNumberedContext()
                 return null  // 검색 성공했지만 결과 없음
             } catch (e: Exception) {
@@ -1323,8 +1339,10 @@ class ConversationalGovernor(
         history: List<TurnExecution>,
         session: ConversationSession
     ): ApiWorkflowDecision {
-        // RAG 컨텍스트 조회
-        val ragContext = consultRagForApiKnowledge(draftSpec)
+        // RAG 컨텍스트 조회 — 세션의 마지막 사용자 메시지를 보조 쿼리로 전달
+        val lastUserMessage = session.getRecentHistory(5)
+            .lastOrNull { it.role == MessageRole.USER }?.content
+        val ragContext = consultRagForApiKnowledge(draftSpec, lastUserMessage)
 
         // 실행 히스토리 포맷 (TurnExecution → 문자열)
         val executionHistory = history.map { turn ->
@@ -1369,21 +1387,38 @@ class ConversationalGovernor(
 
     /**
      * RAG를 통해 API 지식 검색
+     *
+     * 다중 쿼리 전략: intent/domain + 사용자 원문 메시지를 결합하여 검색.
+     * 추상적 의도("날씨 조회")만으로 매칭 안 되는 경우,
+     * 원문 사용자 메시지("서울 날씨 알려줘")가 보조 쿼리로 작동한다.
      */
-    private suspend fun consultRagForApiKnowledge(draftSpec: DraftSpec): String? {
+    private suspend fun consultRagForApiKnowledge(draftSpec: DraftSpec, userMessage: String? = null): String? {
         if (ragPipeline == null) return null
         if (ragPipeline.size() == 0) return null
 
-        val query = buildString {
-            draftSpec.intent?.let { append(it) }
-            draftSpec.domain?.let { append(" $it") }
-        }.trim()
+        val queries = buildList {
+            // Query 1: intent + domain (기존)
+            val intentQuery = buildString {
+                draftSpec.intent?.let { append(it) }
+                draftSpec.domain?.let { append(" $it") }
+            }.trim()
+            if (intentQuery.isNotBlank()) add(intentQuery)
 
-        if (query.isBlank()) return null
+            // Query 2: 사용자 원문 메시지 (키워드 보존)
+            if (!userMessage.isNullOrBlank() && userMessage.trim() != intentQuery) {
+                add(userMessage.trim())
+            }
+        }.distinct()
+
+        if (queries.isEmpty()) return null
 
         repeat(2) { attempt ->
             try {
-                val result = ragPipeline.search(query, topK = 5)
+                val result = if (queries.size == 1) {
+                    ragPipeline.search(queries.first(), topK = 5)
+                } else {
+                    ragPipeline.searchMulti(queries, topK = 5)
+                }
                 if (result.isNotEmpty()) return result.toNumberedContext()
                 return null
             } catch (e: Exception) {

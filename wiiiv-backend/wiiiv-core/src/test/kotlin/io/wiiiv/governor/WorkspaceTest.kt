@@ -229,9 +229,9 @@ class WorkspaceTest {
                 workspace = "/home/user/projects"
             )
 
-            assertTrue(prompt.contains("워크스페이스"))
+            assertTrue(prompt.contains("Workspace"))
             assertTrue(prompt.contains("/home/user/projects"))
-            assertTrue(prompt.contains("targetPath를 물어볼 필요가 없다"))
+            assertTrue(prompt.contains("No need to ask for targetPath"))
         }
 
         @Test
@@ -241,7 +241,7 @@ class WorkspaceTest {
                 workspace = null
             )
 
-            assertFalse(prompt.contains("워크스페이스"))
+            assertFalse(prompt.contains("Workspace"))
         }
     }
 

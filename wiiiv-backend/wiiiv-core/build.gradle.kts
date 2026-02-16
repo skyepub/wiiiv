@@ -65,3 +65,10 @@ dependencies {
     testImplementation("io.ktor:ktor-server-netty:2.3.7")
     testImplementation("io.ktor:ktor-server-content-negotiation:2.3.7")
 }
+
+tasks.test {
+    // -PskipE2E=true 로 E2E 테스트 제외 가능
+    if (project.hasProperty("skipE2E")) {
+        exclude("io/wiiiv/integration/**")
+    }
+}

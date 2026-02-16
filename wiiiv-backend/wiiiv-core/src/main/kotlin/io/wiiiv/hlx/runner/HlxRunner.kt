@@ -174,6 +174,18 @@ class HlxRunner(
                 is FlowControl.JumpTo -> {
                     val targetIndex = nodeIndexMap[flowControl.nodeId]
                     if (targetIndex != null) {
+                        // 중간에 건너뛰는 노드가 있으면 경고 로그
+                        val skippedCount = targetIndex - currentIndex - 1
+                        if (skippedCount > 0) {
+                            val skippedNodes = workflow.nodes
+                                .subList(currentIndex + 1, targetIndex)
+                                .map { it.id }
+                            System.err.println(
+                                "[HlxRunner] WARN: Decide branch jumped from '${node.id}' to '${flowControl.nodeId}', " +
+                                "skipping $skippedCount node(s): $skippedNodes. " +
+                                "If these nodes should always execute, move them before the Decide node."
+                            )
+                        }
                         currentIndex = targetIndex
                     } else {
                         return HlxExecutionResult(

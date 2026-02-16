@@ -16,7 +16,19 @@ data class ConnectionArgs(
     val isAutoLogin: Boolean = true
 ) {
     fun toServerUrl(): String = "http://$host:$port"
-    fun credentialKey(): String = "$host:$port"
+    /**
+     * credential 저장 키 — 같은 서버면 IP가 달라도 동일 키를 사용한다.
+     * localhost, 127.0.0.1, WSL IP 등은 모두 "localhost:포트"로 정규화.
+     */
+    fun credentialKey(): String {
+        val normalized = if (host == "127.0.0.1" || isPrivateOrLocal(host)) "localhost" else host
+        return "$normalized:$port"
+    }
+
+    private fun isPrivateOrLocal(h: String): Boolean {
+        // WSL IP(172.x), 내부망(10.x, 192.168.x) → 동일 머신으로 간주
+        return h.startsWith("172.") || h.startsWith("10.") || h.startsWith("192.168.")
+    }
 
     companion object {
         fun parse(args: Array<String>): ConnectionArgs {

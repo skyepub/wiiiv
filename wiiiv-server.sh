@@ -5,7 +5,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-JAVA_HOME="${JAVA_HOME:-C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot}"
+# WSL vs Git Bash 자동 감지
+if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+    JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}"
+else
+    JAVA_HOME="${JAVA_HOME:-C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot}"
+fi
 JAR_PATH="$SCRIPT_DIR/wiiiv-backend/wiiiv-server/build/libs/wiiiv-server-2.2.0-SNAPSHOT-all.jar"
 PORT=8235
 BUILD=false
@@ -32,5 +37,6 @@ fi
 
 echo "[wiiiv] Starting wiiiv-server on port $PORT..."
 exec "$JAVA_HOME/bin/java" \
+    -Djava.awt.headless=true \
     -Dfile.encoding=UTF-8 \
     -jar "$JAR_PATH"

@@ -1,6 +1,7 @@
 package io.wiiiv.execution.impl
 
 import io.wiiiv.execution.*
+import io.wiiiv.execution.PathResolver
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.io.File
@@ -68,7 +69,7 @@ class MultimodalExecutor(
                 )
 
             // Validate input file exists
-            val inputFile = File(step.inputPath)
+            val inputFile = File(PathResolver.resolve(step.inputPath))
             if (!inputFile.exists()) {
                 return ExecutionResult.Failure(
                     error = ExecutionError(

@@ -1,6 +1,7 @@
 package io.wiiiv.execution.impl
 
 import io.wiiiv.execution.*
+import io.wiiiv.execution.PathResolver
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.io.File
@@ -134,7 +135,7 @@ class CommandExecutor : Executor {
 
         // Set working directory
         step.workingDir?.let { dir ->
-            val workDir = File(dir)
+            val workDir = File(PathResolver.resolve(dir))
             if (!workDir.exists()) {
                 return CommandResult.Error(
                     ExecutionError(

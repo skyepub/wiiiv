@@ -1,6 +1,7 @@
 package io.wiiiv.execution.impl
 
 import io.wiiiv.execution.*
+import io.wiiiv.execution.PathResolver
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.io.File
@@ -136,7 +137,7 @@ class FileExecutor : Executor {
      */
     @Suppress("UNUSED_PARAMETER")
     private fun executeRead(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
-        val file = File(step.path)
+        val file = File(PathResolver.resolve(step.path))
 
         if (!file.exists()) {
             return FileOperationResult.Error(
@@ -179,7 +180,7 @@ class FileExecutor : Executor {
      */
     @Suppress("UNUSED_PARAMETER")
     private fun executeWrite(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
-        val file = File(step.path)
+        val file = File(PathResolver.resolve(step.path))
         val content = step.content ?: ""
 
         // Create parent directories if needed
@@ -205,10 +206,11 @@ class FileExecutor : Executor {
      */
     @Suppress("UNUSED_PARAMETER")
     private fun executeCopy(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
-        val source = File(step.path)
-        val target = File(step.targetPath ?: return FileOperationResult.Error(
+        val source = File(PathResolver.resolve(step.path))
+        val targetPath = step.targetPath ?: return FileOperationResult.Error(
             ExecutionError.contractViolation("MISSING_TARGET", "Copy requires targetPath")
-        ))
+        )
+        val target = File(PathResolver.resolve(targetPath))
 
         if (!source.exists()) {
             return FileOperationResult.Error(
@@ -244,10 +246,11 @@ class FileExecutor : Executor {
      */
     @Suppress("UNUSED_PARAMETER")
     private fun executeMove(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
-        val source = File(step.path)
-        val target = File(step.targetPath ?: return FileOperationResult.Error(
+        val source = File(PathResolver.resolve(step.path))
+        val targetPath = step.targetPath ?: return FileOperationResult.Error(
             ExecutionError.contractViolation("MISSING_TARGET", "Move requires targetPath")
-        ))
+        )
+        val target = File(PathResolver.resolve(targetPath))
 
         if (!source.exists()) {
             return FileOperationResult.Error(
@@ -282,7 +285,7 @@ class FileExecutor : Executor {
      */
     @Suppress("UNUSED_PARAMETER")
     private fun executeDelete(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
-        val file = File(step.path)
+        val file = File(PathResolver.resolve(step.path))
 
         if (!file.exists()) {
             return FileOperationResult.Error(
@@ -322,7 +325,7 @@ class FileExecutor : Executor {
      */
     @Suppress("UNUSED_PARAMETER")
     private fun executeMkdir(step: ExecutionStep.FileStep, context: ExecutionContext): FileOperationResult {
-        val dir = File(step.path)
+        val dir = File(PathResolver.resolve(step.path))
 
         if (dir.exists()) {
             // Already exists - still success

@@ -5,7 +5,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-JAVA_HOME="${JAVA_HOME:-C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot}"
+# WSL vs Git Bash 자동 감지
+if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+    JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}"
+else
+    JAVA_HOME="${JAVA_HOME:-C:/Program Files/Eclipse Adoptium/jdk-17.0.17.10-hotspot}"
+fi
 JAR_PATH="$SCRIPT_DIR/wiiiv-cli/build/libs/wiiiv-cli-2.2.0-SNAPSHOT-all.jar"
 BUILD=false
 

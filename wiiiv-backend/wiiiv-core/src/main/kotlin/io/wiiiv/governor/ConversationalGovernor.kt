@@ -177,6 +177,13 @@ class ConversationalGovernor(
         // RAG 검색 — 사용자 메시지로 관련 문서 조회
         val ragContext = consultRag(userMessage, session.draftSpec)
 
+        // [DEBUG] RAG 상태 로깅
+        if (ragContext != null) {
+            println("[RAG] Context injected: ${ragContext.length} chars, first 100: ${ragContext.take(100)}")
+        } else {
+            println("[RAG] No context (ragPipeline=${if (ragPipeline != null) "yes" else "no"}, storeSize=${ragPipeline?.size() ?: 0})")
+        }
+
         val systemPrompt = GovernorPrompt.withContext(
             draftSpec = session.draftSpec,
             recentHistory = session.getRecentHistory(10),
@@ -191,9 +198,21 @@ class ConversationalGovernor(
         val fullPrompt = buildString {
             appendLine(systemPrompt)
             appendLine()
+
+            // RAG 최종 리마인더 — 사용자 메시지 직전에 한번 더 강조
+            if (ragContext != null) {
+                appendLine("⚠⚠⚠ CRITICAL REMINDER: 위의 '참고 문서 (RAG)' 섹션에 실제 문서가 제공되었다.")
+                appendLine("너의 일반 지식이 아닌, **문서의 내용을 있는 그대로 인용하여** 답변하라.")
+                appendLine("문서에 없는 내용만 일반 지식으로 보충하라.")
+                appendLine()
+            }
+
             appendLine("## 사용자 메시지")
             appendLine(userMessage)
         }
+
+        // [DEBUG] 프롬프트 길이 로깅
+        println("[PROMPT] Total length: ${fullPrompt.length} chars, ragContext: ${ragContext?.length ?: 0} chars")
 
         val response = llmProvider!!.call(
             LlmRequest(
@@ -210,9 +229,13 @@ class ConversationalGovernor(
 
     /**
      * RAG 검색 — 사용자 메시지 + DraftSpec 기반
+     *
+     * 검색 실패 시 1회 재시도한다. 임베딩 API가 일시적으로 불안정할 수 있기 때문.
+     * 재시도까지 실패하면 null을 반환하되, 로그를 남긴다.
      */
     private suspend fun consultRag(userMessage: String, draftSpec: DraftSpec): String? {
         if (ragPipeline == null) return null
+        if (ragPipeline.size() == 0) return null  // 문서가 없으면 스킵
 
         val query = buildString {
             append(userMessage)
@@ -222,12 +245,56 @@ class ConversationalGovernor(
 
         if (query.isBlank()) return null
 
-        return try {
-            val result = ragPipeline.search(query, topK = 5)
-            if (result.isEmpty()) null else result.toNumberedContext()
-        } catch (_: Exception) {
-            null
+        // 1회 재시도 (임베딩 API 일시 장애 대응)
+        repeat(2) { attempt ->
+            try {
+                val result = ragPipeline.search(query, topK = 5)
+                if (result.isNotEmpty()) return result.toNumberedContext()
+                return null  // 검색 성공했지만 결과 없음
+            } catch (e: Exception) {
+                if (attempt == 0) {
+                    System.err.println("[RAG] Search failed (attempt 1), retrying: ${e.message}")
+                    kotlinx.coroutines.delay(500)  // 500ms 대기 후 재시도
+                } else {
+                    System.err.println("[RAG] Search failed (attempt 2), skipping RAG: ${e.message}")
+                }
+            }
         }
+        return null
+    }
+
+    /**
+     * LLM JSON 응답에서 잘못된 이스케이프 시퀀스를 제거한다.
+     *
+     * LLM이 JSON 문자열 안에 \$ 등 유효하지 않은 이스케이프를 생성하는 경우
+     * kotlinx.serialization 파서가 실패한다. 유효한 JSON 이스케이프만 남기고
+     * 나머지는 백슬래시를 제거한다.
+     *
+     * 유효: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+     */
+    private fun sanitizeJsonEscapes(jsonStr: String): String {
+        val validEscapeChars = setOf('"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u')
+        val sb = StringBuilder(jsonStr.length)
+        var i = 0
+        while (i < jsonStr.length) {
+            val c = jsonStr[i]
+            if (c == '\\' && i + 1 < jsonStr.length) {
+                val next = jsonStr[i + 1]
+                if (next in validEscapeChars) {
+                    sb.append(c)
+                    sb.append(next)
+                    i += 2
+                } else {
+                    // Invalid escape (e.g., \$): drop the backslash
+                    sb.append(next)
+                    i += 2
+                }
+            } else {
+                sb.append(c)
+                i++
+            }
+        }
+        return sb.toString()
     }
 
     /**
@@ -237,7 +304,8 @@ class ConversationalGovernor(
         val (jsonStr, tail) = extractJsonWithTail(response)
 
         return try {
-            val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
+            val sanitized = sanitizeJsonEscapes(jsonStr)
+            val jsonElement = json.parseToJsonElement(sanitized).jsonObject
 
             val actionStr = jsonElement["action"]?.jsonPrimitive?.contentOrNull ?: "REPLY"
             val action = try {
@@ -1304,6 +1372,7 @@ class ConversationalGovernor(
      */
     private suspend fun consultRagForApiKnowledge(draftSpec: DraftSpec): String? {
         if (ragPipeline == null) return null
+        if (ragPipeline.size() == 0) return null
 
         val query = buildString {
             draftSpec.intent?.let { append(it) }
@@ -1312,12 +1381,21 @@ class ConversationalGovernor(
 
         if (query.isBlank()) return null
 
-        return try {
-            val result = ragPipeline.search(query, topK = 5)
-            if (result.isEmpty()) null else result.toNumberedContext()
-        } catch (_: Exception) {
-            null
+        repeat(2) { attempt ->
+            try {
+                val result = ragPipeline.search(query, topK = 5)
+                if (result.isNotEmpty()) return result.toNumberedContext()
+                return null
+            } catch (e: Exception) {
+                if (attempt == 0) {
+                    System.err.println("[RAG] API knowledge search failed (attempt 1), retrying: ${e.message}")
+                    kotlinx.coroutines.delay(500)
+                } else {
+                    System.err.println("[RAG] API knowledge search failed (attempt 2), skipping: ${e.message}")
+                }
+            }
         }
+        return null
     }
 
     /**
@@ -1327,7 +1405,8 @@ class ConversationalGovernor(
         val jsonStr = extractJson(response)
 
         return try {
-            val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
+            val sanitized = sanitizeJsonEscapes(jsonStr)
+            val jsonElement = json.parseToJsonElement(sanitized).jsonObject
 
             val isComplete = jsonElement["isComplete"]?.jsonPrimitive?.booleanOrNull ?: false
             val isAbort = jsonElement["isAbort"]?.jsonPrimitive?.booleanOrNull ?: false

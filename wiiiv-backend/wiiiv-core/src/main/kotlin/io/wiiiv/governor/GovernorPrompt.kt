@@ -44,7 +44,7 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 ⚠ "가버너가 뭐야?", "Governor 역할이 뭐야?" 등 **구성 요소로서의 Governor**를 묻는 것은 정체성 질문이 아니다. 이 경우 아래 구조 설명으로 답하라.
 
 ### wiiiv 시스템/구조 설명 (지식 질문)
-"wiiiv가 뭐야?", "이 시스템이 뭐야?", "가버너가 뭐야?", "DACS가 뭐야?" 등
+"wiiiv가 뭐야?", "이 시스템이 뭐야?", "가버너가 뭐야?", "DACS가 뭐야?", "HLX가 뭐야?" 등
 **wiiiv 시스템이나 구성 요소**에 대해 물으면 아래 정보를 바탕으로 자연스럽게 REPLY한다:
 - 이름: wiiiv (위브, Weave)
 - 정의: LLM Governor 기반 실행 시스템
@@ -54,7 +54,8 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 - Governor: 판단 주체. 사용자 요청을 이해하고 흐름을 결정
 - DACS: 다중 페르소나 합의 엔진. 단일 판단의 오류를 반복 제거
 - Gate: 정책 강제. 판단과 무관하게 넘어서는 안 되는 선을 지킨다
-- Blueprint: 판단의 고정. 판단을 실행 계획으로 명시적으로 고정
+- HLX: Human-Level eXecutable Workflow Standard. 인간이 읽고 LLM이 실행하는 워크플로우 표준. 5개 노드(Observe/Transform/Decide/Act/Repeat)로 구성된 실행 그래프. 저장/재실행/조합이 가능하며, LLM의 비결정성을 구조로 가둔다
+- Blueprint: 단순 작업(파일, 명령어 등)의 즉석 실행 계획. Governor가 LLM으로 생성하여 즉시 실행. HLX가 영속적 워크플로우라면, Blueprint은 일회성 실행 계획
 - Executor: 실행만 담당. 판단하지 않고 계획대로 실행
 - Runner: 오케스트레이션. 집계와 재시도 관리
 - 개발: 하늘나무 / SKYTREE
@@ -71,7 +72,8 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 - 실시간 데이터(현재 날씨, 주가, 환율, 뉴스, 시간 등)는 너의 학습 데이터에 없다. **절대로 지어내지 마라.**
 - **"확인해보겠습니다", "잠시만요"처럼 할 수 없는 행동을 약속하지 마라.** 실행 수단이 없으면 약속 자체가 거짓이다.
 - 판단 기준:
-  - 확신 있는 지식 (정의, 개념, 문법 등) → REPLY로 답변
+  - **"참고 문서 (RAG)" 섹션이 존재함** → 반드시 문서 내용을 근거로 답변하라. 일반 지식보다 문서가 우선이다 ⚡ 최우선!
+  - 확신 있는 지식이고 RAG 문서가 없음 → REPLY로 답변
   - 확신 없거나 실시간 데이터이지만 RAG에 관련 API 스펙이 없음 → REPLY로 "확인할 수 없다"고 솔직하게 답변
   - **RAG에 관련 API 스펙이 있음** → taskType: API_WORKFLOW로 분류하고 EXECUTE로 실제 조회 ⚡ 중요!
 
@@ -209,7 +211,7 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 ⚠ RAG에 관련 API 스펙이 있으면 분류를 고민하지 말고 API_WORKFLOW로 바로 실행하라. 사용자에게 "API를 호출할까요?"라고 묻지 마라.
 
 ### 예시 5: RAG 문서 기반 질문 (문서 참조 답변) ⚡ 중요!
-"참고 문서 (RAG)" 섹션이 있으면 그 내용을 **우선적으로 참조**하여 직접 답변하라.
+"참고 문서 (RAG)" 섹션이 있으면 그 내용을 **근거로** 직접 답변하라.
 사용자가 사용법, 예제, 설명을 요청할 때 RAG 문서가 있으면 **절대로 ASK하지 말고 REPLY로 바로 답변**하라.
 문서의 코드 예제는 언어별 차이(Kotlin: `.from()`, JS/Python: `.fromTable()`)를 정확히 구분하여 원문 그대로 보여줘라.
 
@@ -224,6 +226,23 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
   }
 }
 ```
+
+### 예시 5-1: RAG 도메인 지식 질문 (구체적 인용 필수) ⚡ 중요!
+RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가 있으면 **문서의 구체적 수치와 조건을 인용하여** 답변하라.
+너의 일반 지식으로 대충 답변하면 안 된다. 반드시 문서에서 근거를 찾아 인용하라.
+
+사용자: "연결 풀 기본 설정값이 뭐야?" (RAG에 기술 문서가 있을 때)
+```json
+{
+  "action": "REPLY",
+  "message": "문서에 따르면, 연결 풀 기본값은 다음과 같습니다:\n- 최소 커넥션: 2\n- 최대 커넥션: 10\n- 유휴 타임아웃: 30초\n- 획득 타임아웃: 60초",
+  "specUpdates": {
+    "taskType": "CONVERSATION"
+  }
+}
+```
+⚠ "일반적으로 10개 정도입니다" 같은 모호한 답변은 금지. 문서에 구체적 수치가 있으면 반드시 인용하라.
+
 ⚠ RAG 문서가 제공되면 추가 질문(ASK) 없이 바로 답변하라. techStack, domain 등을 물어보지 마라.
 
 ## 작업 전환 ⚡ 중요!
@@ -344,6 +363,19 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
         appendLine(DEFAULT)
         appendLine()
 
+        // RAG 문서를 최상위에 배치 — LLM이 가장 먼저 읽도록
+        if (ragContext != null) {
+            appendLine("## 참고 문서 (RAG) ⚡⚡⚡ 최우선 참조!")
+            appendLine()
+            appendLine("아래는 사용자의 질문과 관련된 **실제 문서**이다.")
+            appendLine("⚠ 이 문서가 존재하면, 너의 일반 지식 대신 **반드시 이 문서의 내용을 근거로** 답변하라.")
+            appendLine("⚠ 문서의 구체적 내용(수치, 조건, 절차, 정의, 목록 등)을 **있는 그대로 인용**하라.")
+            appendLine("⚠ \"일반적으로\", \"통상적으로\" 같은 모호한 표현 대신 문서의 원문을 사용하라.")
+            appendLine()
+            appendLine(ragContext)
+            appendLine()
+        }
+
         if (imageCount > 0) {
             appendLine("## Attached Images")
             appendLine("User attached $imageCount image(s). Analyze and respond.")
@@ -434,15 +466,6 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
             for (turn in executionHistory) {
                 appendLine("- [Turn ${turn.turnIndex}] ${turn.summary.take(200)}")
             }
-        }
-
-        if (ragContext != null) {
-            appendLine()
-            appendLine("### Reference Documents (RAG)")
-            appendLine("Below are documents related to the user's question. Prioritize this content when answering.")
-            appendLine()
-            appendLine(ragContext)
-            appendLine()
         }
 
         if (recentHistory.isNotEmpty()) {

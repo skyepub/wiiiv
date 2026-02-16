@@ -46,7 +46,7 @@ fun Route.authRoutes() {
 
             // TODO: Implement actual user validation
             // For now, simple check for demo
-            if (request.username == "admin" && request.password == "admin123") {
+            if (request.username == "admin" && request.password == "mako2122") {
                 val token = JwtConfig.generateToken(request.username, listOf("admin"))
                 call.respond(
                     ApiResponse.success(

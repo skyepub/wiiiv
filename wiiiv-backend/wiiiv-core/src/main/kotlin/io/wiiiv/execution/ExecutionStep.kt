@@ -185,7 +185,7 @@ sealed class ExecutionStep {
         val url: String,
         val headers: Map<String, String> = emptyMap(),
         val body: String? = null,
-        val timeoutMs: Long = 30_000,
+        val timeoutMs: Long = 60_000,
         override val params: Map<String, String> = emptyMap()
     ) : ExecutionStep() {
         override val type: StepType = StepType.API_CALL

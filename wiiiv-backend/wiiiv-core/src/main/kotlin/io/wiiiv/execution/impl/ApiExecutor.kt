@@ -319,7 +319,7 @@ class ApiExecutor(
          */
         private val DEFAULT_CLIENT: HttpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(Duration.ofSeconds(30))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build()
 

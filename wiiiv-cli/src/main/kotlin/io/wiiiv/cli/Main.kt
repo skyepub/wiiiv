@@ -493,47 +493,58 @@ private fun readPassword(terminal: Terminal, prompt: String): String? {
 }
 
 /**
- * verbose 레벨에 따라 메시지 내 API Workflow Summary 필터링
+ * verbose 레벨에 따라 메시지 필터링
  *
- * - level 0: Summary 블록 전체 제거 (최종 답변만)
- * - level 1: Summary 헤더 + iteration 결과 첫 줄만 (step 상세/JSON 제거)
- * - level 2: Summary 전체 포함 (서버가 이미 200자 truncate)
+ * API Workflow Summary + HLX Workflow 양쪽 모두 처리한다.
+ *
+ * - level 0: 상세 블록 전체 제거 (최종 답변만)
+ * - level 1: 컴팩트 요약만 (노드 출력, Final Variables 제거)
+ * - level 2: 전체 포함
  * - level 3: 원본 그대로 (필터 없음)
  */
 private fun filterMessageByVerbose(message: String, verboseLevel: Int): String {
-    // level 3: 필터 없이 전부
     if (verboseLevel >= 3) return message
 
-    val marker = "=== API Workflow Summary ==="
-    val markerIdx = message.indexOf(marker)
-    if (markerIdx < 0) return message
+    var result = message
 
-    val mainMessage = message.substring(0, markerIdx).trimEnd()
-    val summaryBlock = message.substring(markerIdx)
-
-    // level 0: Summary 완전 제거
-    if (verboseLevel == 0) return mainMessage
-
-    // level 2: Summary 전체 포함 (서버 측에서 이미 200자 truncate)
-    if (verboseLevel >= 2) return message
-
-    // level 1: Summary 헤더 + iteration 요약만 (step 상세/JSON 제거)
-    val filtered = summaryBlock.lines().filter { line ->
-        val trimmed = line.trim()
-        trimmed.startsWith("=== API Workflow") ||
-            trimmed.startsWith("Total iterations:") ||
-            trimmed.startsWith("[Iteration ") ||
-            trimmed.startsWith("Result:")
-    }.joinToString("\n") { line ->
-        // "Result:" 행에서 step 상세 부분 제거 — 첫 번째 결과 요약만
-        if (line.trim().startsWith("Result:")) {
-            val content = line.substringAfter("Result:").trim()
-            val brief = content.substringBefore("\n").substringBefore("[step-").trim()
-            val indent = line.substringBefore("Result:")
-            if (brief.isNotEmpty()) "${indent}Result: $brief"
-            else "${indent}Result: ${content.take(80)}"
-        } else line
+    // HLX Node Details 필터링
+    val hlxDetailMarker = "=== HLX Node Details ==="
+    val hlxDetailIdx = result.indexOf(hlxDetailMarker)
+    if (hlxDetailIdx >= 0) {
+        if (verboseLevel < 2) {
+            // level 0-1: HLX Node Details 이후 전체 제거
+            result = result.substring(0, hlxDetailIdx).trimEnd()
+        }
     }
 
-    return "$mainMessage\n\n$filtered"
+    // API Workflow Summary 필터링
+    val apiMarker = "=== API Workflow Summary ==="
+    val apiMarkerIdx = result.indexOf(apiMarker)
+    if (apiMarkerIdx >= 0) {
+        val mainMessage = result.substring(0, apiMarkerIdx).trimEnd()
+        val summaryBlock = result.substring(apiMarkerIdx)
+
+        if (verboseLevel == 0) {
+            result = mainMessage
+        } else if (verboseLevel < 2) {
+            val filtered = summaryBlock.lines().filter { line ->
+                val trimmed = line.trim()
+                trimmed.startsWith("=== API Workflow") ||
+                    trimmed.startsWith("Total iterations:") ||
+                    trimmed.startsWith("[Iteration ") ||
+                    trimmed.startsWith("Result:")
+            }.joinToString("\n") { line ->
+                if (line.trim().startsWith("Result:")) {
+                    val content = line.substringAfter("Result:").trim()
+                    val brief = content.substringBefore("\n").substringBefore("[step-").trim()
+                    val indent = line.substringBefore("Result:")
+                    if (brief.isNotEmpty()) "${indent}Result: $brief"
+                    else "${indent}Result: ${content.take(80)}"
+                } else line
+            }
+            result = "$mainMessage\n\n$filtered"
+        }
+    }
+
+    return result
 }

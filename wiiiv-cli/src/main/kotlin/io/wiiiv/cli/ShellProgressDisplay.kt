@@ -56,6 +56,51 @@ class ShellProgressDisplay(
         return 80
     }
 
+    /**
+     * 문자열의 터미널 표시 너비 계산.
+     * CJK (한글/한자/일본어 등) 문자는 2컬럼, 나머지는 1컬럼.
+     */
+    private fun displayWidth(s: String): Int {
+        var w = 0
+        for (ch in s) {
+            w += if (isWideChar(ch)) 2 else 1
+        }
+        return w
+    }
+
+    /**
+     * 터미널 표시 너비 기준으로 문자열을 자른다.
+     */
+    private fun truncateToWidth(s: String, maxWidth: Int): String {
+        var w = 0
+        for ((i, ch) in s.withIndex()) {
+            val cw = if (isWideChar(ch)) 2 else 1
+            if (w + cw > maxWidth) {
+                return s.substring(0, i)
+            }
+            w += cw
+        }
+        return s
+    }
+
+    /**
+     * CJK 및 전각 문자 판별 (터미널에서 2컬럼 차지)
+     */
+    private fun isWideChar(ch: Char): Boolean {
+        val code = ch.code
+        return (code in 0x1100..0x115F) ||    // Hangul Jamo
+               (code in 0x2E80..0x303E) ||    // CJK Radicals, Kangxi, CJK Symbols
+               (code in 0x3040..0x33BF) ||    // Hiragana, Katakana, CJK Compatibility
+               (code in 0x3400..0x4DBF) ||    // CJK Unified Ext A
+               (code in 0x4E00..0x9FFF) ||    // CJK Unified Ideographs
+               (code in 0xA000..0xA4CF) ||    // Yi
+               (code in 0xAC00..0xD7AF) ||    // Hangul Syllables
+               (code in 0xF900..0xFAFF) ||    // CJK Compatibility Ideographs
+               (code in 0xFE30..0xFE4F) ||    // CJK Compatibility Forms
+               (code in 0xFF01..0xFF60) ||    // Fullwidth Forms
+               (code in 0xFFE0..0xFFE6)       // Fullwidth Signs
+    }
+
     // ANSI: 현재 줄 전체 지우기 + 커서를 1열로
     private val CLEAR_LINE = "\u001b[2K\u001b[1G"
 
@@ -115,8 +160,13 @@ class ShellProgressDisplay(
 
         val prefix = "  $frame "
         val body = "${currentLabel}${currentStepInfo}${currentDetail}  [${timeStr}]"
-        val maxBody = termWidth - prefix.length - 2
-        val truncated = if (body.length > maxBody && maxBody > 3) body.take(maxBody - 3) + "..." else body
+        val maxBodyWidth = termWidth - displayWidth(prefix) - 2
+        val bodyWidth = displayWidth(body)
+        val truncated = if (bodyWidth > maxBodyWidth && maxBodyWidth > 3) {
+            truncateToWidth(body, maxBodyWidth - 3) + "..."
+        } else {
+            body
+        }
 
         print("${CLEAR_LINE}${currentColor}${prefix}${c.RESET}${c.DIM}${truncated}${c.RESET}")
         System.out.flush()

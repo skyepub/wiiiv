@@ -932,14 +932,23 @@ class ConversationalGovernor(
         val workflow = try {
             HlxParser.parse(hlxJson)
         } catch (e: Exception) {
-            println("[HLX] Parse failed: ${e.message}")
-            println("[HLX] Raw JSON: ${hlxJson.take(500)}")
-            return ConversationResponse(
-                action = ActionType.EXECUTE,
-                message = "HLX 워크플로우 파싱 실패: ${e.message}\n\n생성된 JSON:\n${hlxJson.take(300)}...",
-                sessionId = session.sessionId,
-                error = e.message
-            )
+            // sanitize 후 재시도
+            println("[HLX] Parse failed: ${e.message}, trying sanitize...")
+            try {
+                val sanitized = sanitizeHlxJson(hlxJson)
+                HlxParser.parse(sanitized).also {
+                    println("[HLX] Sanitized parse succeeded")
+                }
+            } catch (e2: Exception) {
+                println("[HLX] Sanitized parse also failed: ${e2.message}")
+                println("[HLX] Raw JSON:\n${hlxJson.take(2000)}")
+                return ConversationResponse(
+                    action = ActionType.EXECUTE,
+                    message = "HLX 워크플로우 파싱 실패: ${e.message}\n\n생성된 JSON:\n${hlxJson.take(500)}...",
+                    sessionId = session.sessionId,
+                    error = e.message
+                )
+            }
         }
 
         println("[HLX] Workflow parsed: ${workflow.name}, ${workflow.nodes.size} nodes")
@@ -965,10 +974,24 @@ class ConversationalGovernor(
         extractTokensFromHlxResult(session, hlxResult)
 
         // 6. 결과 포맷팅
-        emitProgress(ProgressPhase.DONE)
-        val summary = formatHlxExecutionResult(hlxResult, workflow)
+        val technicalSummary = formatHlxExecutionResult(hlxResult, workflow)
 
-        // 7. 세션에 결과 적재
+        // 7. LLM에게 자연어 요약 요청
+        val naturalSummary = summarizeHlxResult(
+            intent = draftSpec.intent ?: "",
+            hlxResult = hlxResult,
+            workflow = workflow
+        )
+
+        emitProgress(ProgressPhase.DONE)
+
+        val fullMessage = if (naturalSummary != null) {
+            "$naturalSummary\n\n$technicalSummary"
+        } else {
+            technicalSummary
+        }
+
+        // 8. 세션에 결과 적재
         session.integrateResult(null, null, "HLX: ${hlxResult.status} - ${workflow.name}")
         session.resetSpec()
         session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
@@ -976,7 +999,7 @@ class ConversationalGovernor(
 
         return ConversationResponse(
             action = ActionType.EXECUTE,
-            message = summary,
+            message = fullMessage,
             sessionId = session.sessionId
         )
     }
@@ -1025,6 +1048,64 @@ class ConversationalGovernor(
     }
 
     /**
+     * HLX 실행 결과를 LLM에게 보내 자연어 요약을 생성한다.
+     *
+     * 사용자의 원래 의도와 실행 결과의 핵심 데이터를 전달하여
+     * 자연어 결론/분석을 생성한다.
+     */
+    private suspend fun summarizeHlxResult(
+        intent: String,
+        hlxResult: HlxExecutionResult,
+        workflow: io.wiiiv.hlx.model.HlxWorkflow
+    ): String? {
+        if (llmProvider == null) return null
+        if (hlxResult.status != HlxExecutionStatus.COMPLETED &&
+            hlxResult.status != HlxExecutionStatus.ENDED_EARLY) return null
+
+        // 마지막 의미있는 노드 결과 수집 (login/token 제외)
+        val meaningfulResults = hlxResult.nodeRecords
+            .filter { it.output != null && it.nodeType != HlxNodeType.ACT }
+            .takeLast(2)
+            .map { "${it.nodeId}: ${it.output.toString().take(500)}" }
+
+        if (meaningfulResults.isEmpty()) return null
+
+        val prompt = buildString {
+            appendLine("사용자가 다음을 요청했고, API 워크플로우를 실행하여 데이터를 얻었다.")
+            appendLine()
+            appendLine("## 사용자 요청")
+            appendLine(intent)
+            appendLine()
+            appendLine("## 워크플로우 결과")
+            appendLine("이름: ${workflow.name}")
+            for (line in meaningfulResults) {
+                appendLine(line)
+            }
+            appendLine()
+            appendLine("## 지시")
+            appendLine("위 데이터를 기반으로 사용자의 질문에 **자연어로 간결하게 답변**하라.")
+            appendLine("- 핵심 수치와 이름을 포함하라")
+            appendLine("- 불필요한 기술 상세(JSON, 토큰 등)는 제외하라")
+            appendLine("- 3~5문장 이내로 답변하라")
+        }
+
+        return try {
+            val response = llmProvider.call(
+                LlmRequest(
+                    action = LlmAction.COMPLETE,
+                    prompt = prompt,
+                    model = model ?: llmProvider.defaultModel,
+                    maxTokens = 500
+                )
+            )
+            response.content.trim()
+        } catch (e: Exception) {
+            println("[HLX-SUMMARY] LLM summarization failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * HLX 워크플로우 실행 결과를 사용자 친화적 문자열로 포맷팅
      */
     private fun formatHlxExecutionResult(result: HlxExecutionResult, workflow: io.wiiiv.hlx.model.HlxWorkflow): String = buildString {
@@ -1035,14 +1116,38 @@ class ConversationalGovernor(
             HlxExecutionStatus.ABORTED -> "ABORTED"
         }
 
+        val durationSec = String.format("%.1fs", result.totalDurationMs / 1000.0)
+
+        // === 컴팩트 섹션 (verbose 1+) ===
         appendLine("=== HLX Workflow: ${workflow.name} ===")
-        appendLine("Status: $statusEmoji")
-        appendLine("Duration: ${result.totalDurationMs}ms")
-        appendLine("Nodes: ${result.nodeRecords.size}")
+        appendLine("Status: $statusEmoji | Duration: $durationSec | Nodes: ${result.nodeRecords.size}")
         result.error?.let { appendLine("Error: $it") }
         appendLine()
 
-        // 각 노드 실행 결과
+        for (record in result.nodeRecords) {
+            val nodeStatus = when (record.status) {
+                io.wiiiv.hlx.model.HlxStatus.SUCCESS -> "[OK]"
+                io.wiiiv.hlx.model.HlxStatus.FAILED -> "[FAIL]"
+                else -> "[${record.status}]"
+            }
+            val durSec = String.format("%.1fs", record.durationMs / 1000.0)
+            append("$nodeStatus ${record.nodeId} (${record.nodeType}) $durSec")
+            record.error?.let { append(" - $it") }
+            appendLine()
+        }
+
+        // 마지막 노드 결과만 간략히 표시 (실질적 결과)
+        val lastOutput = result.nodeRecords.lastOrNull { it.output != null }?.output
+        if (lastOutput != null) {
+            val outputStr = lastOutput.toString()
+            appendLine()
+            appendLine("Result: ${if (outputStr.length <= 200) outputStr else outputStr.take(200) + "..."}")
+        }
+
+        // === 상세 섹션 (verbose 2+) ===
+        appendLine()
+        appendLine("=== HLX Node Details ===")
+
         for (record in result.nodeRecords) {
             val nodeStatus = when (record.status) {
                 io.wiiiv.hlx.model.HlxStatus.SUCCESS -> "[OK]"
@@ -1054,7 +1159,6 @@ class ConversationalGovernor(
             record.error?.let { append(" - $it") }
             appendLine()
 
-            // 출력 값 요약 (너무 길면 잘라냄)
             record.output?.let { output ->
                 val outputStr = output.toString()
                 if (outputStr.length <= 500) {
@@ -1065,7 +1169,6 @@ class ConversationalGovernor(
             }
         }
 
-        // 최종 변수 상태 (중요한 것만)
         if (result.context.variables.isNotEmpty()) {
             appendLine()
             appendLine("=== Final Variables ===")
@@ -1541,6 +1644,55 @@ class ConversationalGovernor(
         }
 
         return Pair(trimmed, "")
+    }
+
+    /**
+     * HLX JSON sanitizer — LLM이 생성한 흔한 구조 오류를 교정
+     *
+     * - decide 노드의 branches가 배열이면 → transform으로 변환
+     * - Map 필드에 배열이 오면 → 빈 객체로 교체
+     */
+    private fun sanitizeHlxJson(rawJson: String): String {
+        val jsonParser = Json { ignoreUnknownKeys = true }
+        val root = jsonParser.parseToJsonElement(rawJson).jsonObject
+        val nodes = root["nodes"]?.jsonArray ?: return rawJson
+
+        val fixedNodes = buildJsonArray {
+            for (node in nodes) {
+                val nodeObj = node.jsonObject
+                val type = nodeObj["type"]?.jsonPrimitive?.contentOrNull
+
+                if (type == "decide") {
+                    val branches = nodeObj["branches"]
+                    if (branches == null || branches is JsonArray) {
+                        // decide + branches가 배열이거나 없음 → transform으로 변환
+                        println("[HLX-SANITIZE] Converting decide node '${nodeObj["id"]?.jsonPrimitive?.contentOrNull}' to transform (invalid branches)")
+                        val fixed = buildJsonObject {
+                            nodeObj.forEach { (k, v) ->
+                                when (k) {
+                                    "type" -> put(k, JsonPrimitive("transform"))
+                                    "branches" -> {} // 제거
+                                    else -> put(k, v)
+                                }
+                            }
+                            // hint 없으면 추가
+                            if ("hint" !in nodeObj) put("hint", JsonPrimitive("summarize"))
+                        }
+                        add(fixed)
+                        continue
+                    }
+                }
+
+                add(node)
+            }
+        }
+
+        val fixedRoot = buildJsonObject {
+            root.forEach { (k, v) ->
+                if (k == "nodes") put(k, fixedNodes) else put(k, v)
+            }
+        }
+        return jsonParser.encodeToString(JsonElement.serializer(), fixedRoot)
     }
 
     /**

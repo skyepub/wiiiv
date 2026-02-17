@@ -1687,8 +1687,12 @@ class ConversationalGovernor(
 
         return try {
             val results = ragPipeline.searchMulti(
-                listOf("login credentials username password 계정 정보", "auth login token 인증"),
-                topK = 3
+                listOf(
+                    "login credentials username password 계정 정보",
+                    "auth login token 인증 로그인",
+                    "admin password role ADMIN 계정"
+                ),
+                topK = 5
             )
             if (results.isNotEmpty()) results.toNumberedContext() else null
         } catch (_: Exception) {
@@ -1726,44 +1730,51 @@ class ConversationalGovernor(
         if (ragContext.isNullOrBlank()) return ""
 
         val entries = mutableListOf<String>()
-        val urlRegex = Regex("""(https?://[^\s/`"]+(?::\d+)?)""")
+        val jsonCredRegex = Regex(""""username"\s*:\s*"([^"]+)"\s*,\s*"password"\s*:\s*"([^"]+)"""")
+        val tableRowRegex = Regex("""\|\s*(\w+)\s*\|\s*(\w+)\s*\|\s*(ADMIN)\s*\|""")
+        val hostRegex = Regex("""(https?://[^\s/`"]+:\d+)""")
 
-        // RAG 청크 단위로 분할 ([1] ... [2] ... 패턴)
-        val chunks = ragContext.split(Regex("""\n\[(\d+)\]\s*"""))
-            .filter { it.isNotBlank() }
+        // 1단계: RAG 청크([N] 패턴) 단위로 분할
+        val chunkBoundary = Regex("""(?:^|\n)\[(\d+)\]\s*""")
+        val bounds = chunkBoundary.findAll(ragContext).toList()
 
-        for (chunk in chunks) {
-            // 청크 내 URL 추출
-            val chunkUrls = urlRegex.findAll(chunk).map { it.groupValues[1] }.distinct().toList()
-            val loginUrl = chunkUrls.find { url ->
-                chunk.contains("login") || chunk.contains("auth")
-            }?.let { baseUrl ->
-                // port 부분만 추출 (host:port)
-                Regex("""https?://([^/]+)""").find(baseUrl)?.groupValues?.get(0) ?: baseUrl
+        val chunks = if (bounds.isEmpty()) {
+            listOf(ragContext)
+        } else {
+            bounds.mapIndexed { i, bound ->
+                val start = bound.range.last + 1
+                val end = if (i + 1 < bounds.size) bounds[i + 1].range.first else ragContext.length
+                ragContext.substring(start, end)
             }
+        }
 
-            // 청크 내 JSON credentials 추출
-            val jsonCredRegex = Regex(""""username"\s*:\s*"([^"]+)"\s*,\s*"password"\s*:\s*"([^"]+)"""")
+        // 2단계: 각 청크에서 호스트 식별 + credentials 추출
+        for (chunk in chunks) {
+            // 청크 내 모든 호스트 URL 추출 → 가장 빈번한 것이 이 청크의 시스템
+            val chunkHosts = hostRegex.findAll(chunk).map { it.groupValues[1] }.toList()
+            val chunkHost = chunkHosts.groupingBy { it }.eachCount()
+                .maxByOrNull { it.value }?.key
+
+            // JSON credentials — {"username":"X","password":"Y"}
             for (match in jsonCredRegex.findAll(chunk)) {
                 val username = match.groupValues[1]
                 val password = match.groupValues[2]
-                val entry = if (loginUrl != null) {
-                    "- $loginUrl → username: \"$username\", password: \"$password\""
+                val entry = if (chunkHost != null) {
+                    "- $chunkHost → username: \"$username\", password: \"$password\""
                 } else {
                     "- username: \"$username\", password: \"$password\""
                 }
                 if (entry !in entries) entries.add(entry)
             }
 
-            // 청크 내 테이블 credentials 추출 (ADMIN role만 — 로그인에 사용할 주 계정)
-            val tableRowRegex = Regex("""\|\s*(\w+)\s*\|\s*(\w+)\s*\|\s*(ADMIN)\s*\|""")
+            // 테이블 credentials — | username | password | ADMIN |
             for (match in tableRowRegex.findAll(chunk)) {
                 val username = match.groupValues[1]
                 val password = match.groupValues[2]
                 val role = match.groupValues[3]
-                if (username == "username") continue // 헤더 행 스킵
-                val entry = if (loginUrl != null) {
-                    "- $loginUrl → username: \"$username\", password: \"$password\" (role: $role)"
+                if (username == "username") continue
+                val entry = if (chunkHost != null) {
+                    "- $chunkHost → username: \"$username\", password: \"$password\" (role: $role)"
                 } else {
                     "- username: \"$username\", password: \"$password\" (role: $role)"
                 }

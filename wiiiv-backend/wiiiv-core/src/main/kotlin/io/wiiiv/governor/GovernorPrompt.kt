@@ -616,6 +616,15 @@ few-shot 예시:
 - "john의 주문을 shipped로 변경해줘" → `writeIntent: true` (변경이므로)
 - "사용자 목록 조회해줘" → `writeIntent: false` (조회이므로)
 
+## URL 구성 규칙 (필수)
+
+**API 스펙 문서에 Base URL이 명시되어 있으면 반드시 그 Base URL을 사용하여 완전한 URL을 구성하라.**
+- 예: 문서에 `Base URL: https://api.techcorp.internal/v2`이고 엔드포인트가 `/projects/{id}/tasks`이면
+  → `https://api.techcorp.internal/v2/projects/proj-001/tasks` (전체 URL)
+- **절대 `api.example.com`이나 `localhost` 같은 임의 도메인을 사용하지 마라.**
+- **절대 상대 경로(`/projects/...`)만 사용하지 마라.** 반드시 `https://`로 시작하는 전체 URL이어야 한다.
+- 문서에 Base URL이 없으면 엔드포인트 예시에서 도메인을 추출하라.
+
 ## 규칙
 
 1. **한 번에 하나의 API 호출** (또는 동일 패턴의 배치 호출. 예: 동일 엔드포인트에 대한 여러 PUT)
@@ -650,7 +659,7 @@ few-shot 예시:
   "calls": [
     {
       "method": "GET | POST | PUT | DELETE | PATCH",
-      "url": "전체 URL",
+      "url": "https://로 시작하는 전체 URL (API 스펙의 Base URL + 엔드포인트 경로)",
       "headers": {"Content-Type": "application/json"},
       "body": "요청 바디 (없으면 null)"
     }

@@ -9,6 +9,8 @@ import io.wiiiv.rag.retrieval.RetrievalResult
 import io.wiiiv.rag.retrieval.SimpleRetriever
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.rag.vector.VectorEntry
+import io.wiiiv.testutil.TestEmbeddingProvider
+import io.wiiiv.testutil.SimilarityAwareTestProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -63,8 +65,8 @@ class RagTest {
         }
 
         @Test
-        fun `MockEmbeddingProvider - same text produces same vector`() = runBlocking {
-            val provider = MockEmbeddingProvider()
+        fun `TestEmbeddingProvider - same text produces same vector`() = runBlocking {
+            val provider = TestEmbeddingProvider()
 
             val embedding1 = provider.embed("hello world")
             val embedding2 = provider.embed("hello world")
@@ -73,8 +75,8 @@ class RagTest {
         }
 
         @Test
-        fun `MockEmbeddingProvider - different texts produce different vectors`() = runBlocking {
-            val provider = MockEmbeddingProvider()
+        fun `TestEmbeddingProvider - different texts produce different vectors`() = runBlocking {
+            val provider = TestEmbeddingProvider()
 
             val embedding1 = provider.embed("hello world")
             val embedding2 = provider.embed("goodbye world")
@@ -83,8 +85,8 @@ class RagTest {
         }
 
         @Test
-        fun `MockEmbeddingProvider - batch embedding works`() = runBlocking {
-            val provider = MockEmbeddingProvider()
+        fun `TestEmbeddingProvider - batch embedding works`() = runBlocking {
+            val provider = TestEmbeddingProvider()
 
             val response = provider.embedBatch(listOf("text1", "text2", "text3"))
 
@@ -93,8 +95,8 @@ class RagTest {
         }
 
         @Test
-        fun `SimilarityAwareMockProvider - similar texts have higher similarity`() = runBlocking {
-            val provider = SimilarityAwareMockProvider()
+        fun `SimilarityAwareTestProvider - similar texts have higher similarity`() = runBlocking {
+            val provider = SimilarityAwareTestProvider()
 
             val catEmbedding = provider.embed("The cat sat on the mat")
             val dogEmbedding = provider.embed("The dog sat on the mat")
@@ -304,7 +306,7 @@ class RagTest {
 
         @BeforeEach
         fun setup() {
-            provider = SimilarityAwareMockProvider()
+            provider = SimilarityAwareTestProvider()
             store = InMemoryVectorStore()
             retriever = SimpleRetriever(provider, store)
         }
@@ -386,7 +388,7 @@ class RagTest {
         @BeforeEach
         fun setup() {
             pipeline = RagPipeline(
-                embeddingProvider = SimilarityAwareMockProvider(),  // Use similarity-aware for better search
+                embeddingProvider = SimilarityAwareTestProvider(),  // Use similarity-aware for better search
                 vectorStore = InMemoryVectorStore(),
                 chunker = FixedSizeChunker(chunkSize = 100, overlap = 20)
             )
@@ -466,7 +468,7 @@ class RagTest {
         @Test
         fun `RagPipelineBuilder creates pipeline with custom config`() {
             val pipeline = RagPipelineBuilder()
-                .withEmbeddingProvider(MockEmbeddingProvider())
+                .withEmbeddingProvider(TestEmbeddingProvider())
                 .withVectorStore(InMemoryVectorStore("custom-store"))
                 .withFixedSizeChunking(chunkSize = 200, overlap = 40)
                 .build()
@@ -477,7 +479,7 @@ class RagTest {
         @Test
         fun `ragPipeline DSL works`() {
             val pipeline = ragPipeline {
-                withEmbeddingProvider(MockEmbeddingProvider())
+                withEmbeddingProvider(TestEmbeddingProvider())
                 withFixedSizeChunking(300, 50)
             }
 

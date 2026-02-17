@@ -31,8 +31,8 @@ import java.util.concurrent.ConcurrentHashMap
  * ## Provider 패턴
  *
  * MultimodalProvider 인터페이스를 통해 다양한 구현 지원:
- * - MockMultimodalProvider (테스트용)
- * - 향후: OpenAI Vision, Claude Vision, Tesseract 등
+ * - TestMultimodalProvider (테스트용, src/test에 위치)
+ * - OpenAIVisionProvider, AnthropicVisionProvider (실제 구현)
  */
 class MultimodalExecutor(
     private val providerRegistry: MultimodalProviderRegistry = DefaultMultimodalProviderRegistry()
@@ -452,104 +452,6 @@ class DefaultMultimodalProviderRegistry(
     }
 }
 
-/**
- * Mock Multimodal Provider (테스트용)
- */
-class MockMultimodalProvider(
-    override val id: String = "mock"
-) : MultimodalProvider {
-    private val supportedActions = mutableSetOf(
-        MultimodalAction.ANALYZE_IMAGE,
-        MultimodalAction.EXTRACT_TEXT,
-        MultimodalAction.PARSE_DOCUMENT,
-        MultimodalAction.TRANSCRIBE_AUDIO,
-        MultimodalAction.VISION_QA
-    )
-
-    private val responses = ConcurrentHashMap<MultimodalAction, MultimodalResponse>()
-
-    override fun supports(action: MultimodalAction): Boolean = action in supportedActions
-
-    fun setSupports(vararg actions: MultimodalAction) {
-        supportedActions.clear()
-        supportedActions.addAll(actions)
-    }
-
-    fun setResponse(action: MultimodalAction, response: MultimodalResponse) {
-        responses[action] = response
-    }
-
-    override fun analyzeImage(
-        imageData: ByteArray,
-        mimeType: String,
-        prompt: String?,
-        timeoutMs: Long
-    ): MultimodalResponse {
-        return responses[MultimodalAction.ANALYZE_IMAGE]
-            ?: MultimodalResponse(
-                text = "Mock image analysis: ${imageData.size} bytes, type: $mimeType",
-                confidence = 0.95,
-                metadata = mapOf("mock" to "true", "size" to imageData.size.toString())
-            )
-    }
-
-    override fun extractText(
-        imageData: ByteArray,
-        mimeType: String,
-        timeoutMs: Long
-    ): MultimodalResponse {
-        return responses[MultimodalAction.EXTRACT_TEXT]
-            ?: MultimodalResponse(
-                text = "Mock extracted text from image",
-                confidence = 0.90,
-                metadata = mapOf("mock" to "true")
-            )
-    }
-
-    override fun parseDocument(
-        documentData: ByteArray,
-        mimeType: String,
-        outputFormat: String,
-        timeoutMs: Long
-    ): MultimodalResponse {
-        return responses[MultimodalAction.PARSE_DOCUMENT]
-            ?: MultimodalResponse(
-                text = "Mock document content",
-                metadata = mapOf("mock" to "true", "pageCount" to "1", "format" to outputFormat)
-            )
-    }
-
-    override fun transcribeAudio(
-        audioData: ByteArray,
-        mimeType: String,
-        timeoutMs: Long
-    ): MultimodalResponse {
-        return responses[MultimodalAction.TRANSCRIBE_AUDIO]
-            ?: MultimodalResponse(
-                text = "Mock audio transcript",
-                metadata = mapOf("mock" to "true", "durationMs" to "1000")
-            )
-    }
-
-    override fun visionQA(
-        imageData: ByteArray,
-        mimeType: String,
-        question: String,
-        timeoutMs: Long
-    ): MultimodalResponse {
-        return responses[MultimodalAction.VISION_QA]
-            ?: MultimodalResponse(
-                text = "Mock answer to: $question",
-                metadata = mapOf("mock" to "true")
-            )
-    }
-
-    fun clear() {
-        responses.clear()
-        supportedActions.clear()
-        supportedActions.addAll(MultimodalAction.entries)
-    }
-}
 
 // Response and Exception types
 data class MultimodalResponse(

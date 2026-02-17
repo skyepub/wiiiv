@@ -537,39 +537,3 @@ class MultiConnectionProvider(
     }
 }
 
-/**
- * Mock Connection Provider - 테스트용
- *
- * 실제 DB 연결 없이 테스트 가능
- */
-class MockConnectionProvider(
-    private val mockConnection: Connection? = null
-) : DbConnectionProvider {
-
-    private var shouldFail = false
-    private var failureMessage = "Mock connection failure"
-
-    fun setFailure(message: String) {
-        shouldFail = true
-        failureMessage = message
-    }
-
-    fun clearFailure() {
-        shouldFail = false
-    }
-
-    override fun getConnection(connectionId: String?): Connection {
-        if (shouldFail) {
-            throw SQLException(failureMessage)
-        }
-        return mockConnection ?: throw SQLException("No mock connection provided")
-    }
-
-    override fun releaseConnection(connection: Connection) {
-        // Mock - do nothing
-    }
-
-    override fun close() {
-        mockConnection?.close()
-    }
-}

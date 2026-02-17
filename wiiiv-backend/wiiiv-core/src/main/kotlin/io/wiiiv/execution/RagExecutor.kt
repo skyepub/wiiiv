@@ -3,7 +3,6 @@ package io.wiiiv.execution
 import io.wiiiv.rag.Document
 import io.wiiiv.rag.RagPipeline
 import io.wiiiv.rag.embedding.EmbeddingProvider
-import io.wiiiv.rag.embedding.MockEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.rag.vector.VectorStore
 import kotlinx.serialization.json.JsonPrimitive
@@ -208,11 +207,5 @@ class RagExecutor(
             return RagExecutor(pipeline)
         }
 
-        /**
-         * Mock Provider로 테스트용 RagExecutor 생성
-         */
-        fun createMock(): RagExecutor {
-            return create(MockEmbeddingProvider())
-        }
     }
 }

@@ -1,6 +1,7 @@
 package io.wiiiv.execution
 
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestMultimodalProvider
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.AfterEach
@@ -28,7 +29,7 @@ class MultimodalExecutorTest {
 
     private lateinit var executor: MultimodalExecutor
     private lateinit var context: ExecutionContext
-    private lateinit var mockProvider: MockMultimodalProvider
+    private lateinit var mockProvider: TestMultimodalProvider
     private lateinit var testDir: File
     private lateinit var testImageFile: File
     private lateinit var testDocFile: File
@@ -36,7 +37,7 @@ class MultimodalExecutorTest {
 
     @BeforeEach
     fun setup() {
-        mockProvider = MockMultimodalProvider()
+        mockProvider = TestMultimodalProvider()
         val registry = DefaultMultimodalProviderRegistry(mockProvider)
         executor = MultimodalExecutor(registry)
         context = ExecutionContext(
@@ -365,7 +366,7 @@ class MultimodalExecutorTest {
     @Test
     fun `DefaultMultimodalProviderRegistry should manage providers`() {
         val registry = DefaultMultimodalProviderRegistry()
-        val customProvider = MockMultimodalProvider(id = "custom")
+        val customProvider = TestMultimodalProvider(id = "custom")
 
         registry.registerProvider(customProvider)
 
@@ -375,7 +376,7 @@ class MultimodalExecutorTest {
     }
 
     @Test
-    fun `MockMultimodalProvider clear should reset state`() = runTest {
+    fun `TestMultimodalProvider clear should reset state`() = runTest {
         mockProvider.setResponse(
             MultimodalAction.ANALYZE_IMAGE,
             MultimodalResponse(text = "Custom response")

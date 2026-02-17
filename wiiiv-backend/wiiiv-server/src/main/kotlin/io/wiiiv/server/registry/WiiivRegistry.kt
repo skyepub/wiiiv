@@ -11,7 +11,6 @@ import io.wiiiv.hlx.model.HlxWorkflow
 import io.wiiiv.hlx.runner.HlxExecutionResult
 import io.wiiiv.hlx.runner.HlxRunner
 import io.wiiiv.rag.RagPipeline
-import io.wiiiv.rag.embedding.MockEmbeddingProvider
 import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
@@ -71,20 +70,16 @@ object WiiivRegistry {
     val gateChain = GateChain.standard(gateLogger)
 
     // === RAG ===
-    val ragPipeline = run {
-        val embeddingProvider = if (llmProvider != null) {
-            try {
-                OpenAIEmbeddingProvider.fromEnv()
-            } catch (_: Exception) {
-                MockEmbeddingProvider()
-            }
-        } else {
-            MockEmbeddingProvider() // 테스트/개발 모드
+    val ragPipeline: RagPipeline? = run {
+        try {
+            val embeddingProvider = OpenAIEmbeddingProvider.fromEnv()
+            RagPipeline(
+                embeddingProvider = embeddingProvider,
+                vectorStore = InMemoryVectorStore("wiiiv-rag-store")
+            )
+        } catch (_: Exception) {
+            null // OPENAI_API_KEY가 없으면 RAG 비활성화
         }
-        RagPipeline(
-            embeddingProvider = embeddingProvider,
-            vectorStore = InMemoryVectorStore("wiiiv-rag-store")
-        )
     }
 
     // === Conversational Governor (세션 API용) ===

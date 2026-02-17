@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
  * ## Provider 패턴
  *
  * GrpcProvider 인터페이스를 통해 다양한 gRPC 구현 지원:
- * - MockGrpcProvider (테스트용)
+ * - TestGrpcProvider (테스트용, src/test에 위치)
  * - 향후: io.grpc 기반 구현 등
  *
  * ## 오류 처리
@@ -384,79 +384,6 @@ class DefaultGrpcProviderRegistry : GrpcProviderRegistry {
     }
 }
 
-/**
- * Mock gRPC Provider (테스트용)
- */
-class MockGrpcProvider(
-    override val targetPattern: String = ".*"
-) : GrpcProvider {
-    private val responses = ConcurrentHashMap<String, GrpcResponse>()
-    private val streamResponses = ConcurrentHashMap<String, List<String>>()
-
-    /** Mock 응답 설정 */
-    fun setResponse(service: String, method: String, response: GrpcResponse) {
-        responses["$service/$method"] = response
-    }
-
-    /** Mock 스트리밍 응답 설정 */
-    fun setStreamResponses(service: String, method: String, responses: List<String>) {
-        streamResponses["$service/$method"] = responses
-    }
-
-    override fun callUnary(
-        service: String,
-        method: String,
-        request: String,
-        metadata: Map<String, String>,
-        timeoutMs: Long
-    ): GrpcResponse {
-        return responses["$service/$method"]
-            ?: GrpcResponse(statusCode = 0, statusMessage = "OK", body = "mock response for $service/$method")
-    }
-
-    override fun callServerStreaming(
-        service: String,
-        method: String,
-        request: String,
-        metadata: Map<String, String>,
-        timeoutMs: Long
-    ): List<String> {
-        return streamResponses["$service/$method"]
-            ?: listOf("stream response 1", "stream response 2")
-    }
-
-    override fun callClientStreaming(
-        service: String,
-        method: String,
-        requests: List<String>,
-        metadata: Map<String, String>,
-        timeoutMs: Long
-    ): GrpcResponse {
-        return responses["$service/$method"]
-            ?: GrpcResponse(
-                statusCode = 0,
-                statusMessage = "OK",
-                body = "received ${requests.size} messages"
-            )
-    }
-
-    override fun callBidirectionalStreaming(
-        service: String,
-        method: String,
-        requests: List<String>,
-        metadata: Map<String, String>,
-        timeoutMs: Long
-    ): List<String> {
-        return streamResponses["$service/$method"]
-            ?: requests.map { "echo: $it" }
-    }
-
-    /** 초기화 */
-    fun clear() {
-        responses.clear()
-        streamResponses.clear()
-    }
-}
 
 // Response and Exception types
 data class GrpcResponse(

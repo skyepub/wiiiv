@@ -3,6 +3,7 @@ package io.wiiiv.dacs
 import io.wiiiv.execution.ErrorCategory
 import io.wiiiv.execution.LlmAction
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestLlmProvider
 import io.wiiiv.governor.RequestType
 import io.wiiiv.governor.Spec
 import kotlinx.coroutines.runBlocking
@@ -15,18 +16,18 @@ import kotlin.test.*
  */
 class LlmPersonaTest {
 
-    private lateinit var mockProvider: MockLlmProvider
+    private lateinit var mockProvider: TestLlmProvider
 
     @BeforeTest
     fun setup() {
-        mockProvider = MockLlmProvider()
+        mockProvider = TestLlmProvider()
     }
 
     // ==================== LlmArchitect Tests ====================
 
     @Test
     fun `LlmArchitect should parse APPROVE response`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Spec is well-structured", "concerns": []}
         """.trimIndent())
 
@@ -43,7 +44,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmArchitect should parse REJECT response`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "REJECT", "summary": "Spec is malformed", "concerns": ["Missing required fields"]}
         """.trimIndent())
 
@@ -59,7 +60,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmArchitect should parse ABSTAIN response`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "ABSTAIN", "summary": "Need more information", "concerns": ["Description is vague"]}
         """.trimIndent())
 
@@ -74,7 +75,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmArchitect should handle markdown code block response`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             Here is my evaluation:
             ```json
             {"vote": "APPROVE", "summary": "All good", "concerns": []}
@@ -104,7 +105,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmArchitect should fallback to ABSTAIN on parse error`() = runBlocking {
-        mockProvider.setMockResponse("This is not valid JSON")
+        mockProvider.setResponse("This is not valid JSON")
 
         val architect = LlmArchitect(mockProvider)
         val opinion = architect.evaluate(createTestSpec(), null)
@@ -117,7 +118,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmReviewer should evaluate requirements`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Requirements are clear and consistent", "concerns": []}
         """.trimIndent())
 
@@ -130,7 +131,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmReviewer should identify unclear requirements`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "ABSTAIN", "summary": "Requirements need clarification", "concerns": ["Intent is unclear", "Operations don't match description"]}
         """.trimIndent())
 
@@ -145,7 +146,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmAdversary should detect security risks`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "ABSTAIN", "summary": "Potential security risks identified", "concerns": ["Accessing system paths", "Broad scope"]}
         """.trimIndent())
 
@@ -166,7 +167,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmAdversary should reject explicit prohibitions`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "REJECT", "summary": "Explicitly prohibited pattern", "concerns": ["Accessing /etc/passwd"]}
         """.trimIndent())
 
@@ -186,7 +187,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmAdversary should approve safe operations`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "No security concerns", "concerns": []}
         """.trimIndent())
 
@@ -208,7 +209,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmDACS should return YES when all personas approve`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "All good", "concerns": []}
         """.trimIndent())
 
@@ -323,7 +324,7 @@ class LlmPersonaTest {
 
     @Test
     fun `HybridDACS should use LLM for non-obvious cases`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "All good", "concerns": []}
         """.trimIndent())
 
@@ -349,7 +350,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should include context in prompt`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Good", "concerns": []}
         """.trimIndent())
 
@@ -366,7 +367,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should include spec details in prompt`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Good", "concerns": []}
         """.trimIndent())
 
@@ -394,7 +395,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should handle lowercase vote`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "approve", "summary": "Good", "concerns": []}
         """.trimIndent())
 
@@ -406,7 +407,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should handle mixed case vote`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "Approve", "summary": "Good", "concerns": []}
         """.trimIndent())
 
@@ -418,7 +419,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should handle JSON with extra fields`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Good", "concerns": [], "reasoning": "extra field", "confidence": 0.9}
         """.trimIndent())
 
@@ -431,7 +432,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should handle empty concerns array`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Good", "concerns": []}
         """.trimIndent())
 
@@ -443,7 +444,7 @@ class LlmPersonaTest {
 
     @Test
     fun `LlmPersona should handle missing concerns field`() = runBlocking {
-        mockProvider.setMockResponse("""
+        mockProvider.setResponse("""
             {"vote": "APPROVE", "summary": "Good"}
         """.trimIndent())
 

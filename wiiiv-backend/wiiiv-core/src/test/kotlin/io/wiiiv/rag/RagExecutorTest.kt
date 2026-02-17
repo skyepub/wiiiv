@@ -1,7 +1,7 @@
 package io.wiiiv.rag
 
 import io.wiiiv.execution.*
-import io.wiiiv.rag.embedding.MockEmbeddingProvider
+import io.wiiiv.testutil.TestEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
@@ -16,7 +16,7 @@ class RagExecutorTest {
     @BeforeEach
     fun setup() {
         val pipeline = RagPipeline(
-            embeddingProvider = MockEmbeddingProvider(),
+            embeddingProvider = TestEmbeddingProvider(),
             vectorStore = InMemoryVectorStore()
         )
         executor = RagExecutor(pipeline)
@@ -209,7 +209,7 @@ class RagExecutorTest {
 
     @Test
     fun `createMock factory creates working executor`() = runBlocking {
-        val mockExecutor = RagExecutor.createMock()
+        val mockExecutor = RagExecutor.create(TestEmbeddingProvider())
 
         val result = mockExecutor.execute(ExecutionStep.RagStep(
             stepId = "test",

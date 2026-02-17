@@ -347,6 +347,10 @@ wiiiv rag size                   # 저장소 크기
 2. **책임 경계 엄수**: 계층 간 침범 금지
 3. **판단 금지**: Executor/Runner는 판단하지 않는다
 4. **해석 금지**: 결과의 의미는 상위 계층이 해석한다
+5. **엔진 내부 Mock 금지**: `src/main/` 코드에 Mock/Fake/Stub 클래스를 절대 만들지 않는다
+   - 테스트용 Provider는 `src/test/kotlin/io/wiiiv/testutil/TestProviders.kt`에 `Test` 접두사로 작성
+   - 엔진 코드에서 Mock fallback 금지 (예: API key 없을 때 MockProvider 사용 → null/비활성화로 처리)
+   - E2E 테스트는 실제 백엔드(skymall/skystock) 사용, Mock 서버 금지
 
 ---
 
@@ -518,7 +522,7 @@ DACS는 Gate가 아니다:
 - [x] Spec enrichment (intent → allowedOperations/allowedPaths 추론)
 - [x] FAIL-CLOSED 설계 (LLM 없으면 REVISION/거부)
 - [x] DecisionRoutes 하드코딩 제거 (intent 기반 동적 step 생성)
-- [x] MockEmbedding → RealEmbedding 스위치 (OpenAIEmbeddingProvider)
+- [x] MockEmbedding → RealEmbedding 전환 완료 (OpenAIEmbeddingProvider, OPENAI_API_KEY 없으면 RAG 비활성화)
 - [x] LlmGovernor E2E 테스트 (성공 + 거부 시나리오)
 - [x] HLX Phase 2: Execution Engine (HlxRunner, LLM 노드 실행, WiiivRegistry 등록)
 - [x] HLX Phase 3: Server + CLI 연동

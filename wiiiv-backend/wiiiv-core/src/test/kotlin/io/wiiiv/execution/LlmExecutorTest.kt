@@ -1,6 +1,9 @@
 package io.wiiiv.execution
 
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestLlmProvider
+import io.wiiiv.testutil.EchoTestLlmProvider
+import io.wiiiv.testutil.CountingTestLlmProvider
 import io.wiiiv.runner.ExecutionRunner
 import io.wiiiv.runner.RunnerStatus
 import kotlinx.coroutines.runBlocking
@@ -16,13 +19,13 @@ import kotlin.test.*
  */
 class LlmExecutorTest {
 
-    private lateinit var mockProvider: MockLlmProvider
+    private lateinit var mockProvider: TestLlmProvider
     private lateinit var executor: LlmExecutor
     private lateinit var context: ExecutionContext
 
     @BeforeTest
     fun setup() {
-        mockProvider = MockLlmProvider()
+        mockProvider = TestLlmProvider()
         executor = LlmExecutor.create(mockProvider)
         context = ExecutionContext.create(
             executionId = "test-exec",
@@ -70,7 +73,7 @@ class LlmExecutorTest {
 
     @Test
     fun `should execute COMPLETE action`() = runBlocking {
-        mockProvider.setMockResponse("Completed text", "stop")
+        mockProvider.setResponse("Completed text", "stop")
 
         val step = ExecutionStep.LlmCallStep(
             stepId = "complete-1",
@@ -93,7 +96,7 @@ class LlmExecutorTest {
 
     @Test
     fun `should execute ANALYZE action`() = runBlocking {
-        mockProvider.setMockResponse("Analysis result", "stop")
+        mockProvider.setResponse("Analysis result", "stop")
 
         val step = ExecutionStep.LlmCallStep(
             stepId = "analyze-1",
@@ -112,7 +115,7 @@ class LlmExecutorTest {
 
     @Test
     fun `should execute SUMMARIZE action`() = runBlocking {
-        mockProvider.setMockResponse("Summary", "stop")
+        mockProvider.setResponse("Summary", "stop")
 
         val step = ExecutionStep.LlmCallStep(
             stepId = "summarize-1",
@@ -157,7 +160,7 @@ class LlmExecutorTest {
         executor.execute(step, context)
 
         val lastCall = mockProvider.getLastCall()
-        assertEquals("mock-model", lastCall?.model)  // MockLlmProvider default
+        assertEquals("mock-model", lastCall?.model)  // TestLlmProvider default
     }
 
     @Test
@@ -186,14 +189,14 @@ class LlmExecutorTest {
         executor.execute(step, context)
 
         val lastCall = mockProvider.getLastCall()
-        assertEquals(1000, lastCall?.maxTokens)  // MockLlmProvider default
+        assertEquals(1000, lastCall?.maxTokens)  // TestLlmProvider default
     }
 
     // ==================== Output Tests ====================
 
     @Test
     fun `output should contain all required fields`() = runBlocking {
-        mockProvider.setMockResponse(
+        mockProvider.setResponse(
             LlmResponse(
                 content = "Response content",
                 finishReason = "stop",
@@ -236,7 +239,7 @@ class LlmExecutorTest {
 
     @Test
     fun `output should be added to context`() = runBlocking {
-        mockProvider.setMockResponse("Context test response")
+        mockProvider.setResponse("Context test response")
 
         val step = ExecutionStep.LlmCallStep(
             stepId = "context-test",
@@ -320,7 +323,7 @@ class LlmExecutorTest {
 
     @Test
     fun `should capture length finish reason`() = runBlocking {
-        mockProvider.setMockResponse(
+        mockProvider.setResponse(
             LlmResponse(
                 content = "Truncated response...",
                 finishReason = "length",
@@ -341,11 +344,11 @@ class LlmExecutorTest {
         assertEquals("length", output.json["finishReason"]?.jsonPrimitive?.content)
     }
 
-    // ==================== EchoLlmProvider Tests ====================
+    // ==================== EchoTestLlmProvider Tests ====================
 
     @Test
-    fun `EchoLlmProvider should echo with action prefix`() = runBlocking {
-        val echoProvider = EchoLlmProvider()
+    fun `EchoTestLlmProvider should echo with action prefix`() = runBlocking {
+        val echoProvider = EchoTestLlmProvider()
         val echoExecutor = LlmExecutor.create(echoProvider)
 
         val step = ExecutionStep.LlmCallStep(
@@ -361,8 +364,8 @@ class LlmExecutorTest {
     }
 
     @Test
-    fun `EchoLlmProvider should handle ANALYZE action`() = runBlocking {
-        val echoProvider = EchoLlmProvider()
+    fun `EchoTestLlmProvider should handle ANALYZE action`() = runBlocking {
+        val echoProvider = EchoTestLlmProvider()
         val echoExecutor = LlmExecutor.create(echoProvider)
 
         val step = ExecutionStep.LlmCallStep(
@@ -378,8 +381,8 @@ class LlmExecutorTest {
     }
 
     @Test
-    fun `EchoLlmProvider should handle SUMMARIZE action`() = runBlocking {
-        val echoProvider = EchoLlmProvider()
+    fun `EchoTestLlmProvider should handle SUMMARIZE action`() = runBlocking {
+        val echoProvider = EchoTestLlmProvider()
         val echoExecutor = LlmExecutor.create(echoProvider)
 
         val step = ExecutionStep.LlmCallStep(
@@ -398,7 +401,7 @@ class LlmExecutorTest {
 
     @Test
     fun `Runner should execute multiple LLM steps`() = runBlocking {
-        mockProvider.setMockResponse("Response")
+        mockProvider.setResponse("Response")
         val runner = ExecutionRunner.create(executor)
 
         val steps = listOf(
@@ -437,8 +440,8 @@ class LlmExecutorTest {
 
     @Test
     fun `Runner should fail-fast on LLM error`() = runBlocking {
-        // Use CountingLlmProvider that fails on 2nd call with non-retryable error
-        val provider = CountingLlmProvider(failOnCall = 2, retryable = false)
+        // Use CountingTestLlmProvider that fails on 2nd call with non-retryable error
+        val provider = CountingTestLlmProvider(failOnCall = 2, retryable = false)
         val llmExecutor = LlmExecutor.create(provider)
         val runner = ExecutionRunner.create(llmExecutor)
 

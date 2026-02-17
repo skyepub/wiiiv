@@ -1,6 +1,7 @@
 package io.wiiiv.execution
 
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestGrpcProvider
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.BeforeEach
@@ -26,11 +27,11 @@ class GrpcExecutorTest {
 
     private lateinit var executor: GrpcExecutor
     private lateinit var context: ExecutionContext
-    private lateinit var mockProvider: MockGrpcProvider
+    private lateinit var mockProvider: TestGrpcProvider
 
     @BeforeEach
     fun setup() {
-        mockProvider = MockGrpcProvider(targetPattern = "localhost:50051")
+        mockProvider = TestGrpcProvider(targetPattern = "localhost:50051")
         val registry = DefaultGrpcProviderRegistry().apply {
             registerProvider(mockProvider)
         }
@@ -83,7 +84,7 @@ class GrpcExecutorTest {
         )
 
         // Need to register a provider that matches this target first
-        val wildcardProvider = MockGrpcProvider(targetPattern = ".*")
+        val wildcardProvider = TestGrpcProvider(targetPattern = ".*")
         val registry = DefaultGrpcProviderRegistry().apply {
             registerProvider(wildcardProvider)
         }
@@ -321,7 +322,7 @@ class GrpcExecutorTest {
 
     @Test
     fun `should accept dns format target`() = runTest {
-        val dnsProvider = MockGrpcProvider(targetPattern = "dns:///myservice.example.com:50051")
+        val dnsProvider = TestGrpcProvider(targetPattern = "dns:///myservice.example.com:50051")
         val registry = DefaultGrpcProviderRegistry().apply {
             registerProvider(dnsProvider)
         }
@@ -341,7 +342,7 @@ class GrpcExecutorTest {
     }
 
     @Test
-    fun `MockGrpcProvider should echo in bidirectional streaming by default`() = runTest {
+    fun `TestGrpcProvider should echo in bidirectional streaming by default`() = runTest {
         // Don't set custom stream responses - use default echo behavior
         val step = ExecutionStep.GrpcStep(
             stepId = "grpc-echo",
@@ -362,7 +363,7 @@ class GrpcExecutorTest {
     @Test
     fun `DefaultGrpcProviderRegistry should find provider by pattern`() {
         val registry = DefaultGrpcProviderRegistry()
-        val provider = MockGrpcProvider(targetPattern = "localhost:.*")
+        val provider = TestGrpcProvider(targetPattern = "localhost:.*")
         registry.registerProvider(provider)
 
         val found = registry.getProvider("localhost:50051")
@@ -370,7 +371,7 @@ class GrpcExecutorTest {
     }
 
     @Test
-    fun `MockGrpcProvider clear should reset responses`() = runTest {
+    fun `TestGrpcProvider clear should reset responses`() = runTest {
         mockProvider.setResponse("TestService", "TestMethod",
             GrpcResponse(statusCode = 0, statusMessage = "Custom", body = "custom"))
 

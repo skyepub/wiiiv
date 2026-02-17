@@ -3,6 +3,7 @@ package io.wiiiv.integration
 import io.wiiiv.blueprint.*
 import io.wiiiv.dacs.*
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestLlmProvider
 import io.wiiiv.gate.*
 import io.wiiiv.governor.*
 import io.wiiiv.runner.*
@@ -19,7 +20,7 @@ import kotlin.test.*
  * ```
  *
  * SimpleGovernor 대신 LlmGovernor를 사용하는 E2E 테스트.
- * MockLlmProvider로 API 키 없이도 실행 가능.
+ * TestLlmProvider로 API 키 없이도 실행 가능.
  */
 class LlmGovernorE2ETest {
 
@@ -42,10 +43,10 @@ class LlmGovernorE2ETest {
         val testFile = File(testDir, "test.txt")
         testFile.writeText("E2E test content from LlmGovernor pipeline")
 
-        // === 2. MockLlmProvider — enrichSpecFromIntent 응답 설정 ===
-        val mockProvider = MockLlmProvider()
+        // === 2. TestLlmProvider — enrichSpecFromIntent 응답 설정 ===
+        val mockProvider = TestLlmProvider()
         val testPath = testDir.absolutePath.replace("\\", "/")
-        mockProvider.setMockResponse(
+        mockProvider.setResponse(
             """{"operations": ["FILE_READ"], "paths": ["$testPath/test.txt"]}"""
         )
 
@@ -81,7 +82,7 @@ class LlmGovernorE2ETest {
         assertEquals(BlueprintStepType.FILE_READ, blueprint.steps[0].type)
         assertTrue(blueprint.steps[0].params["path"]!!.contains("test.txt"))
 
-        // MockLlmProvider가 호출되었는지 검증 (enrichSpecFromIntent 동작 확인)
+        // TestLlmProvider가 호출되었는지 검증 (enrichSpecFromIntent 동작 확인)
         assertTrue(mockProvider.getCallHistory().isNotEmpty(), "LLM should have been called for enrichment")
 
         // === 6. Gate 체인 통과 ===

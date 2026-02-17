@@ -2,7 +2,7 @@ package io.wiiiv.governor
 
 import io.wiiiv.dacs.*
 import io.wiiiv.execution.ErrorCategory
-import io.wiiiv.execution.impl.MockLlmProvider
+import io.wiiiv.testutil.TestLlmProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -175,10 +175,10 @@ class LlmGovernorTest {
     }
 
     @Test
-    fun `LlmGovernor enriches Spec with MockLlmProvider`() = runBlocking {
-        // Given: MockLlmProvider가 operations/paths JSON 반환
-        val mockProvider = MockLlmProvider()
-        mockProvider.setMockResponse("""
+    fun `LlmGovernor enriches Spec with TestLlmProvider`() = runBlocking {
+        // Given: TestLlmProvider가 operations/paths JSON 반환
+        val mockProvider = TestLlmProvider()
+        mockProvider.setResponse("""
             {"operations": ["FILE_READ"], "paths": ["/tmp/**"]}
         """.trimIndent())
 
@@ -213,8 +213,8 @@ class LlmGovernorTest {
 
     @Test
     fun `LlmGovernor falls back on LLM failure`() = runBlocking {
-        // Given: MockLlmProvider가 실패하도록 설정
-        val mockProvider = MockLlmProvider()
+        // Given: TestLlmProvider가 실패하도록 설정
+        val mockProvider = TestLlmProvider()
         mockProvider.setFailure(
             ErrorCategory.EXTERNAL_SERVICE_ERROR,
             "API_ERROR",

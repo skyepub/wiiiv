@@ -1,6 +1,7 @@
 package io.wiiiv.execution
 
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestConnectionProvider
 import io.wiiiv.runner.ExecutionRunner
 import io.wiiiv.runner.RunnerStatus
 import kotlinx.coroutines.runBlocking
@@ -394,7 +395,7 @@ class DbExecutorTest {
 
     @Test
     fun `should handle connection failure`() = runBlocking {
-        val mockProvider = MockConnectionProvider()
+        val mockProvider = TestConnectionProvider()
         mockProvider.setFailure("Connection refused")
 
         val failingExecutor = DbExecutor.create(mockProvider)

@@ -4,6 +4,8 @@ import io.wiiiv.blueprint.*
 import io.wiiiv.dacs.*
 import io.wiiiv.execution.*
 import io.wiiiv.execution.impl.*
+import io.wiiiv.testutil.TestLlmProvider
+import io.wiiiv.testutil.CountingTestLlmProvider
 import io.wiiiv.gate.*
 import io.wiiiv.governor.*
 import io.wiiiv.runner.*
@@ -261,8 +263,8 @@ class E2EFlowTest {
     @Test
     fun `E2E - Complete pipeline with LlmExecutor (Mock)`() = runBlocking {
         // === 1. Mock LLM Provider 설정 ===
-        val mockProvider = MockLlmProvider()
-        mockProvider.setMockResponse(
+        val mockProvider = TestLlmProvider()
+        mockProvider.setResponse(
             LlmResponse(
                 content = "This is a mock summary of the content.",
                 finishReason = "stop",
@@ -519,7 +521,7 @@ class E2EFlowTest {
     @Test
     fun `E2E - Retry policy with transient failures`() = runBlocking {
         // === 실패 후 성공하는 Provider ===
-        val failingProvider = CountingLlmProvider(
+        val failingProvider = CountingTestLlmProvider(
             failOnCall = 1,  // 첫 번째 호출 실패
             retryable = true  // EXTERNAL_SERVICE_ERROR (재시도 가능)
         )

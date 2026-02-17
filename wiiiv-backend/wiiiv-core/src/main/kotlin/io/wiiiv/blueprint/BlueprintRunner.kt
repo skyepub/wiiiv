@@ -25,7 +25,7 @@ import java.util.UUID
  * Governor → BlueprintRunner → ExecutionRunner → Executor
  */
 class BlueprintRunner(
-    private val executor: Executor,
+    val executor: Executor,
     private val retryPolicy: RetryPolicy = RetryPolicy.DEFAULT
 ) {
     private val runner = ExecutionRunner.create(executor, retryPolicy)

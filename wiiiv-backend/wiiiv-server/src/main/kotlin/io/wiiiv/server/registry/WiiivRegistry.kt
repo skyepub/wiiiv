@@ -82,16 +82,6 @@ object WiiivRegistry {
         }
     }
 
-    // === Conversational Governor (세션 API용) ===
-    val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
-        id = "gov-server",
-        dacs = dacs,
-        llmProvider = llmProvider,
-        model = if (llmProvider != null) "gpt-4o-mini" else null,
-        blueprintRunner = blueprintRunner,
-        ragPipeline = ragPipeline
-    )
-
     // === HLX Runner (Phase 4: Executor/Gate 연동, Phase 5: SubWorkflow) ===
     val hlxRunner: HlxRunner? = llmProvider?.let { provider ->
         HlxRunner.createWithExecutor(
@@ -102,6 +92,17 @@ object WiiivRegistry {
             workflowResolver = { id -> getHlxWorkflow(id)?.workflow }
         )
     }
+
+    // === Conversational Governor (세션 API용) ===
+    val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
+        id = "gov-server",
+        dacs = dacs,
+        llmProvider = llmProvider,
+        model = if (llmProvider != null) "gpt-4o-mini" else null,
+        blueprintRunner = blueprintRunner,
+        ragPipeline = ragPipeline,
+        hlxRunner = hlxRunner
+    )
 
     // === Session Manager ===
     val sessionManager = SessionManager(conversationalGovernor)

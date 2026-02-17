@@ -376,7 +376,9 @@ class SessionContext(
     val facts: MutableMap<String, String> = mutableMapOf(),
     var pendingAction: PendingAction? = null,
     var declaredWriteIntent: Boolean? = null,
-    var workspace: String? = null
+    var workspace: String? = null,
+    /** 시스템별 Bearer 토큰 저장소 — key: "host:port", value: token */
+    val tokenStore: MutableMap<String, String> = mutableMapOf()
 ) {
     /**
      * 현재 활성 작업
@@ -409,6 +411,7 @@ class SessionContext(
         facts.clear()
         pendingAction = null
         declaredWriteIntent = null
+        tokenStore.clear()
         // workspace is intentionally preserved — it's an environment setting, not task state
     }
 }

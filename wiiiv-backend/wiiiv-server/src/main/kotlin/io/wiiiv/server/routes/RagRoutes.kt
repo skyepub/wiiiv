@@ -7,11 +7,13 @@ import io.ktor.server.auth.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.util.pipeline.*
 import io.wiiiv.server.dto.common.ApiError
 import io.wiiiv.server.dto.common.ApiResponse
 import io.wiiiv.server.dto.rag.*
 import io.wiiiv.server.registry.WiiivRegistry
 import io.wiiiv.rag.Document
+import io.wiiiv.rag.RagPipeline
 import java.io.File
 
 /**
@@ -35,6 +37,7 @@ fun Route.ragRoutes() {
         authenticate("auth-jwt") {
             // Ingest single document
             post("/ingest") {
+                val rag = requireRag() ?: return@post
                 val request = call.receive<IngestRequest>()
 
                 val document = Document(
@@ -44,7 +47,7 @@ fun Route.ragRoutes() {
                     metadata = request.metadata
                 )
 
-                val result = WiiivRegistry.ragPipeline.ingest(document)
+                val result = rag.ingest(document)
 
                 if (result.success) {
                     call.respond(
@@ -73,6 +76,7 @@ fun Route.ragRoutes() {
 
             // Ingest file (multipart upload — PDF, txt, md, json)
             post("/ingest/file") {
+                val rag = requireRag() ?: return@post
                 val multipart = call.receiveMultipart()
                 var fileName: String? = null
                 var fileBytes: ByteArray? = null
@@ -101,7 +105,7 @@ fun Route.ragRoutes() {
                 val tempFile = File.createTempFile("rag-", "-$fileName")
                 try {
                     tempFile.writeBytes(fileBytes!!)
-                    val result = WiiivRegistry.ragPipeline.ingestFile(tempFile, mapOf("originalName" to fileName!!))
+                    val result = rag.ingestFile(tempFile, mapOf("originalName" to fileName!!))
 
                     if (result.success) {
                         call.respond(
@@ -130,6 +134,7 @@ fun Route.ragRoutes() {
 
             // Batch ingest documents
             post("/ingest/batch") {
+                val rag = requireRag() ?: return@post
                 val request = call.receive<BatchIngestRequest>()
 
                 val documents = request.documents.map { doc ->
@@ -141,7 +146,7 @@ fun Route.ragRoutes() {
                     )
                 }
 
-                val result = WiiivRegistry.ragPipeline.ingestBatch(documents)
+                val result = rag.ingestBatch(documents)
 
                 call.respond(
                     HttpStatusCode.Created,
@@ -166,9 +171,10 @@ fun Route.ragRoutes() {
 
             // Search documents
             post("/search") {
+                val rag = requireRag() ?: return@post
                 val request = call.receive<SearchRequest>()
 
-                val result = WiiivRegistry.ragPipeline.search(
+                val result = rag.search(
                     query = request.query,
                     topK = request.topK,
                     minScore = request.minScore
@@ -196,8 +202,9 @@ fun Route.ragRoutes() {
 
             // Get store size
             get("/size") {
-                val size = WiiivRegistry.ragPipeline.size()
-                val storeId = WiiivRegistry.ragPipeline.vectorStore.storeId
+                val rag = requireRag() ?: return@get
+                val size = rag.size()
+                val storeId = rag.vectorStore.storeId
 
                 call.respond(
                     ApiResponse.success(
@@ -211,7 +218,8 @@ fun Route.ragRoutes() {
 
             // List documents (source IDs)
             get("/documents") {
-                val store = WiiivRegistry.ragPipeline.vectorStore
+                val rag = requireRag() ?: return@get
+                val store = rag.vectorStore
 
                 // InMemoryVectorStore의 listSources 활용
                 val sources = if (store is io.wiiiv.rag.vector.InMemoryVectorStore) {
@@ -238,10 +246,11 @@ fun Route.ragRoutes() {
 
             // Delete document by ID
             delete("/{documentId}") {
+                val rag = requireRag() ?: return@delete
                 val documentId = call.parameters["documentId"]
                     ?: throw IllegalArgumentException("Document ID required")
 
-                val deletedCount = WiiivRegistry.ragPipeline.deleteDocument(documentId)
+                val deletedCount = rag.deleteDocument(documentId)
 
                 call.respond(
                     ApiResponse.success(
@@ -256,7 +265,8 @@ fun Route.ragRoutes() {
 
             // Clear all documents
             delete {
-                WiiivRegistry.ragPipeline.clear()
+                val rag = requireRag() ?: return@delete
+                rag.clear()
 
                 call.respond(
                     ApiResponse.success(
@@ -269,4 +279,21 @@ fun Route.ragRoutes() {
             }
         }
     }
+}
+
+/**
+ * RAG pipeline null 체크 헬퍼.
+ * null이면 503 응답 후 null 반환 — caller는 return@handler.
+ */
+private suspend fun PipelineContext<Unit, ApplicationCall>.requireRag(): RagPipeline? {
+    val rag = WiiivRegistry.ragPipeline
+    if (rag == null) {
+        call.respond(
+            HttpStatusCode.ServiceUnavailable,
+            ApiResponse.error<Unit>(
+                ApiError(code = "RAG_UNAVAILABLE", message = "RAG pipeline is not configured")
+            )
+        )
+    }
+    return rag
 }

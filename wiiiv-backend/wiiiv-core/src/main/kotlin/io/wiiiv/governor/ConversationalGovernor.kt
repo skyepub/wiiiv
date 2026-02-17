@@ -10,6 +10,12 @@ import io.wiiiv.execution.LlmAction
 import io.wiiiv.execution.impl.LlmImage
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
+import io.wiiiv.hlx.model.HlxNode
+import io.wiiiv.hlx.model.HlxNodeType
+import io.wiiiv.hlx.parser.HlxParser
+import io.wiiiv.hlx.runner.HlxExecutionResult
+import io.wiiiv.hlx.runner.HlxExecutionStatus
+import io.wiiiv.hlx.runner.HlxRunner
 import io.wiiiv.rag.RagPipeline
 import kotlinx.serialization.json.*
 import java.time.Instant
@@ -51,7 +57,8 @@ class ConversationalGovernor(
     private val llmProvider: LlmProvider? = null,
     private val model: String? = null,
     private val blueprintRunner: BlueprintRunner? = null,
-    private val ragPipeline: RagPipeline? = null
+    private val ragPipeline: RagPipeline? = null,
+    private val hlxRunner: HlxRunner? = null
 ) : Governor {
 
     var progressListener: GovernorProgressListener? = null
@@ -661,7 +668,8 @@ class ConversationalGovernor(
     /**
      * LLM 결정 작업 실행 (API_WORKFLOW 등)
      *
-     * 1회 배치만 수행하고 nextAction 힌트로 caller에게 제어 반환.
+     * hlxRunner가 있으면 HLX 워크플로우 자동생성+실행 경로를 사용한다.
+     * 없으면 기존 turn-by-turn 결정 경로 (fallback).
      */
     private suspend fun executeLlmDecidedTurn(
         session: ConversationSession,
@@ -677,7 +685,12 @@ class ConversationalGovernor(
             )
         }
 
-        // LLM에게 다음 API 호출 결정 요청
+        // HLX 자동생성 경로: hlxRunner가 있으면 워크플로우를 한번에 생성하고 실행
+        if (hlxRunner != null) {
+            return executeHlxApiWorkflow(session, draftSpec)
+        }
+
+        // Fallback: 기존 turn-by-turn 결정 경로
         val decision = try {
             decideNextApiCall(draftSpec, session.context.executionHistory, session)
         } catch (e: Exception) {
@@ -702,7 +715,9 @@ class ConversationalGovernor(
                 // Case 3: 쓰기 선언했으나 쓰기 미실행 → Continue 강제
                 session.history.add(ConversationMessage(
                     MessageRole.SYSTEM,
-                    "writeIntent=true로 선언했으나 아직 쓰기 작업(PUT/POST/DELETE/PATCH)이 실행되지 않았습니다. 남은 쓰기 작업을 계속하세요."
+                    "writeIntent=true로 선언했으나 아직 쓰기 작업(PUT/POST/DELETE/PATCH)이 실행되지 않았습니다.\n" +
+                    "사용자의 원래 의도: ${draftSpec.intent ?: "unknown"}\n" +
+                    "이 의도를 다시 읽고, 아직 수행하지 않은 단계(다른 시스템 접근, 로그인, 데이터 조회 등)가 있으면 먼저 수행한 뒤 쓰기 작업을 진행하세요."
                 ))
                 session.context.pendingAction = PendingAction.ContinueExecution(
                     reasoning = "writeIntent=true declared but no write operation executed"
@@ -749,7 +764,9 @@ class ConversationalGovernor(
                 // Case 3: 쓰기 선언했으나 쓰기 미실행 → Continue 강제
                 session.history.add(ConversationMessage(
                     MessageRole.SYSTEM,
-                    "writeIntent=true로 선언했으나 아직 쓰기 작업(PUT/POST/DELETE/PATCH)이 실행되지 않았습니다. 남은 쓰기 작업을 계속하세요."
+                    "writeIntent=true로 선언했으나 아직 쓰기 작업(PUT/POST/DELETE/PATCH)이 실행되지 않았습니다.\n" +
+                    "사용자의 원래 의도: ${draftSpec.intent ?: "unknown"}\n" +
+                    "이 의도를 다시 읽고, 아직 수행하지 않은 단계(다른 시스템 접근, 로그인, 데이터 조회 등)가 있으면 먼저 수행한 뒤 쓰기 작업을 진행하세요."
                 ))
                 session.context.pendingAction = PendingAction.ContinueExecution(
                     reasoning = "writeIntent=true declared but no write operation executed"
@@ -776,11 +793,13 @@ class ConversationalGovernor(
             )
         }
 
-        // Case 4: 쓰기 미선언인데 쓰기 호출 존재 → Abort
-        val hasWriteCall = decision.calls.any { it.method.uppercase() in WRITE_HTTP_METHODS }
+        // Case 4: 쓰기 미선언인데 쓰기 호출 존재 → Abort (auth 엔드포인트는 제외)
+        val hasWriteCall = decision.calls.any {
+            it.method.uppercase() in WRITE_HTTP_METHODS && !isAuthEndpoint(it.url)
+        }
         if (!writeIntent && hasWriteCall) {
             val writeCalls = decision.calls
-                .filter { it.method.uppercase() in WRITE_HTTP_METHODS }
+                .filter { it.method.uppercase() in WRITE_HTTP_METHODS && !isAuthEndpoint(it.url) }
                 .joinToString(", ") { "${it.method} ${it.url}" }
             return ConversationResponse(
                 action = ActionType.CANCEL,
@@ -789,9 +808,9 @@ class ConversationalGovernor(
             )
         }
 
-        // Blueprint 생성 및 실행
+        // Blueprint 생성 및 실행 (tokenStore에서 자동 주입)
         val iterationIndex = session.context.executionHistory.size + 1
-        val blueprint = createApiCallBlueprint(decision, spec, iterationIndex)
+        val blueprint = createApiCallBlueprint(decision, spec, iterationIndex, session.context.tokenStore)
         val executionResult = if (blueprintRunner != null) {
             try {
                 blueprintRunner.execute(blueprint)
@@ -801,6 +820,9 @@ class ConversationalGovernor(
         } else {
             null
         }
+
+        // 토큰 자동 추출: auth 엔드포인트 응답에서 토큰을 tokenStore에 저장
+        extractAndStoreTokens(session, blueprint, executionResult)
 
         // 결과를 session context에 적재
         val resultSummary = formatBlueprintExecutionResult(executionResult)
@@ -836,6 +858,226 @@ class ConversationalGovernor(
             executionResult = executionResult,
             nextAction = NextAction.CONTINUE_EXECUTION
         )
+    }
+
+    // ==========================================================
+    // HLX 워크플로우 자동생성 + 실행
+    // ==========================================================
+
+    /**
+     * HLX API 워크플로우 자동생성 및 실행
+     *
+     * 1. RAG에서 API 스펙 조회
+     * 2. LLM에게 HLX 워크플로우 JSON 생성 요청
+     * 3. HlxParser로 파싱
+     * 4. HlxRunner로 실행
+     * 5. 결과 포맷팅 및 반환
+     *
+     * 기존 turn-by-turn 방식과의 차이:
+     * - 완전한 실행 계획을 한번에 생성 (LLM이 컨텍스트를 잃지 않음)
+     * - HlxRunner가 순차 실행 (노드 간 데이터 전달 보장)
+     * - 인증 → 조회 → 변환 → 행동 흐름이 워크플로우 구조에 의해 강제됨
+     */
+    private suspend fun executeHlxApiWorkflow(
+        session: ConversationSession,
+        draftSpec: DraftSpec
+    ): ConversationResponse {
+        emitProgress(ProgressPhase.LLM_THINKING, "Generating HLX workflow...")
+
+        // 1. RAG에서 API 스펙 조회 (일반 + 인증 전용 검색 병합)
+        val lastUserMessage = session.getRecentHistory(5)
+            .lastOrNull { it.role == MessageRole.USER }?.content
+        val ragContext = consultRagForApiKnowledge(draftSpec, lastUserMessage)
+        val authContext = consultRagForAuthCredentials()
+        val mergedRagContext = mergeRagContexts(ragContext, authContext)
+        println("[RAG] Context injected: ${mergedRagContext?.length ?: 0} chars, first 100: ${mergedRagContext?.take(100) ?: "null"}")
+
+        // 1-b. RAG context에서 시스템별 credentials 추출
+        val credentialsTable = extractCredentialsFromRag(mergedRagContext)
+        if (credentialsTable.isNotBlank()) {
+            println("[CRED] Extracted credentials table:\n$credentialsTable")
+        }
+
+        // 2. LLM에게 HLX 워크플로우 JSON 생성 요청
+        val prompt = GovernorPrompt.hlxApiGenerationPrompt(
+            intent = draftSpec.intent ?: "",
+            domain = draftSpec.domain,
+            ragContext = mergedRagContext,
+            credentialsTable = credentialsTable.ifBlank { null }
+        )
+        println("[PROMPT] Total length: ${prompt.length} chars, ragContext: ${mergedRagContext?.length ?: 0} chars")
+
+        val llmResponse = try {
+            llmProvider!!.call(
+                LlmRequest(
+                    action = LlmAction.COMPLETE,
+                    prompt = prompt,
+                    model = model ?: llmProvider.defaultModel,
+                    maxTokens = 4000
+                )
+            )
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 생성 실패: ${e.message}",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 3. HLX JSON 파싱
+        val hlxJson = extractJson(llmResponse.content)
+        println("[HLX] Generated workflow JSON (${hlxJson.length} chars)")
+
+        val workflow = try {
+            HlxParser.parse(hlxJson)
+        } catch (e: Exception) {
+            println("[HLX] Parse failed: ${e.message}")
+            println("[HLX] Raw JSON: ${hlxJson.take(500)}")
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 파싱 실패: ${e.message}\n\n생성된 JSON:\n${hlxJson.take(300)}...",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        println("[HLX] Workflow parsed: ${workflow.name}, ${workflow.nodes.size} nodes")
+        workflow.nodes.forEach { node ->
+            println("[HLX]   Node: ${node.id} (${node.type}) - ${node.description.take(80)}")
+        }
+
+        // 4. HlxRunner로 실행
+        emitProgress(ProgressPhase.EXECUTING, "Executing HLX workflow: ${workflow.name}...")
+
+        val hlxResult = try {
+            hlxRunner!!.run(workflow)
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 실행 실패: ${e.message}",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 5. 실행 결과에서 토큰 추출 (engine-level tokenStore에도 저장)
+        extractTokensFromHlxResult(session, hlxResult)
+
+        // 6. 결과 포맷팅
+        emitProgress(ProgressPhase.DONE)
+        val summary = formatHlxExecutionResult(hlxResult, workflow)
+
+        // 7. 세션에 결과 적재
+        session.integrateResult(null, null, "HLX: ${hlxResult.status} - ${workflow.name}")
+        session.resetSpec()
+        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+        session.context.activeTaskId = null
+
+        return ConversationResponse(
+            action = ActionType.EXECUTE,
+            message = summary,
+            sessionId = session.sessionId
+        )
+    }
+
+    /**
+     * HLX 실행 결과에서 토큰을 추출하여 세션 tokenStore에 저장
+     *
+     * Act 노드 결과 중 auth 엔드포인트 호출이 있으면 토큰을 추출한다.
+     */
+    private fun extractTokensFromHlxResult(session: ConversationSession, result: HlxExecutionResult) {
+        for (record in result.nodeRecords) {
+            if (record.nodeType != HlxNodeType.ACT) continue
+            val output = record.output ?: continue
+
+            // Act 노드 output이 JSON 객체이고 HTTP 응답인 경우 토큰 추출 시도
+            try {
+                val jsonObj = when (output) {
+                    is JsonObject -> output
+                    is JsonPrimitive -> {
+                        val content = output.contentOrNull ?: continue
+                        json.parseToJsonElement(content).jsonObject
+                    }
+                    else -> continue
+                }
+
+                // body 필드에서 토큰 추출 (API 응답 형식)
+                val body = jsonObj["body"]?.jsonPrimitive?.contentOrNull
+                    ?: jsonObj.toString() // body가 없으면 전체를 시도
+
+                val token = extractTokenFromBody(body)
+                if (token != null) {
+                    // URL에서 hostPort 추출 (statusCode가 있으면 API 응답)
+                    val url = jsonObj["url"]?.jsonPrimitive?.contentOrNull
+                    if (url != null) {
+                        val hostPort = extractHostPort(url)
+                        if (hostPort != null) {
+                            session.context.tokenStore[hostPort] = token
+                            println("[HLX-AUTH] Token stored for $hostPort")
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // 파싱 실패는 무시 (모든 Act 결과가 토큰을 포함하진 않음)
+            }
+        }
+    }
+
+    /**
+     * HLX 워크플로우 실행 결과를 사용자 친화적 문자열로 포맷팅
+     */
+    private fun formatHlxExecutionResult(result: HlxExecutionResult, workflow: io.wiiiv.hlx.model.HlxWorkflow): String = buildString {
+        val statusEmoji = when (result.status) {
+            HlxExecutionStatus.COMPLETED -> "OK"
+            HlxExecutionStatus.ENDED_EARLY -> "OK (early)"
+            HlxExecutionStatus.FAILED -> "FAILED"
+            HlxExecutionStatus.ABORTED -> "ABORTED"
+        }
+
+        appendLine("=== HLX Workflow: ${workflow.name} ===")
+        appendLine("Status: $statusEmoji")
+        appendLine("Duration: ${result.totalDurationMs}ms")
+        appendLine("Nodes: ${result.nodeRecords.size}")
+        result.error?.let { appendLine("Error: $it") }
+        appendLine()
+
+        // 각 노드 실행 결과
+        for (record in result.nodeRecords) {
+            val nodeStatus = when (record.status) {
+                io.wiiiv.hlx.model.HlxStatus.SUCCESS -> "[OK]"
+                io.wiiiv.hlx.model.HlxStatus.FAILED -> "[FAIL]"
+                else -> "[${record.status}]"
+            }
+            append("$nodeStatus ${record.nodeId} (${record.nodeType})")
+            if (record.durationMs > 0) append(" ${record.durationMs}ms")
+            record.error?.let { append(" - $it") }
+            appendLine()
+
+            // 출력 값 요약 (너무 길면 잘라냄)
+            record.output?.let { output ->
+                val outputStr = output.toString()
+                if (outputStr.length <= 500) {
+                    appendLine("  → $outputStr")
+                } else {
+                    appendLine("  → ${outputStr.take(500)}...")
+                }
+            }
+        }
+
+        // 최종 변수 상태 (중요한 것만)
+        if (result.context.variables.isNotEmpty()) {
+            appendLine()
+            appendLine("=== Final Variables ===")
+            result.context.variables.forEach { (key, value) ->
+                val valueStr = value.toString()
+                if (valueStr.length <= 300) {
+                    appendLine("$key: $valueStr")
+                } else {
+                    appendLine("$key: ${valueStr.take(300)}...")
+                }
+            }
+        }
     }
 
     /**
@@ -1434,6 +1676,105 @@ class ConversationalGovernor(
     }
 
     /**
+     * RAG에서 인증/계정 정보 전용 검색
+     *
+     * HLX 워크플로우 생성 시 credentials가 누락되는 문제를 방지한다.
+     * 일반 검색과 별도로 auth/login/credentials 키워드로 검색한다.
+     */
+    private suspend fun consultRagForAuthCredentials(): String? {
+        if (ragPipeline == null) return null
+        if (ragPipeline.size() == 0) return null
+
+        return try {
+            val results = ragPipeline.searchMulti(
+                listOf("login credentials username password 계정 정보", "auth login token 인증"),
+                topK = 3
+            )
+            if (results.isNotEmpty()) results.toNumberedContext() else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 두 RAG context를 병합 (중복 제거)
+     */
+    private fun mergeRagContexts(primary: String?, auth: String?): String? {
+        if (primary == null && auth == null) return null
+        if (primary == null) return auth
+        if (auth == null) return primary
+
+        // auth context에서 primary에 이미 포함된 줄 제거
+        val primaryLines = primary.lines().toSet()
+        val newAuthLines = auth.lines().filter { line ->
+            line.isNotBlank() && !primaryLines.contains(line)
+        }
+        return if (newAuthLines.isEmpty()) {
+            primary
+        } else {
+            "$primary\n\n--- 인증/계정 정보 ---\n${newAuthLines.joinToString("\n")}"
+        }
+    }
+
+    /**
+     * RAG context에서 시스템별 로그인 credentials를 코드로 추출
+     *
+     * gpt-4o-mini가 RAG 텍스트에서 credentials를 안정적으로 추출하지 못하므로,
+     * 코드로 파싱하여 구조화된 테이블로 제공한다.
+     */
+    private fun extractCredentialsFromRag(ragContext: String?): String {
+        if (ragContext.isNullOrBlank()) return ""
+
+        val entries = mutableListOf<String>()
+        val urlRegex = Regex("""(https?://[^\s/`"]+(?::\d+)?)""")
+
+        // RAG 청크 단위로 분할 ([1] ... [2] ... 패턴)
+        val chunks = ragContext.split(Regex("""\n\[(\d+)\]\s*"""))
+            .filter { it.isNotBlank() }
+
+        for (chunk in chunks) {
+            // 청크 내 URL 추출
+            val chunkUrls = urlRegex.findAll(chunk).map { it.groupValues[1] }.distinct().toList()
+            val loginUrl = chunkUrls.find { url ->
+                chunk.contains("login") || chunk.contains("auth")
+            }?.let { baseUrl ->
+                // port 부분만 추출 (host:port)
+                Regex("""https?://([^/]+)""").find(baseUrl)?.groupValues?.get(0) ?: baseUrl
+            }
+
+            // 청크 내 JSON credentials 추출
+            val jsonCredRegex = Regex(""""username"\s*:\s*"([^"]+)"\s*,\s*"password"\s*:\s*"([^"]+)"""")
+            for (match in jsonCredRegex.findAll(chunk)) {
+                val username = match.groupValues[1]
+                val password = match.groupValues[2]
+                val entry = if (loginUrl != null) {
+                    "- $loginUrl → username: \"$username\", password: \"$password\""
+                } else {
+                    "- username: \"$username\", password: \"$password\""
+                }
+                if (entry !in entries) entries.add(entry)
+            }
+
+            // 청크 내 테이블 credentials 추출 (ADMIN role만 — 로그인에 사용할 주 계정)
+            val tableRowRegex = Regex("""\|\s*(\w+)\s*\|\s*(\w+)\s*\|\s*(ADMIN)\s*\|""")
+            for (match in tableRowRegex.findAll(chunk)) {
+                val username = match.groupValues[1]
+                val password = match.groupValues[2]
+                val role = match.groupValues[3]
+                if (username == "username") continue // 헤더 행 스킵
+                val entry = if (loginUrl != null) {
+                    "- $loginUrl → username: \"$username\", password: \"$password\" (role: $role)"
+                } else {
+                    "- username: \"$username\", password: \"$password\" (role: $role)"
+                }
+                if (entry !in entries) entries.add(entry)
+            }
+        }
+
+        return if (entries.isEmpty()) "" else entries.joinToString("\n")
+    }
+
+    /**
      * LLM 응답을 ApiWorkflowDecision으로 파싱
      */
     private fun parseApiWorkflowDecision(response: String): ApiWorkflowDecision {
@@ -1491,11 +1832,15 @@ class ConversationalGovernor(
 
     /**
      * ApiWorkflowDecision을 Blueprint로 변환
+     *
+     * 토큰 자동 주입: LLM이 Authorization 헤더를 빠뜨려도,
+     * tokenStore에 해당 host:port의 토큰이 있으면 자동으로 주입한다.
      */
     private fun createApiCallBlueprint(
         decision: ApiWorkflowDecision,
         spec: Spec,
-        iteration: Int
+        iteration: Int,
+        tokenStore: Map<String, String> = emptyMap()
     ): Blueprint {
         val now = Instant.now().toString()
 
@@ -1510,6 +1855,16 @@ class ConversationalGovernor(
             )
             call.headers.forEach { (k, v) -> params["header:$k"] = v }
             call.body?.let { params["body"] = it }
+
+            // 토큰 자동 주입: Authorization 헤더가 없고, tokenStore에 토큰이 있으면 주입
+            if (!params.keys.any { it.equals("header:Authorization", ignoreCase = true) }) {
+                val hostPort = extractHostPort(call.url)
+                if (hostPort != null) {
+                    tokenStore[hostPort]?.let { token ->
+                        params["header:Authorization"] = "Bearer $token"
+                    }
+                }
+            }
 
             BlueprintStep(
                 stepId = "step-api-iter${iteration}-${idx}",
@@ -1665,13 +2020,86 @@ class ConversationalGovernor(
 
     /**
      * 실행 히스토리에서 쓰기 작업(PUT/POST/DELETE/PATCH) 존재 여부 확인
+     * auth 엔드포인트(POST /auth/login 등)는 쓰기로 간주하지 않음
      */
     private fun hasExecutedWriteOperation(session: ConversationSession): Boolean {
         return session.context.executionHistory.any { turn ->
             turn.blueprint?.steps?.any { step ->
                 step.type == BlueprintStepType.API_CALL &&
-                    step.params["method"] in WRITE_HTTP_METHODS
+                    step.params["method"] in WRITE_HTTP_METHODS &&
+                    !isAuthEndpoint(step.params["url"] ?: "")
             } ?: false
+        }
+    }
+
+    /**
+     * URL이 인증 엔드포인트인지 확인
+     * POST /auth/login 등은 "쓰기 작업"이 아닌 인증 작업으로 분류
+     */
+    private fun isAuthEndpoint(url: String): Boolean {
+        val path = try { java.net.URI.create(url).path } catch (_: Exception) { url }
+        return AUTH_PATH_PATTERNS.any { pattern -> path.endsWith(pattern) }
+    }
+
+    /**
+     * API 실행 결과에서 인증 토큰을 자동 추출하여 세션 tokenStore에 저장한다.
+     *
+     * 범용 메커니즘: auth 엔드포인트(POST /auth/login 등) 응답 바디에서
+     * 공통 토큰 필드(accessToken, token, access_token)를 탐색한다.
+     * 특정 백엔드에 종속되지 않는다.
+     */
+    private fun extractAndStoreTokens(
+        session: ConversationSession,
+        blueprint: Blueprint,
+        result: BlueprintExecutionResult?
+    ) {
+        if (result == null || !result.isSuccess) return
+
+        for (step in blueprint.steps) {
+            if (step.type != BlueprintStepType.API_CALL) continue
+            val url = step.params["url"] ?: continue
+            if (!isAuthEndpoint(url)) continue
+
+            val hostPort = extractHostPort(url) ?: continue
+            val output = result.context.getStepOutput(step.stepId) ?: continue
+            val body = output.json["body"]?.jsonPrimitive?.contentOrNull ?: continue
+
+            // 응답 바디에서 토큰 추출 (공통 필드명 탐색)
+            val token = extractTokenFromBody(body)
+            if (token != null) {
+                session.context.tokenStore[hostPort] = token
+                println("[AUTH] Token stored for $hostPort (${token.take(20)}...)")
+            }
+        }
+    }
+
+    /**
+     * JSON 응답 바디에서 Bearer 토큰을 추출한다.
+     * 공통 필드: accessToken, token, access_token, jwt
+     */
+    private fun extractTokenFromBody(body: String): String? {
+        return try {
+            val jsonObj = json.parseToJsonElement(body).jsonObject
+            TOKEN_FIELD_NAMES.firstNotNullOfOrNull { field ->
+                jsonObj[field]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * URL에서 host:port를 추출한다.
+     * 예: "http://home.skyepub.net:9090/api/auth/login" → "home.skyepub.net:9090"
+     */
+    private fun extractHostPort(url: String): String? {
+        return try {
+            val uri = java.net.URI.create(url)
+            val host = uri.host ?: return null
+            val port = if (uri.port > 0) uri.port else if (uri.scheme == "https") 443 else 80
+            "$host:$port"
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -1765,6 +2193,12 @@ class ConversationalGovernor(
         /** 쓰기 HTTP 메서드 */
         private val WRITE_HTTP_METHODS = setOf("PUT", "POST", "DELETE", "PATCH")
 
+        /** 인증 엔드포인트 — writeIntent 검사에서 제외 */
+        private val AUTH_PATH_PATTERNS = listOf("/auth/login", "/auth/register", "/auth/token", "/auth/refresh")
+
+        /** 응답 바디에서 탐색할 토큰 필드명 (범용) */
+        private val TOKEN_FIELD_NAMES = listOf("accessToken", "token", "access_token", "jwt", "id_token")
+
         /**
          * ConversationalGovernor 생성
          */
@@ -1774,9 +2208,10 @@ class ConversationalGovernor(
             llmProvider: LlmProvider? = null,
             model: String? = null,
             blueprintRunner: BlueprintRunner? = null,
-            ragPipeline: RagPipeline? = null
+            ragPipeline: RagPipeline? = null,
+            hlxRunner: HlxRunner? = null
         ): ConversationalGovernor {
-            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline)
+            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner)
         }
     }
 }

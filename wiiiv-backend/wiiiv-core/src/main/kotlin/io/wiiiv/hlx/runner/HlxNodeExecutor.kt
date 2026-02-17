@@ -104,6 +104,7 @@ class HlxNodeExecutor(
             // 1. LLM에게 구조화된 Step 요청
             val prompt = HlxPrompt.actExecution(node, context)
             val response = callLlm(prompt)
+            println("[HLX-ACT] Node: ${node.id}, LLM response: ${response.take(500)}")
             val json = extractJson(response)
 
             // 2. step.type + step.params 추출
@@ -114,7 +115,17 @@ class HlxNodeExecutor(
                 ?: return NodeExecutionResult.Failure("LLM response missing 'step.type' field: $response")
 
             val paramsObj = stepObj["params"]?.jsonObject ?: buildJsonObject { }
-            val params = paramsObj.mapValues { it.value.jsonPrimitive.content }
+            val rawParams = paramsObj.mapValues { entry ->
+                when (val v = entry.value) {
+                    is JsonPrimitive -> v.content
+                    else -> v.toString() // JsonObject/JsonArray → serialize to string
+                }
+            }
+
+            // 3. 템플릿 변수 해결: {변수} 및 {변수.필드} → 실제 값
+            val params = rawParams.mapValues { (_, value) ->
+                resolveTemplateVariables(value, context)
+            }
 
             // BlueprintStepType 파싱
             val stepType = try {
@@ -202,6 +213,45 @@ class HlxNodeExecutor(
         )
         val response = llmProvider.call(request)
         return response.content
+    }
+
+    /**
+     * 템플릿 변수 해결
+     *
+     * {변수}, {변수.필드} 패턴을 context variables의 실제 값으로 치환한다.
+     * LLM이 변수 참조를 해결하지 못하는 경우의 fallback 처리.
+     */
+    private fun resolveTemplateVariables(value: String, context: HlxContext): String {
+        val templateRegex = Regex("""\{(\w+)(?:\.(\w+))?\}""")
+
+        return templateRegex.replace(value) { match ->
+            val varName = match.groupValues[1]
+            val fieldName = match.groupValues[2].takeIf { it.isNotEmpty() }
+
+            val varValue = context.variables[varName]
+            if (varValue == null) {
+                match.value // 미해결 변수는 그대로 유지
+            } else if (fieldName != null) {
+                // {변수.필드} → JSON 객체에서 필드 추출
+                try {
+                    val obj = varValue.jsonObject
+                    val field = obj[fieldName]
+                    when {
+                        field == null -> match.value
+                        field is JsonPrimitive && field.isString -> field.content
+                        else -> field.toString()
+                    }
+                } catch (_: Exception) {
+                    match.value
+                }
+            } else {
+                // {변수} → 전체 값
+                when {
+                    varValue is JsonPrimitive && varValue.isString -> varValue.content
+                    else -> varValue.toString()
+                }
+            }
+        }
     }
 
     companion object {

@@ -194,6 +194,11 @@ class ApiExecutor(
             requestBuilder.header(key, value)
         }
 
+        // body가 있는데 Content-Type 헤더가 없으면 application/json 자동 설정
+        if (step.body != null && step.headers.none { it.key.equals("Content-Type", ignoreCase = true) }) {
+            requestBuilder.header("Content-Type", "application/json")
+        }
+
         // Set method and body
         val bodyPublisher = step.body?.let { HttpRequest.BodyPublishers.ofString(it) }
             ?: HttpRequest.BodyPublishers.noBody()

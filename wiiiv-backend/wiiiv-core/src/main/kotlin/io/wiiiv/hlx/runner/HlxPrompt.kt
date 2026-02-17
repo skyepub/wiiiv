@@ -124,10 +124,12 @@ object HlxPrompt {
             appendLine("- API_CALL: Make an HTTP request. Params: url (required), method (GET/POST/PUT/DELETE/PATCH), body (JSON string), header:<HeaderName> (e.g. header:Authorization, header:Content-Type)")
             appendLine("- NOOP: Do nothing (test/placeholder). Params: any key-value pairs")
             appendLine()
-            appendLine("## IMPORTANT: Variable Resolution")
-            appendLine("- The description may contain {variable} references (e.g., {auth_token}, {item})")
-            appendLine("- You MUST replace these with ACTUAL VALUES from Context Variables above")
-            appendLine("- For Authorization headers: if description says 'Bearer {token_var}', use the actual token value from context")
+            appendLine("## IMPORTANT: Variable References")
+            appendLine("- Use {variable_name} syntax to reference Context Variables (e.g., {auth_token}, {item.id})")
+            appendLine("- DO NOT copy-paste actual token/long values — always use {variable_name} references")
+            appendLine("- The system will automatically resolve {variable_name} to actual values")
+            appendLine("- For Authorization headers: ALWAYS use {token_variable_name}, e.g. \"Bearer {skystock_token}\"")
+            appendLine("- For body fields from iteration items: use {item.fieldName}, e.g. {item.id}, {item.name}")
             appendLine()
             appendLine("## Response Format")
             appendLine("Return ONLY valid JSON in this format:")
@@ -136,7 +138,7 @@ object HlxPrompt {
             appendLine("Examples:")
             appendLine("""{ "step": { "type": "COMMAND", "params": { "command": "echo", "args": "hello world" } } }""")
             appendLine()
-            appendLine("""{ "step": { "type": "API_CALL", "params": { "method": "POST", "url": "http://host:9091/api/orders", "body": "{\"supplierId\":1,\"items\":[{\"productId\":18,\"quantity\":50}]}", "header:Authorization": "Bearer eyJhbG...", "header:Content-Type": "application/json" } } }""")
+            appendLine("""{ "step": { "type": "API_CALL", "params": { "method": "POST", "url": "http://host:9091/api/orders", "body": "{\"supplierId\":1,\"items\":[{\"skymallProductId\":{item.id},\"quantity\":50}]}", "header:Authorization": "Bearer {skystock_token}", "header:Content-Type": "application/json" } } }""")
         }
     }
 

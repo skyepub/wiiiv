@@ -29,6 +29,36 @@ class ShellProgressDisplay(
     @Volatile private var currentStepInfo = ""
     @Volatile private var currentDetail = ""
 
+    // 터미널 너비 캐시 (Windows/Linux 모두 지원)
+    private val termWidth: Int by lazy { detectTerminalWidth() }
+
+    private fun detectTerminalWidth(): Int {
+        // 1. 환경변수 COLUMNS
+        System.getenv("COLUMNS")?.toIntOrNull()?.let { return it }
+
+        // 2. tput cols (Linux/macOS)
+        try {
+            val proc = ProcessBuilder("tput", "cols").redirectErrorStream(true).start()
+            val result = proc.inputStream.bufferedReader().readLine()?.trim()?.toIntOrNull()
+            proc.waitFor()
+            if (result != null && result > 0) return result
+        } catch (_: Exception) {}
+
+        // 3. mode con (Windows)
+        try {
+            val proc = ProcessBuilder("cmd", "/c", "mode", "con").redirectErrorStream(true).start()
+            val output = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            val match = Regex("""Columns:\s*(\d+)""").find(output)
+            match?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        } catch (_: Exception) {}
+
+        return 80
+    }
+
+    // ANSI: 현재 줄 전체 지우기 + 커서를 1열로
+    private val CLEAR_LINE = "\u001b[2K\u001b[1G"
+
     /**
      * 서버에서 수신한 progress 이벤트 처리
      */
@@ -52,10 +82,9 @@ class ShellProgressDisplay(
             val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
             val timeStr = String.format("%.1fs", elapsed)
             if (verboseLevel >= 2) {
-                // level 2-3: 줄바꿈 로그
                 println("  ${c.BRIGHT_GREEN}> Done${stepInfo}${detail}  [${timeStr}]${c.RESET}")
             } else {
-                print("\r${c.BRIGHT_GREEN}  > ${c.RESET}${c.DIM}Done${stepInfo}${detail}  [${timeStr}]${c.RESET}    ")
+                print("${CLEAR_LINE}${c.BRIGHT_GREEN}  > ${c.RESET}${c.DIM}Done${stepInfo}${detail}  [${timeStr}]${c.RESET}")
                 println()
             }
             hasActiveProgress = false
@@ -70,12 +99,10 @@ class ShellProgressDisplay(
         hasActiveProgress = true
 
         if (verboseLevel >= 2) {
-            // level 2-3: phase 변경마다 줄바꿈 로그 (스피너 없음)
             val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
             val timeStr = String.format("%.1fs", elapsed)
             println("  ${color}> ${label}${stepInfo}${detail}  [${timeStr}]${c.RESET}")
         } else {
-            // level 1: 스피너 애니메이션
             startSpinner()
             renderFrame()
         }
@@ -86,7 +113,12 @@ class ShellProgressDisplay(
         val timeStr = String.format("%.1fs", elapsed)
         val frame = spinnerFrames[spinnerIndex % spinnerFrames.size]
 
-        print("\r${currentColor}  $frame ${c.RESET}${c.DIM}${currentLabel}${currentStepInfo}${currentDetail}  [${timeStr}]${c.RESET}    ")
+        val prefix = "  $frame "
+        val body = "${currentLabel}${currentStepInfo}${currentDetail}  [${timeStr}]"
+        val maxBody = termWidth - prefix.length - 2
+        val truncated = if (body.length > maxBody && maxBody > 3) body.take(maxBody - 3) + "..." else body
+
+        print("${CLEAR_LINE}${currentColor}${prefix}${c.RESET}${c.DIM}${truncated}${c.RESET}")
         System.out.flush()
     }
 
@@ -101,7 +133,7 @@ class ShellProgressDisplay(
                         renderFrame()
                     }
                 }
-            }, 80, 80)
+            }, 100, 100)
         }
     }
 

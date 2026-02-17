@@ -3,15 +3,10 @@ package io.wiiiv.integration
 import io.wiiiv.blueprint.BlueprintRunner
 import io.wiiiv.dacs.SimpleDACS
 import io.wiiiv.execution.CompositeExecutor
-import io.wiiiv.execution.impl.ApiExecutor
 import io.wiiiv.execution.impl.CommandExecutor
 import io.wiiiv.execution.impl.FileExecutor
 import io.wiiiv.execution.impl.OpenAIProvider
 import io.wiiiv.governor.*
-import io.wiiiv.rag.Document
-import io.wiiiv.rag.RagPipeline
-import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
-import io.wiiiv.rag.vector.InMemoryVectorStore
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
@@ -53,9 +48,6 @@ class TurnBasedE2ETest {
     }
 
     private lateinit var governor: ConversationalGovernor
-    private lateinit var mockServer: MockApiServer
-    private lateinit var ragPipeline: RagPipeline
-    private lateinit var apiGovernor: ConversationalGovernor
 
     @BeforeAll
     fun setup() {
@@ -81,76 +73,9 @@ class TurnBasedE2ETest {
             blueprintRunner = blueprintRunner
         )
 
-        // Mock API server + Governor with API execution
-        mockServer = MockApiServer()
-        mockServer.start()
-
-        ragPipeline = RagPipeline(
-            embeddingProvider = OpenAIEmbeddingProvider(apiKey = API_KEY),
-            vectorStore = InMemoryVectorStore()
-        )
-
-        val apiSpec = """
-            ## Mock API Specification
-            Base URL: ${mockServer.baseUrl()}
-
-            ### GET /api/users
-            Query parameters: name (optional, filter by name)
-            Returns: JSON array of users [{id, name, email}]
-
-            ### GET /api/users/{id}
-            Returns: Single user {id, name, email}
-
-            ### GET /api/orders
-            Query parameters: userId (optional, filter by user ID)
-            Returns: JSON array of orders [{id, userId, status, item}]
-
-            ### PUT /api/orders/{id}
-            Body: {"status": "new_status"}
-            Returns: Updated order {id, userId, status, item}
-
-            ### Data
-            Users: john (id=1), jane (id=2), bob (id=3)
-            Orders: order-101 (userId=1, pending, Laptop), order-102 (userId=1, pending, Mouse)
-        """.trimIndent()
-
-        runBlocking {
-            ragPipeline.ingest(Document(content = apiSpec, title = "Mock API Spec"))
-        }
-
-        val apiExecutor = CompositeExecutor(listOf(ApiExecutor.INSTANCE))
-        val apiBlueprintRunner = BlueprintRunner.create(apiExecutor)
-
-        apiGovernor = ConversationalGovernor.create(
-            dacs = dacs,
-            llmProvider = OpenAIProvider(
-                apiKey = API_KEY,
-                defaultModel = MODEL,
-                defaultMaxTokens = 2000
-            ),
-            model = MODEL,
-            blueprintRunner = apiBlueprintRunner,
-            ragPipeline = ragPipeline
-        )
-
         println("=== Phase 5-6 E2E Test ===")
         println("Model: $MODEL")
-        println("Mock Server: ${mockServer.baseUrl()}")
         println()
-    }
-
-    @AfterAll
-    fun teardown() {
-        if (::mockServer.isInitialized) {
-            mockServer.stop()
-        }
-    }
-
-    @BeforeEach
-    fun resetMockData() {
-        if (::mockServer.isInitialized) {
-            mockServer.dataStore.reset()
-        }
     }
 
     // ========== Helpers ==========
@@ -321,70 +246,6 @@ class TurnBasedE2ETest {
         } finally {
             testFile.delete()
         }
-    }
-
-    // ========== Case 31: API Workflow → Multi-Turn → COMPLETED ==========
-
-    /**
-     * Case 31: API 워크플로우 멀티턴 실행 → COMPLETED
-     *
-     * 검증 대상:
-     * - executeLlmDecidedTurn() 실행 경로
-     * - nextAction = CONTINUE_EXECUTION → 자동 계속
-     * - 완료 시 COMPLETED 전이
-     * - executionHistory 누적
-     */
-    @Test
-    @Order(31)
-    fun `Case 31 - API workflow multi-turn COMPLETED`() = runBlocking {
-        if (API_KEY.isBlank()) { println("SKIP: OPENAI_API_KEY not set"); return@runBlocking }
-
-        val result = runConversationKeepSession(
-            "Case 31: API Workflow Multi-Turn → COMPLETED",
-            listOf(
-                "john 사용자의 주문 목록을 조회해줘. 먼저 john을 찾고 그 다음 주문을 조회해",
-                "Mock API 서버야. 기본 URL: ${mockServer.baseUrl()}",
-                "진행해"
-            ),
-            gov = apiGovernor,
-            logFileName = "case31.log"
-        )
-
-        val responses = result.responses
-        val session = result.session
-
-        println("  [Result] Total responses: ${responses.size}")
-        println("  [Result] Actions: ${responses.map { it.action }}")
-
-        // Hard Assert: nextAction = CONTINUE_EXECUTION이 최소 1회 등장
-        val continueCount = responses.count { it.nextAction == NextAction.CONTINUE_EXECUTION }
-        println("  [Result] CONTINUE_EXECUTION count: $continueCount")
-        // API workflow가 제대로 작동하면 최소 1회 auto-continue가 있어야 함
-        // 하지만 LLM이 첫 턴에 완료할 수도 있으므로 soft check
-        if (continueCount == 0) {
-            println("  [WARN] No CONTINUE_EXECUTION - LLM may have completed in single turn")
-        }
-
-        // Session state verification
-        if (session != null) {
-            // Soft Assert: 작업이 생성되었으면 COMPLETED 확인
-            if (session.context.tasks.isNotEmpty()) {
-                val completedTasks = session.context.tasks.values.filter { it.status == TaskStatus.COMPLETED }
-                println("  [Result] Tasks: ${session.context.tasks.map { (id, t) -> "$id(${t.status})" }}")
-                println("  [Result] Completed: ${completedTasks.size}")
-            }
-
-            // Hard Assert: executionHistory에 기록이 있어야 함
-            val totalHistory = session.context.tasks.values.sumOf { it.context.executionHistory.size } +
-                (if (session.context.activeTaskId == null) 0 else 0)
-            println("  [Result] Total execution history in tasks: $totalHistory")
-        }
-
-        // Hard Assert: 마지막 응답이 EXECUTE (workflow 완료) 또는 적어도 실행이 진행됨
-        val lastNonContinue = responses.lastOrNull { it.nextAction != NextAction.CONTINUE_EXECUTION }
-            ?: responses.last()
-        println("  [Result] Last terminal action: ${lastNonContinue.action}")
-        println("  [Result] Last message: ${lastNonContinue.message.take(200)}")
     }
 
     // ========== Case 32: Execute → Session Preserves Context ==========
@@ -636,62 +497,6 @@ class TurnBasedE2ETest {
         } finally {
             testFile1.delete()
         }
-    }
-
-    // ========== Case 36: API Workflow with Turn-Based Execution ==========
-
-    /**
-     * Case 36: API Workflow 턴 기반 실행 - nextAction 루프 검증
-     *
-     * 검증 대상:
-     * - executeLlmDecidedTurn이 1회 배치만 수행
-     * - nextAction = CONTINUE_EXECUTION 힌트
-     * - auto-continue가 여러 턴 실행
-     * - 최종 COMPLETED
-     */
-    @Test
-    @Order(36)
-    fun `Case 36 - API workflow turn-based with auto-continue`() = runBlocking {
-        if (API_KEY.isBlank()) { println("SKIP: OPENAI_API_KEY not set"); return@runBlocking }
-
-        val result = runConversationKeepSession(
-            "Case 36: API Workflow Turn-Based",
-            listOf(
-                "john의 모든 주문 상태를 shipped로 변경해줘. " +
-                    "순서: 1) john 사용자 조회 2) 주문 목록 조회 3) 각 주문 PUT 업데이트",
-                "Mock API 서버. 기본 URL: ${mockServer.baseUrl()}",
-                "진행해"
-            ),
-            gov = apiGovernor,
-            logFileName = "case36.log"
-        )
-
-        val responses = result.responses
-        val session = result.session
-
-        // Count auto-continues
-        val continueResponses = responses.filter { it.nextAction == NextAction.CONTINUE_EXECUTION }
-        val executeResponses = responses.filter { it.action == ActionType.EXECUTE }
-        println("  [Result] Total responses: ${responses.size}")
-        println("  [Result] EXECUTE count: ${executeResponses.size}")
-        println("  [Result] CONTINUE_EXECUTION count: ${continueResponses.size}")
-
-        // Hard Assert: EXECUTE 응답이 존재
-        assertTrue(executeResponses.isNotEmpty(),
-            "Case 36: EXECUTE 응답이 있어야 함")
-
-        // Session state
-        if (session != null) {
-            val tasks = session.context.tasks
-            for ((id, task) in tasks) {
-                println("  [Result] Task [$id]: ${task.status}, history=${task.context.executionHistory.size}")
-            }
-        }
-
-        // Verify mock data actually changed
-        val updatedOrders = mockServer.dataStore.getOrdersByUserId(1)
-        val allShipped = updatedOrders.all { it.status == "shipped" }
-        println("  [Result] Orders actually shipped: $allShipped (${updatedOrders.map { "${it.id}:${it.status}" }})")
     }
 
     // ========== Case 37: Conversation → Execute → Follow-up ==========

@@ -390,8 +390,8 @@ wiiiv rag size                   # 저장소 크기
   - [x] GovernorPrompt API_WORKFLOW 템플릿 (반복적 API 결정 프롬프트)
   - [x] ConversationalGovernor.executeApiWorkflow() (반복 실행 루프, 최대 10회)
   - [x] RAG 통합 (ragPipeline으로 API 스펙 검색)
-  - [x] MockApiServer (임베디드 Ktor Netty, E2E 테스트용)
-  - [x] ApiWorkflowE2ETest (6개 시나리오: 단일호출, 2단계, 다단계쓰기, 에러복구, 중복방지, 단일완료)
+  - [x] ~~MockApiServer~~ 제거됨 → 실제 백엔드(skymall/skystock) 사용으로 전환
+  - [x] ~~ApiWorkflowE2ETest~~ 제거됨 → 실제 API 대상 E2E 테스트로 대체 예정
 - [x] HLX Phase 1: Core Model + Parser + Validator
   - [x] HlxNode sealed class (5노드: Observe/Transform/Decide/Act/Repeat)
   - [x] HlxNodeSerializer (JSON "type" 기반 다형성 직렬화)

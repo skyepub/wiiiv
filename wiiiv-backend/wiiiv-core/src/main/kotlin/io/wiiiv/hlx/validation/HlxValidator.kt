@@ -2,6 +2,7 @@ package io.wiiiv.hlx.validation
 
 import io.wiiiv.hlx.model.HlxNode
 import io.wiiiv.hlx.model.HlxWorkflow
+import java.net.URI
 
 /**
  * HLX Validation Error - 검증 오류
@@ -24,12 +25,22 @@ data class HlxValidationError(
  * 5. Decide: branches 최소 1개, 참조 노드 ID 존재 여부 ("end" 특별 허용)
  * 6. Repeat: over/as 비어있지 않은지, body 최소 1개
  * 7. onError 형식 검증
+ * 8. Decide: branch key에 동적 값 차단 (공백 포함 또는 30자 초과)
+ * 9. Act: description URL의 unknown query param 차단
  */
 object HlxValidator {
 
     private val ON_ERROR_PATTERN = Regex(
         """^(retry:\d+(\s+then\s+(skip|decide))?|skip|abort)$"""
     )
+
+    /** 허용된 query param 이름 (소문자) */
+    private val ALLOWED_QUERY_PARAMS = setOf(
+        "page", "size", "threshold", "keyword", "categoryid", "status", "level"
+    )
+
+    /** URL 추출 패턴 (description에서 http(s)://... 추출) */
+    private val URL_PATTERN = Regex("""https?://[^\s"',}]+""")
 
     /**
      * 워크플로우 검증
@@ -130,6 +141,25 @@ object HlxValidator {
                             )
                         }
                     }
+                    // 8. branch key 패턴 검증 — 동적 값 차단
+                    for ((condition, _) in node.branches) {
+                        if (condition.contains(' ')) {
+                            errors.add(
+                                HlxValidationError(
+                                    "$nodePath.branches.$condition",
+                                    "Branch key contains spaces (likely a dynamic value): '$condition'"
+                                )
+                            )
+                        }
+                        if (condition.length > 30) {
+                            errors.add(
+                                HlxValidationError(
+                                    "$nodePath.branches.$condition",
+                                    "Branch key exceeds 30 chars (likely a dynamic value): '${condition.take(30)}...'"
+                                )
+                            )
+                        }
+                    }
                 }
                 is HlxNode.Repeat -> {
                     // 6. Repeat: over/as 비어있지 않은지
@@ -151,8 +181,49 @@ object HlxValidator {
                         errors.add(HlxValidationError("$nodePath.workflowRef", "SubWorkflow node 'workflowRef' must not be blank"))
                     }
                 }
-                is HlxNode.Observe, is HlxNode.Transform, is HlxNode.Act -> {
+                is HlxNode.Act -> {
+                    // 9. ACT 노드 URL의 unknown query param 차단
+                    validateActUrlParams(node.description, nodePath, errors)
+                }
+                is HlxNode.Observe, is HlxNode.Transform -> {
                     // 추가 타입별 검증 없음
+                }
+            }
+        }
+    }
+
+    /**
+     * ACT 노드 description에서 URL을 추출하고,
+     * query param이 허용 목록에 없으면 오류 추가
+     */
+    private fun validateActUrlParams(
+        description: String,
+        nodePath: String,
+        errors: MutableList<HlxValidationError>
+    ) {
+        val urls = URL_PATTERN.findAll(description)
+        for (urlMatch in urls) {
+            val urlStr = urlMatch.value
+            val queryString = try {
+                URI(urlStr).query
+            } catch (_: Exception) {
+                continue
+            } ?: continue
+
+            val paramNames = queryString.split('&').mapNotNull { part ->
+                part.split('=').firstOrNull()?.lowercase()?.takeIf { it.isNotEmpty() }
+            }
+
+            for (param in paramNames) {
+                // 템플릿 변수 ({variable}) 는 허용
+                if (param.startsWith("{")) continue
+                if (param !in ALLOWED_QUERY_PARAMS) {
+                    errors.add(
+                        HlxValidationError(
+                            "$nodePath.url",
+                            "Unknown query param '$param' in URL: $urlStr. Allowed: $ALLOWED_QUERY_PARAMS"
+                        )
+                    )
                 }
             }
         }

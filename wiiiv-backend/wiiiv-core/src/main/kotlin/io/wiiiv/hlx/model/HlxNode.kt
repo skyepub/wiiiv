@@ -52,7 +52,13 @@ enum class TransformHint {
     EXTRACT,
 
     @SerialName("merge")
-    MERGE
+    MERGE,
+
+    @SerialName("aggregate")
+    AGGREGATE,
+
+    @SerialName("sort")
+    SORT
 }
 
 /**

@@ -10,6 +10,7 @@ import io.wiiiv.gate.GateContext
 import io.wiiiv.gate.GateResult
 import io.wiiiv.hlx.model.HlxContext
 import io.wiiiv.hlx.model.HlxNode
+import io.wiiiv.hlx.model.TransformHint
 import kotlinx.serialization.json.*
 import java.util.UUID
 
@@ -52,8 +53,39 @@ class HlxNodeExecutor(
 
     /**
      * Transform 노드 실행
+     *
+     * Phase 1: 코드 추출 가능하면 먼저 시도, 실패 시 LLM 폴백
+     * - hint=EXTRACT
+     * - description에 "extract" 포함
+     * - description에 "Parse the body ... as JSON" 포함
      */
     suspend fun executeTransform(node: HlxNode.Transform, context: HlxContext): NodeExecutionResult {
+        // Phase 1: 코드 추출 가능 여부 판단
+        val descLower = node.description.lowercase()
+        val canTryCode = node.hint in setOf(
+                TransformHint.EXTRACT,
+                TransformHint.AGGREGATE,
+                TransformHint.SORT,
+                TransformHint.FILTER,
+                TransformHint.MAP
+            )
+            || descLower.contains("extract")
+            || descLower.contains("parse")
+            || descLower.contains("aggregate")
+            || descLower.contains("sort")
+            || descLower.contains("filter where")
+            || descLower.contains("select ")
+
+        if (canTryCode) {
+            val codeResult = CodeExtractor.tryExtract(node, context)
+                ?: CodeExtractor.tryCompute(node, context)
+            if (codeResult != null) {
+                println("[HLX-CODE] Code transform succeeded for '${node.id}': ${codeResult.toString().take(200)}")
+                return NodeExecutionResult.Success(codeResult)
+            }
+            println("[HLX-CODE] Code transform failed for '${node.id}' (hint=${node.hint}), falling back to LLM")
+        }
+        // 기존 LLM 경로
         val prompt = HlxPrompt.transform(node, context)
         return callLlmAndExtractResult(prompt)
     }
@@ -165,6 +197,17 @@ class HlxNodeExecutor(
             // 5. ExecutionResult → NodeExecutionResult
             when (executionResult) {
                 is ExecutionResult.Success -> {
+                    // HTTP 4xx/5xx 에러 감지 — 빈 body가 다음 노드로 전달되는 것을 방지
+                    val statusCode = executionResult.output.json["statusCode"]
+                    if (statusCode is JsonPrimitive) {
+                        val code = statusCode.intOrNull ?: 0
+                        if (code in 400..599) {
+                            return NodeExecutionResult.Failure(
+                                "HTTP $code error from ACT node '${node.id}': ${executionResult.output.stdout ?: "no body"}"
+                            )
+                        }
+                    }
+
                     val output = if (executionResult.output.json.isNotEmpty()) {
                         buildJsonObject {
                             executionResult.output.json.forEach { (k, v) -> put(k, v) }

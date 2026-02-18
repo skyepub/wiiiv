@@ -13,6 +13,7 @@ import io.wiiiv.execution.impl.LlmRequest
 import io.wiiiv.hlx.model.HlxNode
 import io.wiiiv.hlx.model.HlxNodeType
 import io.wiiiv.hlx.parser.HlxParser
+import io.wiiiv.hlx.validation.HlxValidator
 import io.wiiiv.hlx.runner.HlxExecutionResult
 import io.wiiiv.hlx.runner.HlxExecutionStatus
 import io.wiiiv.hlx.runner.HlxRunner
@@ -913,7 +914,8 @@ class ConversationalGovernor(
                     action = LlmAction.COMPLETE,
                     prompt = prompt,
                     model = model ?: llmProvider.defaultModel,
-                    maxTokens = 4000
+                    maxTokens = 4000,
+                    params = mapOf("temperature" to "0")
                 )
             )
         } catch (e: Exception) {
@@ -927,7 +929,7 @@ class ConversationalGovernor(
 
         // 3. HLX JSON 파싱
         val hlxJson = extractJson(llmResponse.content)
-        println("[HLX] Generated workflow JSON (${hlxJson.length} chars)")
+        println("[HLX] Generated workflow JSON (${hlxJson.length} chars):\n${hlxJson.take(3000)}")
 
         val workflow = try {
             HlxParser.parse(hlxJson)
@@ -954,6 +956,19 @@ class ConversationalGovernor(
         println("[HLX] Workflow parsed: ${workflow.name}, ${workflow.nodes.size} nodes")
         workflow.nodes.forEach { node ->
             println("[HLX]   Node: ${node.id} (${node.type}) - ${node.description.take(80)}")
+        }
+
+        // 3.5. HLX Validator - 실행 전 검증
+        val validationErrors = HlxValidator.validate(workflow)
+        if (validationErrors.isNotEmpty()) {
+            val errorMsg = validationErrors.joinToString("\n") { "- ${it.path}: ${it.message}" }
+            println("[HLX] Validation failed:\n$errorMsg")
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 검증 실패:\n$errorMsg",
+                sessionId = session.sessionId,
+                error = "Validation failed"
+            )
         }
 
         // 4. HlxRunner로 실행

@@ -904,6 +904,37 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
 ```
 ⚠ **Transform 없이 바로 Repeat하면 안 된다.** Act의 output은 HTTP 응답 래퍼이므로 반드시 Transform으로 body를 파싱해야 한다.
 
+**집계/정렬/필터/매핑** — 코드 경로로 결정론적 처리 (LLM 미사용, 빠르고 정확):
+| 작업 | hint | description 패턴 (정확히 이 형식 사용) | 예시 |
+|------|------|------|------|
+| 집계 | `"aggregate"` | `"Aggregate by {groupField} summing {sumField}"` | `"Aggregate by productName summing quantity"` |
+| 정렬 | `"sort"` | `"Sort by {field} descending"` 또는 `"Sort by {field} ascending"` | `"Sort by totalQuantity descending"` |
+| 필터 | `"filter"` | `"Filter where {field} = {value}"` (=, !=, >, <, >=, <= 지원) | `"Filter where status = active"` |
+| 매핑 | `"map"` | `"Select {field1}, {field2}, ..."` | `"Select productName, totalQuantity"` |
+
+⚠ **AGGREGATE/SORT/FILTER/MAP은 반드시 hint를 지정하라.** hint가 있으면 LLM 없이 코드로 즉시 처리되어 결정론적이고 빠르다.
+⚠ **SUMMARIZE만 LLM을 사용한다.** 자연어 요약이 필요한 경우에만 hint="summarize"를 사용하라.
+
+예시 — 집계 + 정렬 조합:
+```json
+{
+  "id": "aggregate-orders",
+  "type": "transform",
+  "description": "Aggregate by productName summing quantity",
+  "hint": "aggregate",
+  "input": "all_order_items",
+  "output": "aggregated_items"
+},
+{
+  "id": "sort-by-total",
+  "type": "transform",
+  "description": "Sort by totalQuantity descending",
+  "hint": "sort",
+  "input": "aggregated_items",
+  "output": "sorted_items"
+}
+```
+
 ### 7. Repeat 노드로 배치 처리
 여러 항목에 대해 동일 API를 호출할 때 repeat 노드를 사용한다.
 ⚠ `over`에는 **Transform으로 추출한 배열 변수**를 지정해야 한다 (Act의 raw 응답이 아님):

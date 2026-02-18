@@ -349,6 +349,13 @@ object CodeExtractor {
         val direction = match.groupValues[2].ifEmpty { "descending" }
         val ascending = direction.equals("ascending", ignoreCase = true)
 
+        // 필드 존재 검증: 첫 아이템에 sortField가 없으면 null (LLM 폴백)
+        val firstObj = items.firstOrNull() as? JsonObject
+        if (firstObj != null && !firstObj.containsKey(sortField)) {
+            println("[HLX-CODE] Sort SKIPPED: field '$sortField' not found in data. Available: ${firstObj.keys}")
+            return null
+        }
+
         val sorted = items.sortedWith(Comparator { a, b ->
             val aVal = (a as? JsonObject)?.get(sortField)?.jsonPrimitive?.doubleOrNull ?: 0.0
             val bVal = (b as? JsonObject)?.get(sortField)?.jsonPrimitive?.doubleOrNull ?: 0.0

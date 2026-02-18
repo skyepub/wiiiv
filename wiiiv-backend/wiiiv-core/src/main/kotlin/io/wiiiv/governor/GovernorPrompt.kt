@@ -621,6 +621,7 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
     val WORK_ORDER_GENERATION = """
 너는 프로젝트 작업지시서(Work Order) 작성 전문가다.
 대화 내역에서 수집된 모든 요구사항을 빠짐없이 추출하여 정확하고 상세한 작업지시서를 마크다운으로 작성하라.
+이 문서는 코드 생성 LLM의 **유일한 입력**이다. 여기 없으면 코드에도 없다.
 
 ## 작업지시서 필수 섹션
 
@@ -628,6 +629,7 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - 프로젝트 이름 (영문, 소문자-하이픈)
 - 목적/설명 (1-2문장)
 - 도메인
+- **메인 Application 클래스**: 정확한 FQCN 명시 (예: `com.skytree.skystock.SkystockApplication`)
 
 ### 2. 기술 스택 (버전 필수!)
 - 언어 + 버전 (예: Kotlin 2.2, Java 17)
@@ -641,11 +643,19 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - 디렉토리 레이아웃 (controller, model/entity, repository, service, config, dto 등)
 
 ### 4. 데이터 모델
+
 각 엔티티별:
-- 엔티티명
+- 엔티티명 / 클래스명
 - 필드 목록 (이름, 타입, 제약조건)
-- 관계 (ManyToOne, OneToMany 등)
 - 테이블명
+
+**엔티티 관계도** — 반드시 아래 형식으로 관계를 명시하라:
+```
+Supplier (1) --- (N) Product
+Product  (1) --- (N) PurchaseOrder
+Product  (1) --- (N) StockAlert
+```
+이 다이어그램이 없으면 LLM이 FK 방향을 잘못 생성한다.
 
 ### 5. API 설계
 각 컨트롤러별:
@@ -659,11 +669,31 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - 보안 설정 (공개 경로, 인증 필요 경로)
 - 초기 계정 정보
 
-### 7. 설정
-- 서버 포트
-- DB 연결 정보
-- application.yml/properties 주요 설정
-- 프로파일 설정
+### 7. 설정 (application.yml)
+
+⚠ 반드시 **실제 YAML 블록** 형태로 작성하라. 설명형 금지.
+코드 생성 LLM이 이 블록을 그대로 파일에 쓴다.
+
+예시:
+```yaml
+server:
+  port: 9091
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:skystock;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+```
 
 ### 8. 초기 데이터
 - data.sql 또는 DataInitializer 내용
@@ -678,7 +708,10 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - 대화에서 **명시적으로 언급된 모든 세부사항**을 반드시 포함하라 (패키지명, 포트, 엔티티 필드 등)
 - 대화에서 **언급되지 않은 부분**은 합리적 기본값을 명시하되 `[기본값]`으로 표기하라
 - 기술 버전은 반드시 명시하라 — 버전 누락은 LLM이 구버전을 생성하는 주요 원인이다
-- **마크다운 작업지시서만 출력하라** (추가 설명, 인사말 금지)
+- **메인 Application 클래스**를 반드시 명시하라 — 누락 시 프로젝트가 실행 불가
+- **엔티티 관계도**를 반드시 포함하라 — FK 방향 오류 방지
+- **application.yml**은 반드시 실제 YAML 블록으로 작성하라 — 설명형은 누락 원인
+- **마크다운 작업지시서만 출력하라** (추가 설명, 인사말, 코드 펜스 감싸기 금지)
 """.trimIndent()
 
     /**

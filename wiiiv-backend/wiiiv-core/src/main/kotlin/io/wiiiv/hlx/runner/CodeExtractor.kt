@@ -107,6 +107,12 @@ object CodeExtractor {
             return resolved
         }
 
+        // 요청 필드를 못 찾았지만, body가 실제 데이터 객체이면 (HTTP 래퍼 아님) 그대로 반환
+        // 예: /api/stats/supplier-performance/1 → {"supplierId":1,...} 단일 객체
+        if (resolved is JsonObject && !resolved.containsKey("statusCode") && !resolved.containsKey("method")) {
+            return resolved
+        }
+
         return null
     }
 

@@ -65,7 +65,10 @@ class ConversationalGovernor(
     var progressListener: GovernorProgressListener? = null
 
     private val sessions = ConcurrentHashMap<String, ConversationSession>()
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        allowTrailingComma = true
+    }
 
     private fun emitProgress(
         phase: ProgressPhase,

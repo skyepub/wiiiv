@@ -167,13 +167,29 @@ class ConversationalGovernor(
             session.updateSpec(updates)
         }
 
+        // ── State Determinism Gate ──
+        // LLM의 ASK/CONFIRM/EXECUTE 선택은 확률적이다.
+        // Governor가 DraftSpec 상태를 기준으로 최종 상태 전환을 결정한다.
+        // (A) PROJECT_CREATE이고 DraftSpec이 충분하면 ASK → CONFIRM으로 강제 전환
+        val finalAction = if (governorAction.action == ActionType.ASK
+            && session.draftSpec.taskType == TaskType.PROJECT_CREATE
+            && session.draftSpec.isComplete()
+            && session.draftSpec.domain != null
+            && !session.draftSpec.techStack.isNullOrEmpty()
+        ) {
+            println("[GOVERNOR] State Determinism Gate: ASK suppressed → CONFIRM (DraftSpec sufficient)")
+            governorAction.copy(action = ActionType.CONFIRM)
+        } else {
+            governorAction
+        }
+
         // EXECUTE/CONFIRM 시 활성 작업 확정
-        if (governorAction.action in listOf(ActionType.EXECUTE, ActionType.CONFIRM)) {
+        if (finalAction.action in listOf(ActionType.EXECUTE, ActionType.CONFIRM)) {
             session.ensureActiveTask()
         }
 
         // 행동 처리
-        val response = processAction(session, governorAction)
+        val response = processAction(session, finalAction)
 
         // Governor 메시지 기록
         session.addGovernorMessage(response.message)
@@ -472,7 +488,27 @@ class ConversationalGovernor(
             )
         }
 
-        // 2.5. PROJECT_CREATE: workspace에서 targetPath 유도
+        // 2.5. PROJECT_CREATE: WorkOrder 강제 생성 게이트 (방어적 안전망)
+        // CONFIRM 단계를 건너뛴 경우에도 EXECUTE 전에 반드시 WorkOrder를 생성한다.
+        // WorkOrder 없이 코드 생성하면 DraftSpec 4줄 요약만으로 LLM이 추측 → 패키지/엔티티 오류 발생.
+        if (draftSpec.taskType == TaskType.PROJECT_CREATE
+            && draftSpec.workOrderContent == null
+            && llmProvider != null
+        ) {
+            println("[GOVERNOR] WorkOrder Safety Gate: EXECUTE without WorkOrder detected → generating now")
+            try {
+                emitProgress(ProgressPhase.LLM_THINKING, "작업지시서 생성 중 (안전 게이트)...")
+                val workOrder = generateWorkOrder(session)
+                draftSpec = draftSpec.copy(workOrderContent = workOrder)
+                session.draftSpec = draftSpec
+                println("[GOVERNOR] WorkOrder Safety Gate: generated ${workOrder.length} chars")
+            } catch (e: Exception) {
+                println("[WARN] WorkOrder Safety Gate failed: ${e::class.simpleName}: ${e.message}")
+                // 실패해도 계속 진행 (기존 동작 보존)
+            }
+        }
+
+        // 2.6. PROJECT_CREATE: workspace에서 targetPath 유도
         if (draftSpec.taskType == TaskType.PROJECT_CREATE && draftSpec.targetPath == null && workspace != null) {
             val derivedPath = deriveProjectPath(workspace, draftSpec)
             if (derivedPath != null) {

@@ -959,6 +959,24 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
   ]
 }
 ```
+⚠ **Repeat body 내부의 Act 노드에서 {item.fieldName} 템플릿을 사용할 때, 반드시 item 객체에 해당 필드가 있는지 확인하라.** 예: skymall 상품에는 `supplierId`가 없으므로 skystock 공급사 조회를 먼저 해야 한다.
+⚠ **크로스 시스템 발주 워크플로우**: skymall 상품으로 skystock 발주를 생성할 때는 반드시 `GET /api/supplier-products/by-skymall-product/{skymallProductId}` 등으로 공급사를 먼저 조회하라. skymall 상품 객체에 skystock supplierId가 없다.
+
+### 8. Decide 노드 — 조건 분기
+⚠ **branches는 반드시 `Map<String, String>` 형식이다.** 키는 조건 이름, 값은 대상 노드 ID 또는 "end".
+```json
+{
+  "id": "check-stock",
+  "type": "decide",
+  "description": "Check if stock is sufficient",
+  "input": "stock_info",
+  "branches": {
+    "sufficient": "end",
+    "insufficient": "create-order"
+  }
+}
+```
+⚠ **branches에 노드를 내장하지 마라.** 분기 대상은 별도 노드 ID를 참조한다.
 
 ## 응답 형식
 

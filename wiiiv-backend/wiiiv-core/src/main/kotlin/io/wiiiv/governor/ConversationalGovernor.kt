@@ -1664,8 +1664,8 @@ class ConversationalGovernor(
     /**
      * HLX JSON sanitizer — LLM이 생성한 흔한 구조 오류를 교정
      *
-     * - decide 노드의 branches가 배열이면 → transform으로 변환
-     * - Map 필드에 배열이 오면 → 빈 객체로 교체
+     * - decide 노드의 branches가 배열이면 → 배열 내 아이템을 별도 노드로 추출 + branches를 Map으로 변환
+     * - branches가 null이면 → transform으로 변환
      */
     private fun sanitizeHlxJson(rawJson: String): String {
         val jsonParser = Json { ignoreUnknownKeys = true }
@@ -1679,18 +1679,60 @@ class ConversationalGovernor(
 
                 if (type == "decide") {
                     val branches = nodeObj["branches"]
-                    if (branches == null || branches is JsonArray) {
-                        // decide + branches가 배열이거나 없음 → transform으로 변환
-                        println("[HLX-SANITIZE] Converting decide node '${nodeObj["id"]?.jsonPrimitive?.contentOrNull}' to transform (invalid branches)")
+
+                    if (branches is JsonArray && branches.isNotEmpty()) {
+                        // decide + branches가 배열 → 배열 아이템을 별도 노드로 추출, branches를 Map으로 변환
+                        val branchMap = buildJsonObject {}
+                        val extractedNodes = mutableListOf<JsonObject>()
+                        val mapBuilder = mutableMapOf<String, String>()
+
+                        for (branchItem in branches) {
+                            val branchObj = branchItem as? JsonObject ?: continue
+                            val branchId = branchObj["id"]?.jsonPrimitive?.contentOrNull ?: continue
+                            val branchType = branchObj["type"]?.jsonPrimitive?.contentOrNull
+
+                            if (branchType != null) {
+                                // 내장 노드 → 별도 노드로 추출
+                                extractedNodes.add(branchObj)
+                                mapBuilder[branchId] = branchId
+                            } else {
+                                // 단순 {id: "...", ...} → condition으로 처리
+                                val target = branchObj["target"]?.jsonPrimitive?.contentOrNull ?: "end"
+                                mapBuilder[branchId] = target
+                            }
+                        }
+
+                        // Decide 노드 재구성 (branches를 Map으로)
+                        val fixedBranches = buildJsonObject {
+                            mapBuilder.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                        }
+                        val fixed = buildJsonObject {
+                            nodeObj.forEach { (k, v) ->
+                                if (k == "branches") put(k, fixedBranches) else put(k, v)
+                            }
+                        }
+                        add(fixed)
+
+                        // 추출된 내장 노드를 Decide 뒤에 삽입
+                        for (extracted in extractedNodes) {
+                            add(extracted)
+                            println("[HLX-SANITIZE] Extracted embedded node '${extracted["id"]?.jsonPrimitive?.contentOrNull}' from decide branches")
+                        }
+
+                        println("[HLX-SANITIZE] Converted decide branches array → map: $mapBuilder")
+                        continue
+
+                    } else if (branches == null) {
+                        // branches가 null → transform으로 변환 (안전)
+                        println("[HLX-SANITIZE] Converting decide node '${nodeObj["id"]?.jsonPrimitive?.contentOrNull}' to transform (null branches)")
                         val fixed = buildJsonObject {
                             nodeObj.forEach { (k, v) ->
                                 when (k) {
                                     "type" -> put(k, JsonPrimitive("transform"))
-                                    "branches" -> {} // 제거
+                                    "branches" -> {}
                                     else -> put(k, v)
                                 }
                             }
-                            // hint 없으면 추가
                             if ("hint" !in nodeObj) put("hint", JsonPrimitive("summarize"))
                         }
                         add(fixed)

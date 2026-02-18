@@ -266,25 +266,35 @@ class HlxNodeExecutor(
      */
     private fun resolveTemplateVariables(value: String, context: HlxContext): String {
         val templateRegex = Regex("""\{(\w+)(?:\.(\w+))?\}""")
+        var hasUnresolved = false
 
-        return templateRegex.replace(value) { match ->
+        val resolved = templateRegex.replace(value) { match ->
             val varName = match.groupValues[1]
             val fieldName = match.groupValues[2].takeIf { it.isNotEmpty() }
 
             val varValue = context.variables[varName]
             if (varValue == null) {
+                hasUnresolved = true
                 match.value // 미해결 변수는 그대로 유지
             } else if (fieldName != null) {
                 // {변수.필드} → JSON 객체에서 필드 추출
                 try {
                     val obj = varValue.jsonObject
+                    // 직접 매칭
                     val field = obj[fieldName]
+                        // case-insensitive 폴백
+                        ?: obj.entries.firstOrNull { it.key.equals(fieldName, ignoreCase = true) }?.value
                     when {
-                        field == null -> match.value
+                        field == null -> {
+                            hasUnresolved = true
+                            println("[HLX-WARN] Template {$varName.$fieldName}: field '$fieldName' not found. Available: ${obj.keys}")
+                            match.value
+                        }
                         field is JsonPrimitive && field.isString -> field.content
                         else -> field.toString()
                     }
                 } catch (_: Exception) {
+                    hasUnresolved = true
                     match.value
                 }
             } else {
@@ -295,6 +305,12 @@ class HlxNodeExecutor(
                 }
             }
         }
+
+        if (hasUnresolved) {
+            println("[HLX-WARN] Unresolved template variables in: ${value.take(200)}")
+        }
+
+        return resolved
     }
 
     companion object {

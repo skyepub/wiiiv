@@ -249,7 +249,9 @@ data class LlmRequest(
     val model: String,
     val maxTokens: Int,
     val params: Map<String, String> = emptyMap(),
-    val images: List<LlmImage> = emptyList()
+    val images: List<LlmImage> = emptyList(),
+    /** 요청별 타임아웃 (ms). null이면 provider 기본값 사용. 대규모 코드 생성 등에 사용. */
+    val timeoutMs: Long? = null
 )
 
 /**

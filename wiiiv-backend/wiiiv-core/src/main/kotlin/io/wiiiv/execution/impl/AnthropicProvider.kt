@@ -73,13 +73,14 @@ class AnthropicProvider(
             }
         }
 
-        // Build HTTP request
+        // Build HTTP request (요청별 timeout 우선, 없으면 provider 기본값)
+        val effectiveTimeout = request.timeoutMs ?: timeoutMs
         val httpRequest = HttpRequest.newBuilder()
             .uri(URI.create("$baseUrl/messages"))
             .header("Content-Type", "application/json")
             .header("x-api-key", apiKey)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .timeout(Duration.ofMillis(timeoutMs))
+            .timeout(Duration.ofMillis(effectiveTimeout))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody.toString()))
             .build()
 
@@ -90,7 +91,7 @@ class AnthropicProvider(
             throw LlmProviderException(
                 category = ErrorCategory.TIMEOUT,
                 code = "REQUEST_TIMEOUT",
-                message = "Anthropic API request timed out after ${timeoutMs}ms"
+                message = "Anthropic API request timed out after ${effectiveTimeout}ms"
             )
         } catch (e: java.net.ConnectException) {
             throw LlmProviderException(

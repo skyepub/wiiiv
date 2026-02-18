@@ -95,12 +95,13 @@ class OpenAIProvider(
             }
         }
 
-        // Build HTTP request
+        // Build HTTP request (요청별 timeout 우선, 없으면 provider 기본값)
+        val effectiveTimeout = request.timeoutMs ?: timeoutMs
         val httpRequest = HttpRequest.newBuilder()
             .uri(URI.create("$baseUrl/chat/completions"))
             .header("Content-Type", "application/json")
             .header("Authorization", "Bearer $apiKey")
-            .timeout(Duration.ofMillis(timeoutMs))
+            .timeout(Duration.ofMillis(effectiveTimeout))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody.toString()))
             .build()
 
@@ -111,7 +112,7 @@ class OpenAIProvider(
             throw LlmProviderException(
                 category = ErrorCategory.TIMEOUT,
                 code = "REQUEST_TIMEOUT",
-                message = "OpenAI API request timed out after ${timeoutMs}ms"
+                message = "OpenAI API request timed out after ${effectiveTimeout}ms"
             )
         } catch (e: java.net.ConnectException) {
             throw LlmProviderException(

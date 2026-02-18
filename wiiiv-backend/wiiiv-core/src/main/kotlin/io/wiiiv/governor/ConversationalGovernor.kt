@@ -396,12 +396,27 @@ class ConversationalGovernor(
             }
 
             ActionType.CONFIRM -> {
+                // PROJECT_CREATE이면 작업지시서(Work Order) 생성
+                val summary = if (session.draftSpec.taskType == TaskType.PROJECT_CREATE && llmProvider != null) {
+                    try {
+                        emitProgress(ProgressPhase.LLM_THINKING, "작업지시서 생성 중...")
+                        val workOrder = generateWorkOrder(session)
+                        session.draftSpec = session.draftSpec.copy(workOrderContent = workOrder)
+                        workOrder
+                    } catch (e: Exception) {
+                        println("[WARN] Work order generation failed: ${e::class.simpleName}: ${e.message}")
+                        session.draftSpec.summarize()
+                    }
+                } else {
+                    session.draftSpec.summarize()
+                }
+
                 ConversationResponse(
                     action = ActionType.CONFIRM,
                     message = action.message,
                     sessionId = session.sessionId,
                     draftSpec = session.draftSpec,
-                    confirmationSummary = session.draftSpec.summarize()
+                    confirmationSummary = summary
                 )
             }
 
@@ -1324,17 +1339,72 @@ class ConversationalGovernor(
     }
 
     /**
-     * LLM을 사용하여 프로젝트 파일 구조를 생성하고 BlueprintStep 목록으로 변환
+     * 대화 내역 + DraftSpec으로부터 작업지시서(Work Order)를 생성한다.
+     *
+     * CONFIRM 단계에서 호출되며, 생성된 마크다운은:
+     * 1. 사용자에게 확인용으로 보여주고
+     * 2. DraftSpec.workOrderContent에 저장되어 이후 코드 생성에 사용된다.
      */
-    private suspend fun generateProjectBlueprint(draftSpec: DraftSpec, basePath: String): List<BlueprintStep> {
-        val prompt = GovernorPrompt.projectGenerationPrompt(draftSpec)
+    private suspend fun generateWorkOrder(session: ConversationSession): String {
+        val prompt = GovernorPrompt.workOrderGenerationPrompt(session.history, session.draftSpec)
 
         val response = llmProvider!!.call(
             LlmRequest(
                 action = LlmAction.COMPLETE,
                 prompt = prompt,
                 model = model ?: llmProvider.defaultModel,
-                maxTokens = 4096
+                maxTokens = 8192,
+                timeoutMs = 120_000L  // 작업지시서 생성: 2분
+            )
+        )
+
+        return stripMarkdownFence(response.content.trim())
+    }
+
+    /**
+     * LLM이 마크다운을 코드 펜스(```markdown ... ```)로 감싸는 경우 벗겨낸다.
+     */
+    private fun stripMarkdownFence(content: String): String {
+        var result = content
+        // ```markdown 또는 ```md 또는 ``` 로 시작하면 제거
+        if (result.startsWith("```")) {
+            val firstNewline = result.indexOf('\n')
+            if (firstNewline >= 0) {
+                result = result.substring(firstNewline + 1)
+            }
+        }
+        // 끝의 ``` 제거
+        if (result.trimEnd().endsWith("```")) {
+            result = result.trimEnd().removeSuffix("```").trimEnd()
+        }
+        return result
+    }
+
+    /**
+     * LLM을 사용하여 프로젝트 파일 구조를 생성하고 BlueprintStep 목록으로 변환
+     *
+     * 작업지시서가 있으면 풍부한 컨텍스트로 코드 생성, 없으면 기존 DraftSpec 기반.
+     */
+    private suspend fun generateProjectBlueprint(draftSpec: DraftSpec, basePath: String): List<BlueprintStep> {
+        // 작업지시서가 있으면 사용, 없으면 기존 방식
+        val workOrder = draftSpec.workOrderContent
+        val prompt = if (workOrder != null) {
+            GovernorPrompt.projectGenerationFromWorkOrderPrompt(workOrder)
+        } else {
+            GovernorPrompt.projectGenerationPrompt(draftSpec)
+        }
+
+        // 작업지시서 기반이면 토큰 한도 대폭 증가 (전체 프로젝트 코드 생성)
+        val maxTokens = if (workOrder != null) 16384 else 4096
+
+        // 작업지시서 기반 대규모 생성 시 timeout 180초, 아닐 경우 기본값
+        val response = llmProvider!!.call(
+            LlmRequest(
+                action = LlmAction.COMPLETE,
+                prompt = prompt,
+                model = model ?: llmProvider.defaultModel,
+                maxTokens = maxTokens,
+                timeoutMs = if (workOrder != null) 180_000L else null
             )
         )
 
@@ -1353,6 +1423,23 @@ class ConversationalGovernor(
             type = BlueprintStepType.FILE_MKDIR,
             params = mapOf("path" to basePath)
         ))
+
+        // 1.5. 작업지시서를 프로젝트에 저장 (.wiiiv/work-order.md)
+        if (workOrder != null) {
+            steps.add(BlueprintStep(
+                stepId = "step-mkdir-wiiiv-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.FILE_MKDIR,
+                params = mapOf("path" to "$basePath/.wiiiv")
+            ))
+            steps.add(BlueprintStep(
+                stepId = "step-write-workorder-${UUID.randomUUID().toString().take(4)}",
+                type = BlueprintStepType.FILE_WRITE,
+                params = mapOf(
+                    "path" to "$basePath/.wiiiv/work-order.md",
+                    "content" to workOrder
+                )
+            ))
+        }
 
         // 2. 필요한 디렉토리 수집 및 생성
         val dirs = mutableSetOf<String>()

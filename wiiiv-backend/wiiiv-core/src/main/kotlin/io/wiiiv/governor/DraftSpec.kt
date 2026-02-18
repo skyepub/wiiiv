@@ -60,6 +60,13 @@ data class DraftSpec(
     val constraints: List<String>? = null,
 
     /**
+     * 작업지시서 내용 (CONFIRM 단계에서 LLM이 생성한 풍부한 마크다운)
+     * PROJECT_CREATE 시 대화 내역 + DraftSpec을 기반으로 생성되며,
+     * 이후 코드 생성 LLM에 전달되어 정확한 프로젝트를 만든다.
+     */
+    val workOrderContent: String? = null,
+
+    /**
      * 사용자가 명시적으로 확인한 항목들
      */
     val confirmedSlots: Set<String> = emptySet()
@@ -194,7 +201,7 @@ data class DraftSpec(
     /**
      * 요약 문자열 (확인용)
      */
-    fun summarize(): String = buildString {
+    fun summarize(): String = workOrderContent ?: buildString {
         appendLine("작업: ${taskType?.displayName ?: "미정"}")
         intent?.let { appendLine("의도: $it") }
         domain?.let { appendLine("도메인: $it") }

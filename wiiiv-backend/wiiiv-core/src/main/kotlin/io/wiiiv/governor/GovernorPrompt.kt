@@ -608,6 +608,137 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
         appendLine("⚠ 위 요구사항의 모든 필드/기능을 빠짐없이 구현하라. 일부만 구현하면 안 된다.")
     }
 
+    // ──────────────────────────────────────────────────────────
+    // 작업지시서 (Work Order Document) 관련 프롬프트
+    // ──────────────────────────────────────────────────────────
+
+    /**
+     * 작업지시서 생성 프롬프트
+     *
+     * 대화 내역 + DraftSpec → 풍부한 마크다운 작업지시서
+     * CONFIRM 단계에서 호출되어 사용자에게 보여주고, 이후 코드 생성에 사용된다.
+     */
+    val WORK_ORDER_GENERATION = """
+너는 프로젝트 작업지시서(Work Order) 작성 전문가다.
+대화 내역에서 수집된 모든 요구사항을 빠짐없이 추출하여 정확하고 상세한 작업지시서를 마크다운으로 작성하라.
+
+## 작업지시서 필수 섹션
+
+### 1. 프로젝트 개요
+- 프로젝트 이름 (영문, 소문자-하이픈)
+- 목적/설명 (1-2문장)
+- 도메인
+
+### 2. 기술 스택 (버전 필수!)
+- 언어 + 버전 (예: Kotlin 2.2, Java 17)
+- 프레임워크 + 버전 (예: Spring Boot 4.0)
+- 빌드 도구 (예: Gradle + Kotlin DSL)
+- 데이터베이스 + 드라이버 (예: H2 in-memory, MySQL 8.x)
+- 추가 라이브러리 (예: Spring Security, JWT)
+
+### 3. 프로젝트 구조
+- 루트 패키지 (예: com.skytree.skystock)
+- 디렉토리 레이아웃 (controller, model/entity, repository, service, config, dto 등)
+
+### 4. 데이터 모델
+각 엔티티별:
+- 엔티티명
+- 필드 목록 (이름, 타입, 제약조건)
+- 관계 (ManyToOne, OneToMany 등)
+- 테이블명
+
+### 5. API 설계
+각 컨트롤러별:
+- 기본 경로 (예: /api/products)
+- 엔드포인트 목록 (메서드, 경로, 설명)
+- 요청/응답 형식 (필요시)
+
+### 6. 보안/인증
+- 인증 방식 (JWT, Session 등)
+- 역할/권한 (ADMIN, USER 등)
+- 보안 설정 (공개 경로, 인증 필요 경로)
+- 초기 계정 정보
+
+### 7. 설정
+- 서버 포트
+- DB 연결 정보
+- application.yml/properties 주요 설정
+- 프로파일 설정
+
+### 8. 초기 데이터
+- data.sql 또는 DataInitializer 내용
+- 테스트용 샘플 데이터
+
+### 9. 빌드/실행
+- 빌드 명령어
+- 실행 방법
+- 테스트 실행 명령어
+
+## 규칙
+- 대화에서 **명시적으로 언급된 모든 세부사항**을 반드시 포함하라 (패키지명, 포트, 엔티티 필드 등)
+- 대화에서 **언급되지 않은 부분**은 합리적 기본값을 명시하되 `[기본값]`으로 표기하라
+- 기술 버전은 반드시 명시하라 — 버전 누락은 LLM이 구버전을 생성하는 주요 원인이다
+- **마크다운 작업지시서만 출력하라** (추가 설명, 인사말 금지)
+""".trimIndent()
+
+    /**
+     * 대화 내역 + DraftSpec → 작업지시서 생성 프롬프트 구성
+     */
+    fun workOrderGenerationPrompt(
+        conversationHistory: List<ConversationMessage>,
+        draftSpec: DraftSpec
+    ): String = buildString {
+        appendLine(WORK_ORDER_GENERATION)
+        appendLine()
+        appendLine("---")
+        appendLine()
+        appendLine("## 대화 내역")
+        appendLine()
+        for (msg in conversationHistory) {
+            val role = when (msg.role) {
+                MessageRole.USER -> "사용자"
+                MessageRole.GOVERNOR -> "시스템"
+                MessageRole.SYSTEM -> "시스템"
+            }
+            appendLine("**${role}**: ${msg.content}")
+            appendLine()
+        }
+        appendLine("---")
+        appendLine()
+        appendLine("## 수집된 요구사항 (DraftSpec)")
+        appendLine()
+        draftSpec.intent?.let { appendLine("- 의도: $it") }
+        draftSpec.domain?.let { appendLine("- 도메인: $it") }
+        draftSpec.techStack?.let { appendLine("- 기술 스택: ${it.joinToString(", ")}") }
+        draftSpec.targetPath?.let { appendLine("- 대상 경로: $it") }
+        draftSpec.scale?.let { appendLine("- 기능/규모: $it") }
+        draftSpec.constraints?.let { constraints ->
+            if (constraints.isNotEmpty()) {
+                appendLine("- 제약 조건: ${constraints.joinToString(", ")}")
+            }
+        }
+        appendLine()
+        appendLine("위 대화와 요구사항을 기반으로 작업지시서를 작성하라.")
+    }
+
+    /**
+     * 작업지시서 기반 프로젝트 생성 프롬프트
+     *
+     * 기존 projectGenerationPrompt()를 대체하여,
+     * 4줄 DraftSpec 대신 풍부한 작업지시서를 LLM에 전달한다.
+     */
+    fun projectGenerationFromWorkOrderPrompt(workOrderContent: String): String = buildString {
+        appendLine(PROJECT_GENERATION)
+        appendLine()
+        appendLine("## 작업지시서")
+        appendLine()
+        appendLine(workOrderContent)
+        appendLine()
+        appendLine("⚠ 위 작업지시서의 **모든** 사항을 빠짐없이 구현하라. 일부만 구현하면 안 된다.")
+        appendLine("⚠ 패키지명, 프로젝트명, 포트, 엔티티 필드, API 경로, 보안 설정 등 명시된 모든 것을 정확히 따르라.")
+        appendLine("⚠ 버전이 명시되어 있으면 반드시 해당 버전을 사용하라 (예: Spring Boot 4.0 → id(\"org.springframework.boot\") version \"4.0.0\").")
+    }
+
     /**
      * API 워크플로우 프롬프트
      *

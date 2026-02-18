@@ -261,8 +261,11 @@ object CodeExtractor {
         val sumField = match.groupValues[2]
         val totalFieldName = "total${sumField.replaceFirstChar { it.uppercase() }}"
 
+        // groupField가 최상위에 없으면 중첩 배열 자동 탐색
+        val workItems = resolveNestedItems(items, groupField)
+
         val groups = mutableMapOf<String, MutableList<JsonObject>>()
-        for (item in items) {
+        for (item in workItems) {
             if (item !is JsonObject) continue
             val key = item[groupField]?.let { extractPrimitiveString(it) } ?: "unknown"
             groups.getOrPut(key) { mutableListOf() }.add(item)
@@ -293,8 +296,46 @@ object CodeExtractor {
             }
         }
 
-        println("[HLX-CODE] Aggregate: ${items.size} items → ${result.size} groups by '$groupField' summing '$sumField'")
+        println("[HLX-CODE] Aggregate: ${workItems.size} items → ${result.size} groups by '$groupField' summing '$sumField'")
         return JsonArray(result)
+    }
+
+    /**
+     * 중첩 배열 자동 탐색.
+     *
+     * targetField가 최상위 아이템에 없으면,
+     * 각 아이템의 배열 필드(items, orderItems, details 등)를 탐색하여 flatten한다.
+     * 예: orders[].items[].productId → items[]를 flatten
+     */
+    private fun resolveNestedItems(items: JsonArray, targetField: String): JsonArray {
+        if (items.isEmpty()) return items
+
+        // 첫 아이템에 targetField가 있으면 그대로 사용
+        val first = items.firstOrNull()
+        if (first is JsonObject && first.containsKey(targetField)) {
+            return items
+        }
+
+        // 중첩 배열 필드 탐색
+        val flattened = mutableListOf<JsonElement>()
+        for (item in items) {
+            if (item !is JsonObject) continue
+            for ((_, value) in item) {
+                if (value is JsonArray && value.isNotEmpty()) {
+                    val innerFirst = value.firstOrNull()
+                    if (innerFirst is JsonObject && innerFirst.containsKey(targetField)) {
+                        flattened.addAll(value)
+                    }
+                }
+            }
+        }
+
+        if (flattened.isNotEmpty()) {
+            println("[HLX-CODE] Resolved nested items: ${items.size} parents → ${flattened.size} child items (field: '$targetField')")
+            return JsonArray(flattened)
+        }
+
+        return items
     }
 
     /**

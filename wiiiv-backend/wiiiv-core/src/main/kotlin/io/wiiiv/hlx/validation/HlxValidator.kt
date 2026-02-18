@@ -36,7 +36,7 @@ object HlxValidator {
 
     /** 허용된 query param 이름 (소문자) */
     private val ALLOWED_QUERY_PARAMS = setOf(
-        "page", "size", "threshold", "keyword", "categoryid", "status", "level"
+        "page", "size", "sort", "threshold", "keyword", "categoryid", "status", "level"
     )
 
     /** URL 추출 패턴 (description에서 http(s)://... 추출) */

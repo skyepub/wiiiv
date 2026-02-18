@@ -914,7 +914,8 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
 
 ⚠ **AGGREGATE/SORT/FILTER/MAP은 반드시 hint를 지정하라.** hint가 있으면 LLM 없이 코드로 즉시 처리되어 결정론적이고 빠르다.
 ⚠ **SUMMARIZE만 LLM을 사용한다.** 자연어 요약이 필요한 경우에만 hint="summarize"를 사용하라.
-⚠ **description의 필드명은 반드시 API 응답의 실제 JSON 필드명을 사용하라.** 추상적 이름(performance, sales)이 아닌 실제 필드명(fulfillmentRate, totalQuantity)을 써야 한다. API 스펙에 없는 필드명을 쓰면 코드 경로가 실패한다.
+⚠ **description의 필드명은 반드시 API 응답의 실제 JSON 필드명을 사용하라.** 추상적 이름(performance, sales, averagePrice)이 아닌 실제 필드명(fulfillmentRate, totalQuantity, avgPrice)을 써야 한다. API 스펙에 없는 필드명을 쓰면 코드 경로가 실패한다. 중첩 객체 필드는 "Aggregate by name" 형식으로 사용하면 자동으로 중첩 탐색된다 (예: category.name → name).
+⚠ **"사용자별 집계"는 반드시 Aggregate by userId 형식을 사용하라.** "상품별 집계"는 Aggregate by productId를 사용하라. 요청의 "~별"에 해당하는 필드명을 정확히 매칭하라.
 ⚠ **"집계 후 정렬", "많이 팔린 순", "~순으로 보여줘" 요구가 있으면 반드시 AGGREGATE 노드와 SORT 노드를 별도로 생성하라.** 하나의 노드에 합치지 마라. SORT 노드의 input은 AGGREGATE 노드의 output을 사용한다.
 
 예시 — 집계 + 정렬 조합 (반드시 이처럼 2개 노드로 분리):

@@ -244,11 +244,19 @@ object CodeExtractor {
             return resolved
         }
 
-        // JsonObject에서 배열 필드 탐색 (content, items, data, results)
+        // JsonObject에서 배열 필드 탐색
         if (resolved is JsonObject) {
+            // 우선: 알려진 필드명
             for (key in listOf("content", "items", "data", "results")) {
                 val arr = resolved[key]
-                if (arr is JsonArray) return arr
+                if (arr is JsonArray && arr.isNotEmpty()) return arr
+            }
+            // 폴백: 임의 배열 필드 (topOrders, orders 등)
+            for ((key, value) in resolved) {
+                if (value is JsonArray && value.isNotEmpty() && value.first() is JsonObject) {
+                    println("[HLX-CODE] flattenToArray: found array in field '$key' (${value.size} items)")
+                    return value
+                }
             }
         }
 
@@ -265,7 +273,12 @@ object CodeExtractor {
         val match = AGGREGATE_PATTERN.find(description) ?: return null
         val groupField = match.groupValues[1]
         val sumField = match.groupValues[2]
-        val totalFieldName = "total${sumField.replaceFirstChar { it.uppercase() }}"
+        // sumField가 이미 "total"로 시작하면 중복 방지
+        val totalFieldName = if (sumField.startsWith("total", ignoreCase = true)) {
+            sumField // totalAmount → totalAmount (not totalTotalAmount)
+        } else {
+            "total${sumField.replaceFirstChar { it.uppercase() }}" // quantity → totalQuantity
+        }
 
         // groupField가 최상위에 없으면 중첩 배열 자동 탐색
         val workItems = resolveNestedItems(items, groupField)
@@ -273,13 +286,14 @@ object CodeExtractor {
         val groups = mutableMapOf<String, MutableList<JsonObject>>()
         for (item in workItems) {
             if (item !is JsonObject) continue
-            val key = item[groupField]?.let { extractPrimitiveString(it) } ?: "unknown"
+            val key = resolveField(item, groupField)?.let { extractPrimitiveString(it) } ?: "unknown"
             groups.getOrPut(key) { mutableListOf() }.add(item)
         }
 
         val result = groups.map { (_, groupItems) ->
             val sum = groupItems.sumOf { obj ->
-                obj[sumField]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                val v = resolveField(obj, sumField)
+                v?.jsonPrimitive?.doubleOrNull ?: 0.0
             }
             val first = groupItems.first()
             buildJsonObject {
@@ -316,9 +330,9 @@ object CodeExtractor {
     private fun resolveNestedItems(items: JsonArray, targetField: String): JsonArray {
         if (items.isEmpty()) return items
 
-        // 첫 아이템에 targetField가 있으면 그대로 사용
+        // 첫 아이템에 targetField가 있으면 그대로 사용 (resolveField로 중첩 객체도 확인)
         val first = items.firstOrNull()
-        if (first is JsonObject && first.containsKey(targetField)) {
+        if (first is JsonObject && resolveField(first, targetField) != null) {
             return items
         }
 
@@ -355,16 +369,16 @@ object CodeExtractor {
         val direction = match.groupValues[2].ifEmpty { "descending" }
         val ascending = direction.equals("ascending", ignoreCase = true)
 
-        // 필드 존재 검증: 첫 아이템에 sortField가 없으면 null (LLM 폴백)
+        // 필드 존재 검증: resolveField로 확인
         val firstObj = items.firstOrNull() as? JsonObject
-        if (firstObj != null && !firstObj.containsKey(sortField)) {
+        if (firstObj != null && resolveField(firstObj, sortField) == null) {
             println("[HLX-CODE] Sort SKIPPED: field '$sortField' not found in data. Available: ${firstObj.keys}")
             return null
         }
 
         val sorted = items.sortedWith(Comparator { a, b ->
-            val aVal = (a as? JsonObject)?.get(sortField)?.jsonPrimitive?.doubleOrNull ?: 0.0
-            val bVal = (b as? JsonObject)?.get(sortField)?.jsonPrimitive?.doubleOrNull ?: 0.0
+            val aVal = (a as? JsonObject)?.let { resolveField(it, sortField) }?.jsonPrimitive?.doubleOrNull ?: 0.0
+            val bVal = (b as? JsonObject)?.let { resolveField(it, sortField) }?.jsonPrimitive?.doubleOrNull ?: 0.0
             if (ascending) aVal.compareTo(bVal) else bVal.compareTo(aVal)
         })
 
@@ -383,7 +397,7 @@ object CodeExtractor {
 
         val filtered = items.filter { item ->
             if (item !is JsonObject) return@filter false
-            val fieldValue = item[field] ?: return@filter false
+            val fieldValue = resolveField(item, field) ?: return@filter false
             compareField(fieldValue, operator, rawValue)
         }
 
@@ -417,6 +431,76 @@ object CodeExtractor {
     // ==========================================================
     // 유틸리티
     // ==========================================================
+
+    /** 약어 → 정규형 확장 (항상 풀 네임으로 통일) */
+    private val ABBREVIATION_TO_FULL = mapOf(
+        "avg" to "average",
+        "qty" to "quantity",
+        "num" to "number",
+        "cnt" to "count",
+        "amt" to "amount",
+        "desc" to "description",
+        "cat" to "category",
+        "prod" to "product"
+    )
+
+    /**
+     * 중첩 필드 해석.
+     *
+     * - "category.name" → obj["category"]["name"] (dot notation)
+     * - "name" → obj["name"] 직접 접근, 없으면 중첩 객체 내부 탐색
+     * - 약어 확장: "averagePrice" → "avgPrice" 자동 매칭
+     */
+    private fun resolveField(obj: JsonObject, fieldName: String): JsonElement? {
+        // 1. dot notation: "category.name"
+        if (fieldName.contains('.')) {
+            val parts = fieldName.split('.')
+            var current: JsonElement = obj
+            for (part in parts) {
+                current = (current as? JsonObject)?.get(part) ?: return null
+            }
+            return current
+        }
+
+        // 2. 직접 매칭
+        obj[fieldName]?.let { return it }
+
+        // 3. case-insensitive 매칭
+        for ((key, value) in obj) {
+            if (key.equals(fieldName, ignoreCase = true)) return value
+        }
+
+        // 4. 약어 확장 매칭: averagePrice → avgPrice
+        val normalized = normalizeFieldName(fieldName)
+        for ((key, value) in obj) {
+            if (normalizeFieldName(key) == normalized) return value
+        }
+
+        // 5. 중첩 객체 내부 탐색 — 한 단계만
+        for ((_, value) in obj) {
+            if (value is JsonObject) {
+                value[fieldName]?.let { return it }
+                for ((innerKey, innerValue) in value) {
+                    if (innerKey.equals(fieldName, ignoreCase = true)) return innerValue
+                    if (normalizeFieldName(innerKey) == normalized) return innerValue
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * 필드명 정규화: 약어를 풀 네임으로 확장하여 비교용 문자열 생성.
+     * 예: "avgPrice" → "averageprice", "averagePrice" → "averageprice"
+     */
+    private fun normalizeFieldName(name: String): String {
+        // camelCase를 분리: avgPrice → [avg, price]
+        val parts = name.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase().split("_")
+        return parts.joinToString("") { part ->
+            ABBREVIATION_TO_FULL[part] ?: part
+        }
+    }
 
     /** JsonElement에서 문자열 표현 추출 */
     private fun extractPrimitiveString(element: JsonElement): String {

@@ -876,6 +876,46 @@ plugins {
     }
 
     /**
+     * 파일 패치 프롬프트 (Patch READ→WRITE)
+     *
+     * FILE_WRITE 시 대상 파일이 이미 존재하면, 기존 내용을 LLM에 보여주고
+     * 수정 요청만 정확히 적용한 완전한 파일을 생성하게 한다.
+     *
+     * 핵심 원칙: 기존 코드를 한 글자도 건드리지 않되, 요청된 수정만 적용.
+     */
+    fun patchFilePrompt(existingContent: String, filePath: String, modificationIntent: String): String = buildString {
+        appendLine("너는 정밀 파일 수정 전문가다.")
+        appendLine("기존 파일의 **현재 내용**을 받고, 수정 요청을 적용한 **완전한 파일**을 반환한다.")
+        appendLine()
+        appendLine("## 절대 규칙")
+        appendLine("1. 수정 요청과 **무관한 코드는 한 글자도 변경하지 않는다**")
+        appendLine("2. import문, package명, 어노테이션, 기존 필드/메서드를 임의로 변경하지 않는다")
+        appendLine("3. jakarta ↔ javax 전환 금지 — 기존 파일이 사용하는 것을 그대로 유지한다")
+        appendLine("4. @Column, @Id, @GeneratedValue 등 JPA 어노테이션을 제거하거나 변경하지 않는다")
+        appendLine("5. 기존 코드의 들여쓰기, 줄바꿈, 코딩 스타일을 그대로 유지한다")
+        appendLine("6. 새 필드 추가 시 기존 필드들의 어노테이션 패턴을 따른다 (예: 기존에 @Column이 있으면 새 필드에도 @Column 추가)")
+        appendLine("7. 새 import가 필요하면 기존 import 블록의 끝에 추가한다")
+        appendLine()
+        appendLine("## 출력 형식")
+        appendLine("- **완전한 파일 내용만** 반환한다")
+        appendLine("- 마크다운 코드 펜스(```) 없음")
+        appendLine("- 설명/주석/요약 없음")
+        appendLine("- 첫 줄부터 바로 파일 내용이 시작해야 한다")
+        appendLine()
+        appendLine("## 파일: $filePath")
+        appendLine()
+        appendLine("### 현재 내용:")
+        appendLine("```")
+        appendLine(existingContent)
+        appendLine("```")
+        appendLine()
+        appendLine("### 수정 요청:")
+        appendLine(modificationIntent)
+        appendLine()
+        appendLine("위 규칙을 지키며, 수정이 적용된 완전한 파일 내용을 반환하라:")
+    }
+
+    /**
      * API 워크플로우 프롬프트
      *
      * Governor가 API 워크플로우를 반복적으로 실행할 때 사용하는 프롬프트.

@@ -517,6 +517,48 @@ class ConversationalGovernor(
             }
         }
 
+        // 2.7. FILE_WRITE Patch READ→WRITE Gate
+        // FILE_WRITE 시 대상 파일이 이미 존재하면, 기존 내용을 읽어 LLM에 주입한다.
+        // LLM이 기존 코드를 보면서 수정하므로 전체 덮어쓰기로 인한 코드 소실을 방지한다.
+        if (draftSpec.taskType == TaskType.FILE_WRITE && llmProvider != null) {
+            val targetPath = draftSpec.targetPath
+            if (targetPath != null) {
+                val targetFile = java.io.File(targetPath)
+                if (targetFile.exists() && targetFile.isFile) {
+                    // 사용자 원본 메시지를 수정 의도로 사용 (draftSpec.intent는 LLM이 요약하여 정보 소실)
+                    val userOriginalMessage = session.getRecentHistory(5)
+                        .lastOrNull { it.role == MessageRole.USER }?.content
+                    val modificationIntent = userOriginalMessage ?: draftSpec.intent ?: draftSpec.content ?: ""
+                    println("[PATCH] READ→WRITE Gate: existing file detected at $targetPath (${targetFile.length()} bytes)")
+                    println("[PATCH] modificationIntent: ${modificationIntent.take(100)}")
+                    try {
+                        emitProgress(ProgressPhase.LLM_THINKING, "기존 파일 분석 중...")
+                        val existingContent = targetFile.readText()
+                        val patchPrompt = GovernorPrompt.patchFilePrompt(
+                            existingContent = existingContent,
+                            filePath = targetPath,
+                            modificationIntent = modificationIntent
+                        )
+                        val patchResponse = llmProvider!!.call(
+                            LlmRequest(
+                                action = LlmAction.COMPLETE,
+                                prompt = patchPrompt,
+                                model = model ?: llmProvider.defaultModel,
+                                maxTokens = 4096
+                            )
+                        )
+                        val patchedContent = stripMarkdownFence(patchResponse.content.trim())
+                        draftSpec = draftSpec.copy(content = patchedContent)
+                        session.draftSpec = draftSpec
+                        println("[PATCH] READ→WRITE Gate: patched content generated (${patchedContent.length} chars)")
+                    } catch (e: Exception) {
+                        println("[WARN] Patch READ→WRITE failed: ${e::class.simpleName}: ${e.message}")
+                        // 실패 시 기존 동작 유지 (DraftSpec.content 그대로 사용)
+                    }
+                }
+            }
+        }
+
         // 3. DraftSpec → Spec 변환
         val spec = try {
             draftSpec.toSpec()

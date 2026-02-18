@@ -579,6 +579,83 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 }
 ```
 
+## Spring Boot 버전별 필수 규칙 ⚡
+
+- **Spring Boot 3.x**: `javax.*` 패키지를 **절대 사용하지 마라**. 반드시 `jakarta.*`를 사용:
+  - `jakarta.persistence.*` (Entity, Id, GeneratedValue, Table, Column, ManyToOne 등)
+  - `jakarta.validation.constraints.*` (NotNull, NotBlank, Size 등)
+  - `javax.persistence`나 `javax.validation`을 쓰면 컴파일 에러 발생
+- **Kotlin 버전**: 반드시 패치 버전까지 명시 (예: `1.9.22`, NOT `1.9`)
+  - `kotlin("jvm") version "1.9"`는 유효하지 않다. `"1.9.22"` 등 정확한 버전 사용
+- **Spring Boot + Kotlin**: 다음 플러그인을 반드시 포함:
+  - `kotlin("plugin.spring")` — @SpringBootApplication 프록시용
+  - `kotlin("plugin.jpa")` — data class + JPA 호환용
+- **spring-boot-starter-web**: REST API 프로젝트면 반드시 포함
+- **spring-boot-starter-data-jpa**: JPA 엔티티 사용 시 반드시 포함
+- **spring-boot-starter-test**: 테스트 시 반드시 testImplementation으로 포함
+
+## Gradle 빌드 필수 규칙 ⚡
+
+- **build.gradle.kts plugins 블록은 반드시 모든 필수 플러그인을 포함**해야 한다. 하나라도 빠지면 빌드 불가:
+  ```kotlin
+  plugins {
+      kotlin("jvm") version "1.9.22"              // ⚡ 필수 — 없으면 Kotlin 컴파일 불가
+      kotlin("plugin.spring") version "1.9.22"    // ⚡ 필수 — @Configuration 프록시
+      kotlin("plugin.jpa") version "1.9.22"       // ⚡ 필수 — JPA data class 호환
+      id("org.springframework.boot") version "3.4.2"  // ⚡ 필수 — bootJar, bootRun
+      id("io.spring.dependency-management") version "1.1.4"  // ⚡ 필수 — 의존성 버전 관리
+  }
+  ```
+- 위 5개 플러그인 중 **하나라도 빠지면 컴파일 실패**한다. 특히 `kotlin("jvm")`과 `id("org.springframework.boot")`를 빠뜨리지 마라
+- **`settings.gradle.kts` 파일 필수**: `rootProject.name = "프로젝트명"` — 이 파일이 없으면 Gradle 빌드가 실패한다
+- **`spring-boot-starter-data-jpa` 필수**: JPA 엔티티를 사용하는 프로젝트에서 반드시 포함. 누락 시 Entity/Repository가 컴파일 에러
+- **`kotlin-reflect` 의존성 필수**: Spring Data JPA + Kotlin에서 리플렉션이 필요
+  ```kotlin
+  implementation("org.jetbrains.kotlin:kotlin-reflect")
+  ```
+- **spring-boot-starter-security**: Spring Security 사용 시 반드시 `spring-boot-starter-security`를 사용. `spring-security-core`를 직접 쓰지 마라
+- **jjwt 라이브러리**: Spring Boot 3.x에서는 반드시 `0.12.x` 이상 사용 (0.9.x는 javax 기반이라 비호환)
+  ```kotlin
+  implementation("io.jsonwebtoken:jjwt-api:0.12.5")
+  runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.5")
+  runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.5")
+  ```
+
+## Spring Security 6.x 필수 규칙 ⚡ (Spring Boot 3.x)
+
+- **WebSecurityConfigurerAdapter는 삭제됨**. 절대 사용하지 마라
+- 반드시 `SecurityFilterChain` Bean 방식을 사용:
+  ```kotlin
+  @Bean
+  fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+      http.csrf { it.disable() }
+          .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+          .authorizeHttpRequests { auth -> auth.requestMatchers("/api/auth/**").permitAll().anyRequest().authenticated() }
+      return http.build()
+  }
+  ```
+- `antMatchers()` 사용 금지 → `requestMatchers()` 사용
+
+## Kotlin + JPA 필수 규칙 ⚡
+
+- **data class의 프로퍼티가 `val`이면 재할당 불가**. update 시 `copy()` 사용:
+  ```kotlin
+  // ❌ 틀림: entity.id = id
+  // ✅ 맞음: entity.copy(id = id)
+  ```
+- **Int * BigDecimal은 불가**. `BigDecimal.multiply()` 사용:
+  ```kotlin
+  // ❌ 틀림: quantity * unitCost (Int * BigDecimal)
+  // ✅ 맞음: unitCost.multiply(BigDecimal(quantity))
+  ```
+
+## application.yml 필수 규칙 ⚡
+
+- **data.sql + JPA 사용 시**: 반드시 `spring.jpa.defer-datasource-initialization: true` 설정
+  (data.sql이 Hibernate 스키마 생성 이후에 실행되어야 함)
+- **data.sql 컬럼명**: JPA 기본 네이밍 전략은 camelCase → snake_case 변환.
+  `@Column(name = "xxx")` 으로 지정한 이름 또는 snake_case 변환된 이름 사용
+
 ## 주의사항
 
 - path는 프로젝트 루트 기준 상대경로 (예: "src/main/kotlin/model/Student.kt")
@@ -631,12 +708,13 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - 도메인
 - **메인 Application 클래스**: 정확한 FQCN 명시 (예: `com.skytree.skystock.SkystockApplication`)
 
-### 2. 기술 스택 (버전 필수!)
-- 언어 + 버전 (예: Kotlin 2.2, Java 17)
-- 프레임워크 + 버전 (예: Spring Boot 4.0)
+### 2. 기술 스택 (정확한 버전 필수!)
+- 언어 + **패치 버전까지** (예: Kotlin 1.9.22, Java 17) — "1.9" 같은 메이저.마이너만은 금지
+- 프레임워크 + **패치 버전까지** (예: Spring Boot 3.4.2) — "3.4" 같은 약식 금지
 - 빌드 도구 (예: Gradle + Kotlin DSL)
 - 데이터베이스 + 드라이버 (예: H2 in-memory, MySQL 8.x)
 - 추가 라이브러리 (예: Spring Security, JWT)
+- ⚠ **Spring Boot 3.x는 jakarta 패키지를 사용** (javax 아님) — 반드시 명시할 것
 
 ### 3. 프로젝트 구조
 - 루트 패키지 (예: com.skytree.skystock)
@@ -674,6 +752,9 @@ Product  (1) --- (N) StockAlert
 ⚠ 반드시 **실제 YAML 블록** 형태로 작성하라. 설명형 금지.
 코드 생성 LLM이 이 블록을 그대로 파일에 쓴다.
 
+⚠ data.sql 사용 시 반드시 `spring.jpa.defer-datasource-initialization: true` 포함할 것
+(Hibernate 스키마 생성 후 data.sql이 실행되어야 함)
+
 예시:
 ```yaml
 server:
@@ -689,6 +770,7 @@ spring:
     hibernate:
       ddl-auto: create-drop
     show-sql: true
+    defer-datasource-initialization: true
   h2:
     console:
       enabled: true
@@ -698,11 +780,32 @@ spring:
 ### 8. 초기 데이터
 - data.sql 또는 DataInitializer 내용
 - 테스트용 샘플 데이터
+- ⚠ data.sql 컬럼명은 JPA snake_case 네이밍 전략에 맞춰 작성 (camelCase 금지)
 
 ### 9. 빌드/실행
 - 빌드 명령어
 - 실행 방법
 - 테스트 실행 명령어
+
+### 10. build.gradle.kts 필수 플러그인 및 의존성 체크리스트
+작업지시서에 아래 **완전한 plugins 블록**과 의존성 목록을 반드시 포함하여 코드 생성 시 누락을 방지하라:
+
+**필수 plugins 블록** (Spring Boot + Kotlin + JPA 프로젝트):
+```kotlin
+plugins {
+    kotlin("jvm") version "1.9.22"
+    kotlin("plugin.spring") version "1.9.22"
+    kotlin("plugin.jpa") version "1.9.22"
+    id("org.springframework.boot") version "3.4.2"
+    id("io.spring.dependency-management") version "1.1.4"
+}
+```
+
+**필수 의존성**:
+- `kotlin-reflect` — Spring Data JPA + Kotlin에 필수
+- `spring-boot-starter-security` (Security 사용 시) — `spring-security-core` 직접 사용 금지
+- `jjwt-api:0.12.x` + `jjwt-impl` + `jjwt-jackson` (JWT 사용 시) — `jjwt:0.9.x`는 javax 기반이라 Spring Boot 3.x 비호환
+- Spring Security 6.x에서 `WebSecurityConfigurerAdapter`는 삭제됨 → `SecurityFilterChain` Bean 사용
 
 ## 규칙
 - 대화에서 **명시적으로 언급된 모든 세부사항**을 반드시 포함하라 (패키지명, 포트, 엔티티 필드 등)

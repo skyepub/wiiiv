@@ -22,7 +22,7 @@ skystock과 동일한 구조의 재고/발주 관리 백엔드를 7개 대화 �
 
 ```
 재고/발주 관리 백엔드를 만들려고 해.
-Spring Boot 4 + Kotlin, JPA + H2 인메모리 DB, JWT 인증으로.
+Spring Boot 3.4 + Kotlin 1.9, JPA + H2 인메모리 DB, JWT 인증으로.
 localhost:9091에서 실행되게 해줘.
 Java 17 기반이고, 프로젝트명은 skystock, 패키지는 com.skytree.skystock으로.
 ```

@@ -1378,7 +1378,14 @@ class ConversationalGovernor(
             }
 
             TaskType.PROJECT_CREATE -> {
-                val basePath = draftSpec.targetPath
+                val rawTarget = draftSpec.targetPath
+                // targetPath가 URL/호스트:포트 패턴이면 프로젝트 경로로 부적절 → 무시
+                val sanitizedTarget = rawTarget?.takeIf { path ->
+                    !path.matches(Regex("^(https?://)?[\\w.-]+(:\\d+).*")) &&  // localhost:9091, http://...
+                    !path.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+.*")) &&    // IP주소
+                    !path.contains("://")                                       // 프로토콜 포함
+                }
+                val basePath = sanitizedTarget
                     ?: deriveProjectPath(workspace, draftSpec)
                     ?: "/tmp/wiiiv-project"
                 // LLM이 있으면 실제 프로젝트 파일 생성 시도
@@ -1489,8 +1496,9 @@ class ConversationalGovernor(
             )
         )
 
-        // JSON 파싱
-        val jsonStr = extractJson(response.content)
+        // JSON 파싱 (LLM이 triple-quote를 쓸 경우 교정)
+        val rawJson = extractJson(response.content)
+        val jsonStr = sanitizeTripleQuotes(rawJson)
         val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
 
         val filesArray = jsonElement["files"]?.jsonArray
@@ -1925,6 +1933,50 @@ class ConversationalGovernor(
      */
     private fun extractJson(response: String): String {
         return extractJsonWithTail(response).first
+    }
+
+    /**
+     * LLM이 JSON content 필드에 triple-quote(""")를 사용한 경우 교정.
+     * "content": """...""" → "content": "..." (내부 줄바꿈은 \n으로 이스케이프)
+     */
+    private fun sanitizeTripleQuotes(json: String): String {
+        if (!json.contains("\"\"\"")) return json
+
+        println("[SANITIZE] Triple-quote detected in JSON, fixing...")
+
+        val result = StringBuilder()
+        var i = 0
+        while (i < json.length) {
+            // "content": """ 패턴 감지
+            if (i + 3 <= json.length && json.substring(i, i + 3) == "\"\"\"") {
+                // 앞쪽 컨텍스트 확인: "content": 뒤의 triple-quote인지
+                val before = json.substring(0, i).trimEnd()
+                if (before.endsWith(":") || before.endsWith(": ")) {
+                    // triple-quote 시작 → 닫는 triple-quote까지의 내용을 JSON string으로 변환
+                    val contentStart = i + 3
+                    val closingIdx = json.indexOf("\"\"\"", contentStart)
+                    if (closingIdx != -1) {
+                        val rawContent = json.substring(contentStart, closingIdx)
+                        // JSON string으로 이스케이프
+                        val escaped = rawContent
+                            .replace("\\", "\\\\")
+                            .replace("\"", "\\\"")
+                            .replace("\n", "\\n")
+                            .replace("\r", "\\r")
+                            .replace("\t", "\\t")
+                        result.append("\"")
+                        result.append(escaped)
+                        result.append("\"")
+                        i = closingIdx + 3
+                        continue
+                    }
+                }
+            }
+            result.append(json[i])
+            i++
+        }
+
+        return result.toString()
     }
 
     /**
@@ -2495,13 +2547,12 @@ class ConversationalGovernor(
      * 워크스페이스와 DraftSpec으로부터 프로젝트 경로를 유도한다.
      *
      * domain 또는 intent에서 slug를 생성하여 workspace 하위에 프로젝트 디렉토리 경로를 반환.
-     * workspace가 null이면 null 반환.
+     * workspace가 null이면 /tmp 하위에 프로젝트 디렉토리를 생성한다.
      */
     internal fun deriveProjectPath(workspace: String?, draftSpec: DraftSpec): String? {
-        if (workspace == null) return null
-
         val slug = generateSlug(draftSpec.domain ?: draftSpec.intent ?: return null)
-        return "$workspace/$slug"
+        val base = workspace ?: "/tmp/wiiiv-projects"
+        return "$base/$slug"
     }
 
     /**

@@ -579,6 +579,13 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 }
 ```
 
+⚠ **content 필드의 JSON 이스케이프 규칙 (필수)**:
+- content 값은 반드시 유효한 JSON 문자열이어야 한다 (쌍따옴표 1개로 감싸기)
+- 줄바꿈은 반드시 \n으로, 탭은 \t로, 큰따옴표는 \"로, 백슬래시는 \\로 이스케이프
+- triple-quote(큰따옴표 3개 연속), 백틱, raw string을 JSON content 안에 절대 사용 금지
+- 올바른 예: "content": "package com.example\nimport org.springframework.boot.autoconfigure.SpringBootApplication\n@SpringBootApplication\nclass Application"
+- 잘못된 예: "content" 값을 큰따옴표 3개로 감싸거나, 줄바꿈을 그대로 넣는 것
+
 ## Spring Boot 버전별 필수 규칙 ⚡
 
 - **Spring Boot 3.x**: `javax.*` 패키지를 **절대 사용하지 마라**. 반드시 `jakarta.*`를 사용:
@@ -596,6 +603,7 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 
 ## Gradle 빌드 필수 규칙 ⚡
 
+- **`repositories { mavenCentral() }` 필수**: plugins 블록 바로 다음에 반드시 포함. 누락 시 모든 의존성 resolve 실패
 - **build.gradle.kts plugins 블록은 반드시 모든 필수 플러그인을 포함**해야 한다. 하나라도 빠지면 빌드 불가:
   ```kotlin
   plugins {
@@ -605,10 +613,13 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
       id("org.springframework.boot") version "3.4.2"  // ⚡ 필수 — bootJar, bootRun
       id("io.spring.dependency-management") version "1.1.4"  // ⚡ 필수 — 의존성 버전 관리
   }
+  repositories { mavenCentral() }
   ```
 - 위 5개 플러그인 중 **하나라도 빠지면 컴파일 실패**한다. 특히 `kotlin("jvm")`과 `id("org.springframework.boot")`를 빠뜨리지 마라
 - **`settings.gradle.kts` 파일 필수**: `rootProject.name = "프로젝트명"` — 이 파일이 없으면 Gradle 빌드가 실패한다
+- **`spring-boot-starter-web` 필수**: REST API 프로젝트에서 반드시 포함. 누락 시 @RestController, @RequestMapping 등이 컴파일 에러
 - **`spring-boot-starter-data-jpa` 필수**: JPA 엔티티를 사용하는 프로젝트에서 반드시 포함. 누락 시 Entity/Repository가 컴파일 에러
+- **`spring-boot-starter-validation` 필수**: `@Valid`, `@NotBlank`, `@Size` 등 jakarta.validation 어노테이션 사용 시 반드시 포함. 누락 시 jakarta.validation 패키지 resolve 실패
 - **`kotlin-reflect` 의존성 필수**: Spring Data JPA + Kotlin에서 리플렉션이 필요
   ```kotlin
   implementation("org.jetbrains.kotlin:kotlin-reflect")
@@ -648,6 +659,19 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
   // ❌ 틀림: quantity * unitCost (Int * BigDecimal)
   // ✅ 맞음: unitCost.multiply(BigDecimal(quantity))
   ```
+- **H2 DB 예약어 회피**: `user`, `order`, `group`, `table`, `select` 등은 H2 예약어. 테이블명으로 사용 금지:
+  ```kotlin
+  // ❌ 틀림: @Table(name = "user")  — H2에서 SQL 파싱 에러
+  // ✅ 맞음: @Table(name = "users") — 복수형 사용
+  // ❌ 틀림: @Table(name = "order")
+  // ✅ 맞음: @Table(name = "orders")
+  ```
+- **`isXxx` Boolean 필드의 Spring Data 메서드명**: Kotlin `isActive` 필드 → `findByIsActiveTrue()` (NOT `findByActiveIsTrue()`):
+  ```kotlin
+  // Entity: var isActive: Boolean = true
+  // ❌ 틀림: fun findByActiveIsTrue(): List<Supplier>   — "No property 'active' found" 에러
+  // ✅ 맞음: fun findByIsActiveTrue(): List<Supplier>
+  ```
 
 ## application.yml 필수 규칙 ⚡
 
@@ -655,6 +679,53 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
   (data.sql이 Hibernate 스키마 생성 이후에 실행되어야 함)
 - **data.sql 컬럼명**: JPA 기본 네이밍 전략은 camelCase → snake_case 변환.
   `@Column(name = "xxx")` 으로 지정한 이름 또는 snake_case 변환된 이름 사용
+
+## MVP Controller 필수 생성 규칙 ⚡
+
+- **REST API 프로젝트는 반드시 다음 3개 Controller를 최우선 생성**한다. 토큰이 부족하더라도 이 3개는 반드시 포함:
+
+### 1. AuthController (필수)
+```kotlin
+@RestController
+@RequestMapping("/api/auth")
+class AuthController(private val userService: UserService) {
+    @PostMapping("/login")
+    fun login(@RequestBody request: LoginRequest): ResponseEntity<LoginResponse> {
+        // userService로 인증 → JWT 발급 → LoginResponse 반환
+    }
+}
+data class LoginRequest(val username: String, val password: String)
+data class LoginResponse(val token: String, val username: String, val role: String)
+```
+
+### 2. HealthController (필수)
+```kotlin
+@RestController
+class HealthController {
+    @GetMapping("/api/health")
+    fun health() = mapOf("status" to "OK", "timestamp" to System.currentTimeMillis())
+}
+```
+
+### 3. 핵심 도메인 Controller 최소 1개 (필수)
+- 프로젝트의 **메인 도메인 엔티티**에 대한 GET 목록 조회 엔드포인트 1개 이상
+- 예: `GET /api/suppliers`, `GET /api/products`, `GET /api/students`
+- Service를 주입하여 실제 DB 조회 결과를 반환
+
+### 필수 동반 파일
+- **JwtProvider**: JWT 생성/검증 유틸리티 (secret key, 만료 시간 설정)
+- **JwtAuthFilter**: OncePerRequestFilter 상속, Authorization 헤더에서 JWT 검증
+- **SecurityConfig에 JwtAuthFilter 등록**: `addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter::class.java)`
+- HealthController의 `/api/health`는 SecurityConfig에서 `permitAll()` 처리
+
+### 생성 우선순위 (토큰 부족 시 이 순서로 컷)
+1. build.gradle.kts + settings.gradle.kts + application.yml
+2. Entity + Repository
+3. **AuthController + JwtProvider + JwtAuthFilter + HealthController** ← 여기까지 필수
+4. Service + 도메인 Controller
+5. DataInitializer + data.sql
+6. 추가 Controller + DTO
+7. Test
 
 ## 주의사항
 

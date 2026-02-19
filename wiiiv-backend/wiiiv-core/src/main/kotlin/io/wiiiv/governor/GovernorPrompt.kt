@@ -625,11 +625,22 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
   implementation("org.jetbrains.kotlin:kotlin-reflect")
   ```
 - **spring-boot-starter-security**: Spring Security 사용 시 반드시 `spring-boot-starter-security`를 사용. `spring-security-core`를 직접 쓰지 마라
+- **`runtimeOnly("com.h2database:h2")` 필수**: H2 인메모리 DB 사용 시 반드시 포함. 누락 시 DataSource 초기화 실패
 - **jjwt 라이브러리**: Spring Boot 3.x에서는 반드시 `0.12.x` 이상 사용 (0.9.x는 javax 기반이라 비호환)
+- **dependencies 블록 전체 예시** (REST API + JPA + Security + JWT + H2 프로젝트):
   ```kotlin
-  implementation("io.jsonwebtoken:jjwt-api:0.12.5")
-  runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.5")
-  runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.5")
+  dependencies {
+      implementation("org.jetbrains.kotlin:kotlin-reflect")
+      implementation("org.springframework.boot:spring-boot-starter-web")
+      implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+      implementation("org.springframework.boot:spring-boot-starter-security")
+      implementation("org.springframework.boot:spring-boot-starter-validation")
+      implementation("io.jsonwebtoken:jjwt-api:0.12.5")
+      runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.5")
+      runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.5")
+      runtimeOnly("com.h2database:h2")
+      testImplementation("org.springframework.boot:spring-boot-starter-test")
+  }
   ```
 
 ## Spring Security 6.x 필수 규칙 ⚡ (Spring Boot 3.x)
@@ -649,6 +660,13 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 
 ## Kotlin + JPA 필수 규칙 ⚡
 
+- **import 누락 금지**: 엔티티에서 사용하는 모든 타입은 반드시 import해야 한다:
+  - `BigDecimal` → `import java.math.BigDecimal`
+  - `LocalDateTime` → `import java.time.LocalDateTime`
+  - `LocalDate` → `import java.time.LocalDate`
+  - JPA 어노테이션 → `import jakarta.persistence.*`
+  - Validation → `import jakarta.validation.constraints.*`
+  - 이 import가 누락되면 Unresolved reference 컴파일 에러가 발생한다
 - **data class의 프로퍼티가 `val`이면 재할당 불가**. update 시 `copy()` 사용:
   ```kotlin
   // ❌ 틀림: entity.id = id

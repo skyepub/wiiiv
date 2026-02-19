@@ -535,7 +535,13 @@ DraftSpec 기반으로 프로젝트 파일 구조를 JSON으로 생성하라.
 
 ## 규칙
 
-1. 모든 파일은 완전한 코드여야 한다 (placeholder 금지)
+1. **모든 메서드는 완전한 구현 코드여야 한다** ⚡ 절대 규칙!
+   - `// TODO`, `// Logic to ...`, `// implement here` 같은 **주석 placeholder 절대 금지**
+   - 메서드 body가 비어 있거나 주석만 있으면 **컴파일 에러**가 발생한다
+   - 모든 함수는 반드시 실제 동작하는 코드와 return문을 포함해야 한다
+   - 예시:
+     - ❌ `fun getById(id: Long): Entity { // Logic to retrieve }` — 컴파일 에러!
+     - ✅ `fun getById(id: Long): Entity = repository.findById(id).orElseThrow { RuntimeException("Not found") }`
 2. 외부 의존성은 DraftSpec constraints에 명시된 경우에만 사용
 3. 테스트 코드를 반드시 포함하라
 4. 빌드 스크립트가 필요한 언어는 반드시 포함하라
@@ -619,7 +625,7 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - **`settings.gradle.kts` 파일 필수**: `rootProject.name = "프로젝트명"` — 이 파일이 없으면 Gradle 빌드가 실패한다
 - **`spring-boot-starter-web` 필수**: REST API 프로젝트에서 반드시 포함. 누락 시 @RestController, @RequestMapping 등이 컴파일 에러
 - **`spring-boot-starter-data-jpa` 필수**: JPA 엔티티를 사용하는 프로젝트에서 반드시 포함. 누락 시 Entity/Repository가 컴파일 에러
-- **`spring-boot-starter-validation` 필수**: `@Valid`, `@NotBlank`, `@Size` 등 jakarta.validation 어노테이션 사용 시 반드시 포함. 누락 시 jakarta.validation 패키지 resolve 실패
+- **`spring-boot-starter-validation` 필수** ⚡: 엔티티에 `@NotBlank`, `@NotNull`, `@Size`, `@Valid` 등 jakarta.validation 어노테이션을 **하나라도 사용하면 반드시 포함**. 이 의존성이 없으면 `Unresolved reference: validation` 컴파일 에러가 발생한다. **@NotBlank를 import하면서 starter-validation을 빼먹는 것이 가장 흔한 실수**이므로 반드시 확인하라
 - **`kotlin-reflect` 의존성 필수**: Spring Data JPA + Kotlin에서 리플렉션이 필요
   ```kotlin
   implementation("org.jetbrains.kotlin:kotlin-reflect")
@@ -730,20 +736,40 @@ class HealthController {
 - 예: `GET /api/suppliers`, `GET /api/products`, `GET /api/students`
 - Service를 주입하여 실제 DB 조회 결과를 반환
 
+### 4. SecurityConfig (필수)
+- Spring Security 사용 프로젝트에서 **반드시 생성**해야 한다. 없으면 모든 엔드포인트가 차단됨
+- `/api/auth/**`와 `/api/health`는 `permitAll()` 처리
+- CSRF disabled, STATELESS 세션
+```kotlin
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http.csrf { it.disable() }
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .authorizeHttpRequests { auth ->
+                auth.requestMatchers("/api/auth/**").permitAll()
+                    .requestMatchers("/api/health").permitAll()
+                    .anyRequest().authenticated()
+            }
+        return http.build()
+    }
+}
+```
+
 ### 필수 동반 파일
 - **JwtProvider**: JWT 생성/검증 유틸리티 (secret key, 만료 시간 설정)
 - **JwtAuthFilter**: OncePerRequestFilter 상속, Authorization 헤더에서 JWT 검증
-- **SecurityConfig에 JwtAuthFilter 등록**: `addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter::class.java)`
-- HealthController의 `/api/health`는 SecurityConfig에서 `permitAll()` 처리
 
 ### 생성 우선순위 (토큰 부족 시 이 순서로 컷)
 1. build.gradle.kts + settings.gradle.kts + application.yml
 2. Entity + Repository
-3. **AuthController + JwtProvider + JwtAuthFilter + HealthController** ← 여기까지 필수
+3. **SecurityConfig + AuthController + HealthController** ← 여기까지 필수
 4. Service + 도메인 Controller
-5. DataInitializer + data.sql
-6. 추가 Controller + DTO
-7. Test
+5. JwtProvider + JwtAuthFilter
+6. DataInitializer + data.sql
+7. 추가 Controller + DTO + Test
 
 ## 주의사항
 

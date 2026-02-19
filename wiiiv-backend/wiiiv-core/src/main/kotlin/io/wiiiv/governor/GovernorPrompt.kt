@@ -625,7 +625,17 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 - **`settings.gradle.kts` 파일 필수**: `rootProject.name = "프로젝트명"` — 이 파일이 없으면 Gradle 빌드가 실패한다
 - **`spring-boot-starter-web` 필수**: REST API 프로젝트에서 반드시 포함. 누락 시 @RestController, @RequestMapping 등이 컴파일 에러
 - **`spring-boot-starter-data-jpa` 필수**: JPA 엔티티를 사용하는 프로젝트에서 반드시 포함. 누락 시 Entity/Repository가 컴파일 에러
-- **`spring-boot-starter-validation` 필수** ⚡: 엔티티에 `@NotBlank`, `@NotNull`, `@Size`, `@Valid` 등 jakarta.validation 어노테이션을 **하나라도 사용하면 반드시 포함**. 이 의존성이 없으면 `Unresolved reference: validation` 컴파일 에러가 발생한다. **@NotBlank를 import하면서 starter-validation을 빼먹는 것이 가장 흔한 실수**이므로 반드시 확인하라
+- **의존성 완전성 원칙** ⚡⚡: 소스 파일의 import문은 반드시 build.gradle.kts의 의존성과 일치해야 한다. 아래 매핑표에 해당하는 import를 사용하면 대응 의존성이 **반드시** 있어야 한다:
+  | import 패키지 | 필수 의존성 |
+  |---|---|
+  | `jakarta.validation.*` (`@NotBlank`, `@Valid`, `@Size` 등) | `spring-boot-starter-validation` |
+  | `jakarta.persistence.*` (`@Entity`, `@Table` 등) | `spring-boot-starter-data-jpa` |
+  | `org.springframework.security.*` | `spring-boot-starter-security` |
+  | `org.springframework.web.*` (`@RestController` 등) | `spring-boot-starter-web` |
+  | `io.jsonwebtoken.*` | `jjwt-api` + `jjwt-impl` + `jjwt-jackson` |
+  - **build.gradle.kts를 생성할 때, 이후 생성할 모든 소스 파일이 사용할 의존성을 미리 포함**하라
+  - 엔티티에 `@NotBlank`를 쓸 계획이면 build.gradle.kts에 `starter-validation`이 이미 있어야 한다
+  - 이 원칙을 어기면 `Unresolved reference` 컴파일 에러가 발생한다
 - **`kotlin-reflect` 의존성 필수**: Spring Data JPA + Kotlin에서 리플렉션이 필요
   ```kotlin
   implementation("org.jetbrains.kotlin:kotlin-reflect")
@@ -652,27 +662,54 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 ## Spring Security 6.x 필수 규칙 ⚡ (Spring Boot 3.x)
 
 - **WebSecurityConfigurerAdapter는 삭제됨**. 절대 사용하지 마라
-- 반드시 `SecurityFilterChain` Bean 방식을 사용:
+- `antMatchers()` 사용 금지 → `requestMatchers()` 사용
+- **SecurityFilterChain은 반드시 3요소를 모두 포함**해야 한다. 하나라도 빠지면 Security가 동작하지 않는다:
+  1. **보호 정책**: `csrf { it.disable() }` + `sessionManagement { STATELESS }`
+  2. **인가 규칙**: `authorizeHttpRequests { permitAll / authenticated }`
+  3. **인증 메커니즘**: `httpBasic()`, `formLogin()`, 또는 커스텀 JWT 필터 중 최소 1개
+  - 인증 메커니즘이 없으면 `anyRequest().authenticated()`가 모든 요청을 거부한다 (permitAll 경로 포함)
+  - JWT 인증 필터를 직접 구현하지 않는 한, 반드시 `httpBasic(Customizer.withDefaults())`를 포함하라
   ```kotlin
   @Bean
   fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
-      http.csrf { it.disable() }
+      http.csrf { it.disable() }                                          // 1. 보호 정책
           .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-          .authorizeHttpRequests { auth -> auth.requestMatchers("/api/auth/**").permitAll().anyRequest().authenticated() }
+          .authorizeHttpRequests { auth ->                                 // 2. 인가 규칙
+              auth.requestMatchers("/api/auth/**", "/api/health").permitAll()
+                  .anyRequest().authenticated()
+          }
+          .httpBasic(Customizer.withDefaults())                            // 3. 인증 메커니즘 ⚡ 필수
       return http.build()
   }
   ```
-- `antMatchers()` 사용 금지 → `requestMatchers()` 사용
 
 ## Kotlin + JPA 필수 규칙 ⚡
 
-- **import 누락 금지**: 엔티티에서 사용하는 모든 타입은 반드시 import해야 한다:
+### import 3대 원칙
+- **1. import 누락 금지**: 파일에서 사용하는 모든 타입/어노테이션은 반드시 import해야 한다:
   - `BigDecimal` → `import java.math.BigDecimal`
   - `LocalDateTime` → `import java.time.LocalDateTime`
   - `LocalDate` → `import java.time.LocalDate`
   - JPA 어노테이션 → `import jakarta.persistence.*`
   - Validation → `import jakarta.validation.constraints.*`
   - 이 import가 누락되면 Unresolved reference 컴파일 에러가 발생한다
+- **2. 크로스 패키지 import 필수**: 같은 프로젝트라도 **다른 패키지**의 클래스를 사용하면 반드시 import해야 한다. Kotlin은 같은 프로젝트의 다른 패키지를 자동 import하지 않는다:
+  ```kotlin
+  // controller 패키지에서 service/repository/model 패키지의 클래스를 사용할 때:
+  // ❌ 틀림: import 없이 UserService 사용 → Unresolved reference
+  // ✅ 맞음:
+  import com.example.service.UserService
+  import com.example.repository.SupplierRepository
+  import com.example.model.Supplier
+  ```
+  - Controller → Service, Repository, Entity, DTO 모두 import 필요
+  - Service → Repository, Entity 모두 import 필요
+  - 패키지가 다르면 **무조건** import문을 작성하라
+- **3. 불필요 import 금지**: 파일에서 실제로 사용하지 않는 클래스를 import하지 마라. 특히 다음은 절대 import하지 마라:
+  - `WebSecurityConfigurerAdapter` — Spring Security 6에서 **삭제됨**, import하면 컴파일 에러
+  - 같은 클래스의 중복 import (다른 패키지 경로로 같은 이름)
+  - CORS, Filter 등 실제 코드에서 사용하지 않는 클래스
+  - **규칙: 각 import문에 대해, 해당 파일의 코드에서 실제로 참조하는 곳이 있어야 한다**
 - **data class의 프로퍼티가 `val`이면 재할당 불가**. update 시 `copy()` 사용:
   ```kotlin
   // ❌ 틀림: entity.id = id
@@ -703,6 +740,18 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
   (data.sql이 Hibernate 스키마 생성 이후에 실행되어야 함)
 - **data.sql 컬럼명**: JPA 기본 네이밍 전략은 camelCase → snake_case 변환.
   `@Column(name = "xxx")` 으로 지정한 이름 또는 snake_case 변환된 이름 사용
+
+## 생성물 간 정합성 규칙 ⚡
+
+- **data.sql ↔ @Entity 정합성**: data.sql에서 INSERT하는 테이블명은 반드시 @Entity의 `@Table(name = "xxx")`과 **정확히** 일치해야 한다. @Entity로 정의되지 않은 테이블에 INSERT하면 `Table not found` 에러로 서버 기동이 실패한다
+- **FK 참조 정합성**: data.sql에서 FK를 참조하는 INSERT는 참조되는 테이블의 데이터가 먼저 INSERT되어야 한다
+- **build.gradle.kts ↔ 소스 파일 정합성**: 위 "의존성 완전성 원칙" 참조. 소스의 import가 의존성과 불일치하면 컴파일 실패
+- **SecurityConfig ↔ Controller 정합성**: `permitAll()` 경로에 대응하는 Controller가 존재해야 의미가 있다. 경로만 permit하고 Controller가 없으면 404 반환
+- **호출 정합성** ⚡: 파일 A가 파일 B의 메서드를 호출하면, 해당 메서드가 파일 B에 반드시 정의되어 있어야 한다:
+  - Controller가 `repository.findByNameContaining(keyword)`를 호출하면, Repository 인터페이스에 `fun findByNameContaining(keyword: String): List<Entity>` 정의 필수
+  - Controller가 `service.authenticate(username, password)`를 호출하면, Service 클래스에 해당 메서드 정의 필수
+  - **규칙: 파일을 생성할 때, 그 파일이 호출하는 모든 메서드가 대상 클래스/인터페이스에 존재하는지 확인하라**
+  - Spring Data JPA의 `findAll()`, `findById()`, `save()`, `deleteById()`는 JpaRepository가 제공하므로 별도 정의 불요. 그 외 커스텀 쿼리 메서드는 반드시 Repository에 선언해야 한다
 
 ## MVP Controller 필수 생성 규칙 ⚡
 
@@ -738,8 +787,7 @@ class HealthController {
 
 ### 4. SecurityConfig (필수)
 - Spring Security 사용 프로젝트에서 **반드시 생성**해야 한다. 없으면 모든 엔드포인트가 차단됨
-- `/api/auth/**`와 `/api/health`는 `permitAll()` 처리
-- CSRF disabled, STATELESS 세션
+- **반드시 3요소 포함**: 보호 정책 + 인가 규칙 + 인증 메커니즘 (위 Spring Security 규칙 참조)
 ```kotlin
 @Configuration
 @EnableWebSecurity
@@ -749,10 +797,10 @@ class SecurityConfig {
         http.csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests { auth ->
-                auth.requestMatchers("/api/auth/**").permitAll()
-                    .requestMatchers("/api/health").permitAll()
+                auth.requestMatchers("/api/auth/**", "/api/health").permitAll()
                     .anyRequest().authenticated()
             }
+            .httpBasic(Customizer.withDefaults())
         return http.build()
     }
 }

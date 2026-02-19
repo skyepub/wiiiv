@@ -1496,9 +1496,9 @@ class ConversationalGovernor(
             )
         )
 
-        // JSON 파싱 (LLM이 triple-quote를 쓸 경우 교정)
+        // JSON 파싱 (LLM이 triple-quote, 잘못된 이스케이프를 쓸 경우 교정)
         val rawJson = extractJson(response.content)
-        val jsonStr = sanitizeTripleQuotes(rawJson)
+        val jsonStr = sanitizeInvalidEscapes(sanitizeTripleQuotes(rawJson))
         val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
 
         val filesArray = jsonElement["files"]?.jsonArray
@@ -1977,6 +1977,44 @@ class ConversationalGovernor(
         }
 
         return result.toString()
+    }
+
+    /**
+     * LLM이 JSON content 필드에 유효하지 않은 이스케이프 시퀀스를 사용한 경우 교정.
+     * JSON에서 유효한 이스케이프: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
+     * LLM이 코드에서 \d, \s, \w 등 regex 패턴을 그대로 쓰면 JSON 파싱 에러.
+     * \X (X가 유효하지 않은 문자) → \\X 로 변환
+     */
+    private fun sanitizeInvalidEscapes(json: String): String {
+        val validEscapeChars = setOf('"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u')
+        val sb = StringBuilder(json.length)
+        var i = 0
+        var fixed = false
+        while (i < json.length) {
+            if (json[i] == '\\' && i + 1 < json.length) {
+                val next = json[i + 1]
+                if (next in validEscapeChars) {
+                    // 유효한 이스케이프 — 그대로 유지
+                    sb.append('\\')
+                    sb.append(next)
+                    i += 2
+                } else {
+                    // 유효하지 않은 이스케이프 (\d, \s, \w 등) → \\ + next
+                    sb.append('\\')
+                    sb.append('\\')
+                    sb.append(next)
+                    i += 2
+                    fixed = true
+                }
+            } else {
+                sb.append(json[i])
+                i++
+            }
+        }
+        if (fixed) {
+            println("[SANITIZE] Invalid escape sequences fixed in JSON")
+        }
+        return sb.toString()
     }
 
     /**

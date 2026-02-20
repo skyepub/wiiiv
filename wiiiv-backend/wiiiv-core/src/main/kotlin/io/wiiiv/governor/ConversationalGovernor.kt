@@ -613,6 +613,7 @@ class ConversationalGovernor(
      */
     private fun needsLlmDecision(draftSpec: DraftSpec): Boolean = when (draftSpec.taskType) {
         TaskType.API_WORKFLOW -> true
+        TaskType.DB_QUERY -> true  // Phase E: Governed HLX 경로
         else -> false
     }
 
@@ -650,6 +651,9 @@ class ConversationalGovernor(
 
         // API_WORKFLOW → 항상 HLX (다중 스텝, 외부 상호작용)
         if (taskType == TaskType.API_WORKFLOW) return RouteMode.HLX
+
+        // DB_QUERY → 항상 HLX (Phase E: GateChain 거버넌스)
+        if (taskType == TaskType.DB_QUERY) return RouteMode.HLX
 
         // FILE_WRITE → HLX (WRITE = 부작용)
         if (taskType == TaskType.FILE_WRITE) return RouteMode.HLX
@@ -860,6 +864,11 @@ class ConversationalGovernor(
             )
         }
 
+        // Phase E: DB_QUERY → Governed HLX 경로 (GateChain이 통제)
+        if (hlxRunner != null && draftSpec.taskType == TaskType.DB_QUERY) {
+            return executeDbQueryHlx(session, draftSpec)
+        }
+
         // HLX 자동생성 경로: hlxRunner가 있으면 워크플로우를 한번에 생성하고 실행
         if (hlxRunner != null) {
             return executeHlxApiWorkflow(session, draftSpec)
@@ -1053,6 +1062,125 @@ class ConversationalGovernor(
      * - HlxRunner가 순차 실행 (노드 간 데이터 전달 보장)
      * - 인증 → 조회 → 변환 → 행동 흐름이 워크플로우 구조에 의해 강제됨
      */
+
+    /**
+     * Phase E: DB 조회 → Governed HLX 실행
+     *
+     * 자연어 DB 요청을 HLX ACT 워크플로우로 변환하고 GateChain 거버넌스 하에서 실행한다.
+     * DACS를 우회하고 GateChain + RiskLevel이 실행 통제를 담당한다.
+     *
+     * 흐름: 자연어 → LLM(HLX 생성) → HlxRunner(userId, role) → GateTrace 포함 결과
+     */
+    private suspend fun executeDbQueryHlx(
+        session: ConversationSession,
+        draftSpec: DraftSpec
+    ): ConversationResponse {
+        emitProgress(ProgressPhase.LLM_THINKING, "Generating DB query workflow...")
+        println("[DB-QUERY-HLX] intent=${draftSpec.intent} domain=${draftSpec.domain}")
+
+        if (llmProvider == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "LLM이 연결되어 있지 않아 DB 쿼리를 생성할 수 없습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        // 1. LLM에게 HLX 워크플로우 JSON 생성 요청
+        val prompt = GovernorPrompt.dbQueryHlxPrompt(
+            intent = draftSpec.intent ?: "",
+            domain = draftSpec.domain
+        )
+        val llmResponse = try {
+            llmProvider.call(
+                LlmRequest(
+                    action = LlmAction.COMPLETE,
+                    prompt = prompt,
+                    model = model ?: llmProvider.defaultModel,
+                    maxTokens = 2048
+                )
+            )
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "DB 쿼리 HLX 생성 중 LLM 오류: ${e.message}",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 2. HLX JSON 파싱
+        val hlxJson = llmResponse.content
+            .replace("```json", "").replace("```", "")
+            .trim()
+        println("[DB-QUERY-HLX] Generated HLX: ${hlxJson.take(500)}")
+
+        val workflow = try {
+            HlxParser.parse(hlxJson)
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "DB 쿼리 HLX 파싱 실패: ${e.message}\n\nLLM 응답:\n${hlxJson.take(300)}",
+                sessionId = session.sessionId,
+                error = "HLX parse error"
+            )
+        }
+
+        // 3. HlxRunner로 실행 (userId/role → GateChain 거버넌스)
+        emitProgress(ProgressPhase.EXECUTING, "Executing DB query with governance...")
+        val role = "OPERATOR"
+        println("[DB-QUERY-HLX] Running with role=$role")
+
+        val hlxResult = try {
+            hlxRunner!!.run(
+                workflow = workflow,
+                userId = "dev-user",
+                role = role
+            )
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "DB 쿼리 실행 오류: ${e.message}",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 4. 결과 포맷팅 (Gate Trace 포함)
+        val technicalSummary = formatHlxExecutionResult(hlxResult, workflow)
+        println("[DB-QUERY-HLX] Result: status=${hlxResult.status} duration=${hlxResult.totalDurationMs}ms")
+
+        // 5. LLM에게 자연어 요약 요청
+        emitProgress(ProgressPhase.LLM_THINKING, "Summarizing results...")
+        val naturalSummary = try {
+            summarizeHlxResult(
+                intent = draftSpec.intent ?: "",
+                hlxResult = hlxResult,
+                workflow = workflow
+            )
+        } catch (_: Exception) {
+            null // 요약 실패 시 기술 요약만 사용
+        }
+
+        // 6. 세션에 실행 기록 적재 + 리셋
+        val fullMessage = if (naturalSummary != null) {
+            "$naturalSummary\n\n$technicalSummary"
+        } else {
+            technicalSummary
+        }
+
+        session.integrateResult(null, null, "DB-QUERY-HLX: ${hlxResult.status}")
+        session.resetSpec()
+        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+        session.context.activeTaskId = null
+
+        return ConversationResponse(
+            action = ActionType.EXECUTE,
+            message = fullMessage,
+            sessionId = session.sessionId
+        )
+    }
+
     private suspend fun executeHlxApiWorkflow(
         session: ConversationSession,
         draftSpec: DraftSpec
@@ -1145,11 +1273,12 @@ class ConversationalGovernor(
             )
         }
 
-        // 4. HlxRunner로 실행
+        // 4. HlxRunner로 실행 (Phase D: userId/role 전달 → GateChain 거버넌스)
         emitProgress(ProgressPhase.EXECUTING, "Executing HLX workflow: ${workflow.name}...")
+        val sessionRole = "OPERATOR"
 
         val hlxResult = try {
-            hlxRunner!!.run(workflow)
+            hlxRunner!!.run(workflow, userId = "dev-user", role = sessionRole)
         } catch (e: Exception) {
             return ConversationResponse(
                 action = ActionType.EXECUTE,
@@ -1487,6 +1616,17 @@ class ConversationalGovernor(
                         stepId = stepId,
                         type = BlueprintStepType.NOOP,
                         params = mapOf("reason" to "API_WORKFLOW handled by iterative loop")
+                    )
+                )
+            }
+
+            TaskType.DB_QUERY -> {
+                // DB_QUERY는 executeDbQueryHlx()에서 HLX 워크플로우를 동적 생성/실행
+                listOf(
+                    BlueprintStep(
+                        stepId = stepId,
+                        type = BlueprintStepType.NOOP,
+                        params = mapOf("reason" to "DB_QUERY handled by executeDbQueryHlx via HLX")
                     )
                 )
             }

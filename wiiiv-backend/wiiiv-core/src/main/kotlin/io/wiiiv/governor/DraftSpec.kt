@@ -83,6 +83,7 @@ data class DraftSpec(
         TaskType.INFORMATION -> emptySet() // 정보 질문은 필수 없음
         TaskType.CONVERSATION -> emptySet() // 일반 대화는 필수 없음
         TaskType.API_WORKFLOW -> setOf("intent", "domain") // API 워크플로우
+        TaskType.DB_QUERY -> setOf("intent", "domain") // DB 조회 (domain = DB명)
         null -> setOf("intent", "taskType") // 아직 유형 미정
     }
 
@@ -130,6 +131,7 @@ data class DraftSpec(
             targetPath?.let { isSystemPath(it) } ?: false
         }
         TaskType.API_WORKFLOW -> false  // API 호출은 외부 서비스 읽기 — DACS 불필요
+        TaskType.DB_QUERY -> false  // DB 조회는 GateChain이 통제 — DACS 불필요
         else -> {
             // 특정 경로 패턴만 위험 (시스템 경로)
             targetPath?.let { isSystemPath(it) } ?: false
@@ -161,6 +163,7 @@ data class DraftSpec(
                 RequestType.FILE_WRITE
             )
             TaskType.API_WORKFLOW -> listOf(RequestType.CUSTOM)
+            TaskType.DB_QUERY -> listOf(RequestType.CUSTOM)
             else -> emptyList()
         }
 
@@ -168,6 +171,10 @@ data class DraftSpec(
             TaskType.API_WORKFLOW -> {
                 // API 워크플로우: domain을 논리적 경로 스코프로 사용
                 listOfNotNull(domain?.let { "api://$it" } ?: "api://external")
+            }
+            TaskType.DB_QUERY -> {
+                // DB 조회: domain을 DB 스코프로 사용
+                listOfNotNull(domain?.let { "db://$it" } ?: "db://default")
             }
             else -> listOfNotNull(targetPath)
         }
@@ -191,6 +198,9 @@ data class DraftSpec(
         if (taskType == TaskType.API_WORKFLOW) {
             domain?.let { append(" - API Workflow: $it domain") }
             append(" - Operation: External API call (read-only HTTP request)")
+        } else if (taskType == TaskType.DB_QUERY) {
+            domain?.let { append(" - DB Query: $it database") }
+            append(" - Operation: Database query (governed by GateChain)")
         } else {
             domain?.let { append(" - Domain: $it") }
         }
@@ -251,7 +261,10 @@ enum class TaskType(val displayName: String) {
     CONVERSATION("일반 대화"),
 
     /** API 워크플로우 (반복적 API 호출) */
-    API_WORKFLOW("API 워크플로우")
+    API_WORKFLOW("API 워크플로우"),
+
+    /** 데이터베이스 조회/실행 (Phase E: Governed HLX) */
+    DB_QUERY("데이터베이스 조회")
 }
 
 /**

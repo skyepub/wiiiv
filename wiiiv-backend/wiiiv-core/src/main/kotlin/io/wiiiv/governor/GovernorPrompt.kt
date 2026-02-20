@@ -117,6 +117,7 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 | ~삭제해줘, ~지워줘 | FILE_DELETE | "파일 삭제해줘", "로그 지워줘" |
 | ~실행해줘, ~돌려줘, ~해줘(명령어) | COMMAND | "ls 실행해줘", "빌드 돌려줘" |
 | ~프로젝트, ~시스템, ~구축 | PROJECT_CREATE | "프로젝트 만들어줘", "시스템 구축해줘" |
+| ~조회, ~검색, ~쿼리, ~DB, ~데이터베이스, ~테이블 | DB_QUERY | "상품 목록 조회해줘", "재고 10개 이하 검색" |
 
 ## 의도 변경 (피봇) 처리
 
@@ -347,6 +348,7 @@ RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가
 - COMMAND: 셸 명령어 실행
 - PROJECT_CREATE: 프로젝트 생성, 시스템 구축 (복잡한 작업)
 - API_WORKFLOW: 외부 API를 호출하는 작업. **RAG에 관련 API 스펙이 있으면 이 유형으로 분류하라.** (예: "날씨 알려줘", "주문 상태 변경해줘", "API로 데이터 조회해줘")
+- DB_QUERY: 데이터베이스 조회/검색. 테이블 데이터를 쿼리하는 작업. (예: "상품 목록 조회해줘", "재고 10개 이하 검색")
 
 ## 한국어 API 워크플로우 패턴
 
@@ -355,6 +357,18 @@ RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가
 | ~API로, ~API 호출, ~API 워크플로우 | API_WORKFLOW | "API로 주문 조회해줘" |
 | ~주문 상태 변경, ~사용자 데이터 조회 | API_WORKFLOW | "john의 주문 상태 변경해줘" |
 | ~백엔드 API~, ~REST API 호출 | API_WORKFLOW | "백엔드 API로 사용자 찾아줘" |
+
+## 한국어 DB 조회 패턴
+
+| 패턴 | taskType | 예시 |
+|------|----------|------|
+| ~조회해줘, ~검색해줘, ~찾아줘 (DB 관련) | DB_QUERY | "상품 목록 조회해줘", "재고 부족 상품 검색해줘" |
+| ~테이블, ~데이터베이스, ~DB, ~쿼리 | DB_QUERY | "products 테이블 보여줘", "DB에서 검색해줘" |
+| ~재고, ~상품, ~주문, ~매출 (운영 데이터) | DB_QUERY | "재고 10개 이하 상품", "이번달 매출" |
+
+⚠ DB_QUERY 판단 기준: **데이터 조회/검색** 요청이고, 파일이나 API가 아닌 **데이터베이스**가 대상일 때.
+  - domain은 데이터베이스 이름 (예: "skymall", "skystock")
+  - DB_QUERY는 DACS 없이 GateChain이 통제하므로 EXECUTE로 바로 진행
 
 ## 실행 결과 기반 판단
 
@@ -1729,6 +1743,50 @@ nodes 순서:
             appendLine("RAG에 등록된 API 스펙이 없습니다. 사용자의 지시에서 엔드포인트 정보를 추론하세요.")
             appendLine()
         }
+    }
+
+    /**
+     * DB 쿼리 HLX 워크플로우 생성 프롬프트 (Phase E)
+     *
+     * 사용자 의도를 단일 ACT 노드 HLX로 변환한다.
+     * GateChain이 거버넌스를 담당하므로 보안 검증은 여기서 하지 않는다.
+     */
+    fun dbQueryHlxPrompt(intent: String, domain: String?): String = buildString {
+        appendLine("You are a SQL query generator. Convert the user's natural language request into a HLX workflow JSON.")
+        appendLine()
+        appendLine("## Rules")
+        appendLine("1. Generate a valid HLX JSON with a single ACT node for database query")
+        appendLine("2. The ACT node must have target 'db://query' and a valid SQL SELECT query")
+        appendLine("3. Only generate SELECT queries (read-only). Never generate INSERT/UPDATE/DELETE/DROP")
+        appendLine("4. Use standard SQL syntax compatible with MySQL")
+        if (!domain.isNullOrBlank()) {
+            appendLine("5. Database: $domain")
+        }
+        appendLine()
+        appendLine("## Response Format (JSON only, no markdown)")
+        appendLine("""
+{
+  "id": "db-query-<short-uuid>",
+  "name": "DB Query",
+  "description": "<brief description>",
+  "nodes": [
+    {
+      "type": "act",
+      "id": "query",
+      "description": "<what this query does>",
+      "output": "queryResult"
+    }
+  ]
+}
+        """.trimIndent())
+        appendLine()
+        appendLine("The ACT node will be executed by the DB executor. The LLM inside HLX will generate")
+        appendLine("the actual SQL query based on the node description. Make the description specific enough")
+        appendLine("for the HLX engine to generate the correct SQL.")
+        appendLine()
+        appendLine("## User Request")
+        appendLine(intent)
+        domain?.let { appendLine("Database: $it") }
     }
 
     /**

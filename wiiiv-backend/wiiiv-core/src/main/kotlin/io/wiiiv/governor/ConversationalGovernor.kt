@@ -153,10 +153,19 @@ class ConversationalGovernor(
         }
 
         // specUpdates 적용 (자동 작업 보존 포함)
+        // EXECUTE 액션이면 taskType 변경 금지 — EXECUTE는 "현재 작업 진행"이므로 작업 전환 불가
         governorAction.specUpdates?.let { updates ->
+            val filteredUpdates = if (
+                session.draftSpec.taskType != null &&
+                (governorAction.action == ActionType.EXECUTE || session.draftSpec.workOrderContent != null)
+            ) {
+                updates.filterKeys { it != "taskType" }
+            } else {
+                updates
+            }
             // taskSwitch가 이미 처리한 경우가 아니면, taskType 변경 감지 시 현재 작업을 자동 보존
             if (governorAction.taskSwitch == null) {
-                val newTaskType = updates["taskType"]?.jsonPrimitive?.contentOrNull?.let { str ->
+                val newTaskType = filteredUpdates["taskType"]?.jsonPrimitive?.contentOrNull?.let { str ->
                     try { TaskType.valueOf(str) } catch (_: Exception) { null }
                 }
                 val currentSpec = session.draftSpec
@@ -165,23 +174,30 @@ class ConversationalGovernor(
                     session.suspendCurrentWork()
                 }
             }
-            session.updateSpec(updates)
+            session.updateSpec(filteredUpdates)
         }
 
         // ── State Determinism Gate ──
         // LLM의 ASK/CONFIRM/EXECUTE 선택은 확률적이다.
         // Governor가 DraftSpec 상태를 기준으로 최종 상태 전환을 결정한다.
-        // (A) PROJECT_CREATE이고 DraftSpec이 충분하면 ASK → CONFIRM으로 강제 전환
-        val finalAction = if (governorAction.action == ActionType.ASK
-            && session.draftSpec.taskType == TaskType.PROJECT_CREATE
-            && session.draftSpec.isComplete()
-            && session.draftSpec.domain != null
-            && !session.draftSpec.techStack.isNullOrEmpty()
-        ) {
-            println("[GOVERNOR] State Determinism Gate: ASK suppressed → CONFIRM (DraftSpec sufficient)")
-            governorAction.copy(action = ActionType.CONFIRM)
-        } else {
-            governorAction
+        val finalAction = when {
+            // (A) PROJECT_CREATE이고 DraftSpec이 충분하면 ASK → CONFIRM으로 강제 전환
+            // LLM이 specUpdates를 불완전하게 채울 수 있으므로, 사용자 메시지가 충분히 길면 (200자+) 정보 충분으로 판단
+            governorAction.action == ActionType.ASK
+                && session.draftSpec.taskType == TaskType.PROJECT_CREATE
+                && (session.draftSpec.isComplete()
+                    || userMessage.length >= 200) -> {
+                println("[GOVERNOR] State Determinism Gate: ASK suppressed → CONFIRM (DraftSpec sufficient or message length=${userMessage.length})")
+                governorAction.copy(action = ActionType.CONFIRM)
+            }
+            // (B) WorkOrder가 이미 존재하고 CONFIRM/ASK가 반복되면 → EXECUTE로 강제 전환
+            governorAction.action in listOf(ActionType.CONFIRM, ActionType.ASK)
+                && session.draftSpec.taskType == TaskType.PROJECT_CREATE
+                && session.draftSpec.workOrderContent != null -> {
+                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → EXECUTE (WorkOrder already exists)")
+                governorAction.copy(action = ActionType.EXECUTE)
+            }
+            else -> governorAction
         }
 
         // EXECUTE/CONFIRM 시 활성 작업 확정
@@ -1489,11 +1505,26 @@ class ConversationalGovernor(
         val allFiles = mutableMapOf<String, IntegrityAnalyzer.GeneratedFile>() // path → file (후속 덮어쓰기)
         var buildCommand: String? = null
         var testCommand: String? = null
-        val maxTurns = 3
+        val maxTurns = 5
+        var useForcePrompt = false
+        var lastMissingLayers: List<String> = emptyList()
 
         for (turn in 1..maxTurns) {
             val prompt = if (turn == 1) {
                 GovernorPrompt.multiTurnFirstPrompt(workOrder)
+            } else if (useForcePrompt && lastMissingLayers.isNotEmpty()) {
+                useForcePrompt = false  // 플래그 리셋
+                val generatedPaths = allFiles.keys.sorted()
+                val gradleDeps = extractGradleDependencies(allFiles.values.toList())
+                val basePackage = inferBasePackage(allFiles.values.toList())
+                GovernorPrompt.multiTurnForcedContinuationPrompt(
+                    workOrderContent = workOrder,
+                    generatedPaths = generatedPaths,
+                    gradleDependencies = gradleDeps,
+                    basePackage = basePackage,
+                    missingLayers = lastMissingLayers,
+                    turnNumber = turn
+                )
             } else {
                 val generatedPaths = allFiles.keys.sorted()
                 val gradleDeps = extractGradleDependencies(allFiles.values.toList())
@@ -1524,7 +1555,7 @@ class ConversationalGovernor(
             }
 
             // JSON 파싱
-            val turnFiles: List<IntegrityAnalyzer.GeneratedFile>
+            var turnFiles: List<IntegrityAnalyzer.GeneratedFile>
             var turnBuildCmd: String? = null
             var turnTestCmd: String? = null
             try {
@@ -1534,6 +1565,13 @@ class ConversationalGovernor(
 
                 val filesArray = jsonElement["files"]?.jsonArray
                 if (filesArray == null || filesArray.isEmpty()) {
+                    val missingLayers = findMissingCriticalLayers(allFiles.values.toList())
+                    if (missingLayers.isNotEmpty() && !useForcePrompt && turn < maxTurns) {
+                        log.info("[MULTI-TURN] Turn {} returned empty files[] but missing layers: {} — forcing retry", turn, missingLayers)
+                        useForcePrompt = true
+                        lastMissingLayers = missingLayers
+                        continue
+                    }
                     log.info("[MULTI-TURN] Turn {} returned empty files[], ending", turn)
                     break
                 }
@@ -1551,11 +1589,25 @@ class ConversationalGovernor(
                     turnTestCmd = jsonElement["testCommand"]?.jsonPrimitive?.contentOrNull
                 }
             } catch (e: Exception) {
-                log.warn("[MULTI-TURN] Turn {} JSON parse failed: {}, proceeding with collected files", turn, e.message)
-                break
+                log.warn("[MULTI-TURN] Turn {} JSON parse failed: {}, trying fallback extraction", turn, e.message)
+                val fallbackResult = fallbackExtractFiles(response.content)
+                if (fallbackResult.isNotEmpty()) {
+                    turnFiles = fallbackResult
+                    log.info("[MULTI-TURN] Turn {} fallback extracted {} files", turn, fallbackResult.size)
+                } else {
+                    log.warn("[MULTI-TURN] Turn {} fallback also extracted 0 files, proceeding with collected", turn)
+                    break
+                }
             }
 
             if (turnFiles.isEmpty()) {
+                val missingLayers = findMissingCriticalLayers(allFiles.values.toList())
+                if (missingLayers.isNotEmpty() && !useForcePrompt && turn < maxTurns) {
+                    log.info("[MULTI-TURN] Turn {} parsed 0 files but missing layers: {} — forcing retry", turn, missingLayers)
+                    useForcePrompt = true
+                    lastMissingLayers = missingLayers
+                    continue
+                }
                 log.info("[MULTI-TURN] Turn {} parsed 0 files, ending", turn)
                 break
             }
@@ -1587,14 +1639,30 @@ class ConversationalGovernor(
             log.info("[MULTI-TURN] Turn {} complete: finishReason={}, filesReturned={}, newPaths={}, overwritten={}, skippedDegradation={}, totalAccumulated={}",
                 turn, response.finishReason, turnFiles.size, newPathCount, overwrittenCount, skippedDegradation, allFiles.size)
 
-            // 종료 조건: finishReason이 end_turn/stop이면 LLM이 스스로 완료 판단
+            // 종료 조건 3단계:
+            // 1) finishReason=length/max_tokens → 무조건 continue (토큰 부족)
+            // 2) finishReason=stop/end_turn → 레이어 완성 체크 후 판단
+            // 3) 신규 path 0 → 종료
             if (response.finishReason in listOf("end_turn", "stop")) {
-                log.info("[MULTI-TURN] LLM signaled completion (finishReason={}), ending after turn {}", response.finishReason, turn)
-                break
+                val missingLayers = findMissingCriticalLayers(allFiles.values.toList())
+                if (missingLayers.isEmpty()) {
+                    log.info("[MULTI-TURN] LLM signaled completion and all critical layers present, ending after turn {}", turn)
+                    break
+                } else {
+                    log.info("[MULTI-TURN] LLM signaled stop but missing layers: {} — continuing to turn {}", missingLayers, turn + 1)
+                    // continue to next turn
+                }
             }
 
             // 종료 조건: 신규 path가 0개면 더 생성할 것이 없음
             if (newPathCount == 0) {
+                val missingLayers = findMissingCriticalLayers(allFiles.values.toList())
+                if (missingLayers.isNotEmpty() && !useForcePrompt && turn < maxTurns) {
+                    log.info("[MULTI-TURN] No new paths in turn {} but missing layers: {} — forcing retry", turn, missingLayers)
+                    useForcePrompt = true
+                    lastMissingLayers = missingLayers
+                    continue
+                }
                 log.info("[MULTI-TURN] No new paths in turn {}, ending", turn)
                 break
             }
@@ -1689,6 +1757,50 @@ class ConversationalGovernor(
             ?: return null
 
         return packageLine.trim().removePrefix("package ").trim()
+    }
+
+    /**
+     * 생성된 파일에서 누락된 핵심 레이어를 찾는다.
+     *
+     * coverageRatio 기반: Controller/Service 수가 Entity 수의 50% 미만이면 미완성.
+     * 프로젝트 크기에 자동 적응한다:
+     * - Entity 6개 → Controller 3개 이상 필요
+     * - Entity 2개 → Controller 1개 이상 필요
+     */
+    private fun findMissingCriticalLayers(files: List<IntegrityAnalyzer.GeneratedFile>): List<String> {
+        val missing = mutableListOf<String>()
+
+        // Entity 수 파악 (Config, DTO 제외)
+        val entityCount = files.count { file ->
+            file.path.endsWith(".kt") &&
+            !file.path.contains("config/", ignoreCase = true) &&
+            !file.path.contains("dto/", ignoreCase = true) &&
+            (file.content.contains("@Entity") || file.path.contains("model/") || file.path.contains("entity/"))
+        }
+
+        val controllerCount = files.count { file ->
+            file.path.contains("Controller.kt", ignoreCase = true) ||
+            file.content.contains("@RestController") ||
+            file.content.contains("@Controller")
+        }
+
+        val serviceCount = files.count { file ->
+            (file.path.contains("Service.kt", ignoreCase = true) ||
+            file.content.contains("@Service")) &&
+            !file.path.contains("config/", ignoreCase = true)
+        }
+
+        // 최소 기준: Entity가 있으면 Controller/Service 커버리지 50% 이상
+        val minRequired = if (entityCount > 0) maxOf(1, entityCount / 2) else 1
+
+        if (controllerCount < minRequired) {
+            missing.add("Controller(${controllerCount}/${minRequired})")
+        }
+        if (serviceCount < minRequired) {
+            missing.add("Service(${serviceCount}/${minRequired})")
+        }
+
+        return missing
     }
 
     /**
@@ -2204,6 +2316,86 @@ class ConversationalGovernor(
             println("[SANITIZE] Invalid escape sequences fixed in JSON")
         }
         return sb.toString()
+    }
+
+    /**
+     * JSON 파싱 실패 시 폴백: "path" 키를 기준으로 파일 경계를 찾아 추출.
+     *
+     * LLM이 코드 내 따옴표를 제대로 이스케이프하지 않으면 (예: claims["role"])
+     * JSON 파서가 실패한다. 이 함수는 "path": "xxx.kt" 패턴으로
+     * 파일 경계를 찾고 그 사이의 content를 추출한다.
+     */
+    private fun fallbackExtractFiles(rawLlmOutput: String): List<IntegrityAnalyzer.GeneratedFile> {
+        val files = mutableListOf<IntegrityAnalyzer.GeneratedFile>()
+
+        // "path": "xxx.ext" 패턴으로 각 파일 시작점을 찾기
+        val pathPattern = Regex(""""path"\s*:\s*"([^"]+\.(?:kt|kts|yml|yaml|sql|properties|xml|json|gradle|java|md|txt))"""")
+        val matches = pathPattern.findAll(rawLlmOutput).toList()
+        if (matches.isEmpty()) return files
+
+        for ((idx, pm) in matches.withIndex()) {
+            val filePath = pm.groupValues[1]
+
+            // 이 path 다음에 나오는 "content": " 찾기
+            val searchStart = pm.range.last + 1
+            val searchEnd = if (idx + 1 < matches.size) matches[idx + 1].range.first else rawLlmOutput.length
+            val searchRegion = rawLlmOutput.substring(searchStart, minOf(searchStart + 200, searchEnd))
+
+            val contentKeyIdx = searchRegion.indexOf("\"content\"")
+            if (contentKeyIdx < 0) continue
+
+            val afterContentKey = searchRegion.substring(contentKeyIdx + "\"content\"".length)
+            val openingQuoteIdx = afterContentKey.indexOf('"')
+            if (openingQuoteIdx < 0) continue
+
+            val absoluteContentStart = searchStart + contentKeyIdx + "\"content\"".length + openingQuoteIdx + 1
+
+            // 다음 "path" 키 이전까지가 content 범위
+            val contentEndBound = if (idx + 1 < matches.size) matches[idx + 1].range.first else rawLlmOutput.length
+            val rawRegion = rawLlmOutput.substring(absoluteContentStart, contentEndBound)
+
+            // content 값의 끝 찾기: }, 또는 }] 패턴으로 역방향 검색
+            val contentStr = findContentEnd(rawRegion)
+
+            // JSON 문자열 언이스케이프 (순서 중요: \\ → placeholder → 나머지 → placeholder 복원)
+            val unescaped = contentStr
+                .replace("\\\\", "\u0000")  // \\ → placeholder (다른 이스케이프와 간섭 방지)
+                .replace("\\n", "\n")
+                .replace("\\t", "\t")
+                .replace("\\r", "\r")
+                .replace("\\\"", "\"")
+                .replace("\\/", "/")
+                .replace("\u0000", "\\")    // placeholder → \
+
+            if (filePath.isNotBlank() && unescaped.isNotBlank()) {
+                files.add(IntegrityAnalyzer.GeneratedFile(filePath, unescaped))
+            }
+        }
+
+        return files
+    }
+
+    /** content 영역에서 실제 값이 끝나는 지점 찾기 (역방향 검색) */
+    private fun findContentEnd(rawRegion: String): String {
+        val trimmed = rawRegion.trimEnd()
+
+        // 패턴 1: "}, { (다음 파일 객체 시작)
+        // 패턴 2: "}] (files 배열 끝)
+        // 패턴 3: "} (객체 끝)
+        // 역방향으로 } 를 찾고, 그 앞의 " 위치를 찾는다
+        val lastBrace = trimmed.lastIndexOf('}')
+        if (lastBrace > 0) {
+            // } 앞에서 " 찾기 (공백/줄바꿈 건너뛰기)
+            var i = lastBrace - 1
+            while (i >= 0 && (trimmed[i] == ' ' || trimmed[i] == '\n' || trimmed[i] == '\r' || trimmed[i] == '\t')) i--
+            if (i >= 0 && trimmed[i] == '"') {
+                return trimmed.substring(0, i)
+            }
+        }
+
+        // 폴백: 마지막 " 기준
+        val lastQuote = trimmed.lastIndexOf('"')
+        return if (lastQuote > 0) trimmed.substring(0, lastQuote) else trimmed
     }
 
     /**

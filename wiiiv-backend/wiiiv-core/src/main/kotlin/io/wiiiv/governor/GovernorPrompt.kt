@@ -1064,9 +1064,11 @@ plugins {
         appendLine("5. (토큰 여유가 있으면) Service 클래스")
         appendLine()
         appendLine("### 절대 규칙")
+        appendLine("- 이번 턴에서는 **기반 파일만** 생성하라. 전체 프로젝트를 한 번에 만들지 마라")
         appendLine("- 코드 중간이 잘릴 바엔 파일을 **덜 생성**해도 좋다")
         appendLine("- 단, 생성하는 파일은 반드시 **컴파일 가능한 완결 형태**로 작성하라")
-        appendLine("- 나머지 파일(Service, Controller, DTO, Test 등)은 다음 턴에서 생성한다")
+        appendLine("- **Service, Controller, DTO, DataInitializer 등은 다음 턴에서 생성한다**")
+        appendLine("- 이번 턴의 목표: build.gradle.kts + Entity + Repository + Config + Application")
         appendLine()
         appendLine("## 작업지시서")
         appendLine()
@@ -1137,6 +1139,11 @@ plugins {
         appendLine("- 단, 생성하는 파일은 반드시 **컴파일 가능한 완결 형태**로 작성하라")
         appendLine("- **모든 파일 생성이 완료되었으면 빈 files[] 배열을 반환하라**")
         appendLine()
+        appendLine("### ⚡ 프로젝트 완성 기준")
+        appendLine("프로젝트는 최소한 **Controller와 Service 레이어를 포함**해야 완성이다.")
+        appendLine("Entity/Repository만 있고 Service/Controller가 없으면 미완성이다.")
+        appendLine("이전 턴에서 생성된 파일 목록에 Controller/Service가 없다면, 이번 턴에서 **반드시** 생성하라.")
+        appendLine()
         appendLine("## 작업지시서")
         appendLine()
         appendLine(workOrderContent)
@@ -1148,6 +1155,82 @@ plugins {
         appendLine("""{"files": [{"path": "...", "content": "..."}]}""")
         appendLine("```")
         appendLine("모든 파일이 이미 생성되었으면: `{\"files\": []}`")
+    }
+
+    /**
+     * 멀티턴 프로젝트 생성 — 강제 후속 턴 프롬프트
+     *
+     * 이전 턴에서 빈 응답을 반환했지만 아직 필수 레이어가 누락된 경우 사용.
+     * 누락된 파일 유형을 명시적으로 나열하여 LLM에게 강제로 생성을 요구한다.
+     */
+    fun multiTurnForcedContinuationPrompt(
+        workOrderContent: String,
+        generatedPaths: List<String>,
+        gradleDependencies: String?,
+        basePackage: String?,
+        missingLayers: List<String>,
+        turnNumber: Int
+    ): String = buildString {
+        appendLine(PROJECT_GENERATION)
+        appendLine()
+        appendLine("## ⛔ 강제 생성 모드 — Turn $turnNumber")
+        appendLine()
+        appendLine("이전 턴에서 빈 응답을 반환했지만, 프로젝트가 아직 **미완성**이다.")
+        appendLine("다음 레이어가 **완전히 누락**되어 있다:")
+        appendLine()
+        for (layer in missingLayers) {
+            appendLine("- ❌ **$layer**")
+        }
+        appendLine()
+        appendLine("### ⚡ 반드시 이번 턴에서 생성해야 할 파일들")
+        appendLine()
+
+        // 작업지시서에서 추출할 수 있는 엔티티 이름 기반으로 필요한 파일 힌트
+        if (missingLayers.any { it.contains("Controller") }) {
+            appendLine("**Controller**: 작업지시서에 명시된 **모든 API 엔드포인트**를 구현하는 Controller를 생성하라.")
+            appendLine("  - 각 도메인(Supplier, PurchaseOrder, StockAlert, Auth, Stats 등)마다 별도 Controller 필요")
+        }
+        if (missingLayers.any { it.contains("Service") }) {
+            appendLine("**Service**: 각 Controller에 대응하는 Service 클래스를 생성하라.")
+            appendLine("  - 각 도메인(Supplier, PurchaseOrder, StockAlert, Auth, Stats 등)마다 별도 Service 필요")
+        }
+        appendLine()
+        appendLine("**빈 files[]를 반환하지 마라. 반드시 위 누락 파일을 생성하라.**")
+        appendLine()
+
+        appendLine("### 이미 생성된 파일 (${generatedPaths.size}개)")
+        appendLine("```")
+        for (path in generatedPaths) {
+            appendLine(path)
+        }
+        appendLine("```")
+        appendLine()
+
+        if (!gradleDependencies.isNullOrBlank()) {
+            appendLine("### 사용 가능한 의존성 (build.gradle.kts)")
+            appendLine("```kotlin")
+            appendLine(gradleDependencies)
+            appendLine("```")
+            appendLine()
+        }
+
+        if (!basePackage.isNullOrBlank()) {
+            appendLine("### 패키지 규칙")
+            appendLine("- 루트 패키지: `$basePackage`")
+            appendLine("- 파일 경로: `src/main/kotlin/${basePackage.replace('.', '/')}/` 하위에 생성")
+            appendLine()
+        }
+
+        appendLine("## 작업지시서")
+        appendLine()
+        appendLine(workOrderContent)
+        appendLine()
+        appendLine("## 응답 형식")
+        appendLine()
+        appendLine("반드시 아래 JSON 형식으로만 응답하라 (buildCommand/testCommand 없음):")
+        appendLine("```json")
+        appendLine("""{"files": [{"path": "...", "content": "..."}]}""")
+        appendLine("```")
     }
 
     /**

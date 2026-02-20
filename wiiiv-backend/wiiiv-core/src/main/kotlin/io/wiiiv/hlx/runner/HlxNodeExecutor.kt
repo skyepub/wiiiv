@@ -19,8 +19,9 @@ import java.util.UUID
  * 노드 실행 결과 (Observe, Transform, Act)
  */
 sealed class NodeExecutionResult {
-    data class Success(val output: JsonElement) : NodeExecutionResult()
-    data class Failure(val error: String) : NodeExecutionResult()
+    abstract val gate: JsonElement?
+    data class Success(val output: JsonElement, override val gate: JsonElement? = null) : NodeExecutionResult()
+    data class Failure(val error: String, override val gate: JsonElement? = null) : NodeExecutionResult()
 }
 
 /**
@@ -179,10 +180,12 @@ class HlxNodeExecutor(
             // 3. Governed Gate 체크 (Phase D2: GateChain + RiskLevel + Role 기반)
             val executionStep = blueprintStep.toExecutionStep()
             val governanceResult = evaluateGovernance(executionStep, context)
+            val gateTrace = governanceResult?.toJson()
             println("[HLX-ACT] node=${node.id} stepType=$stepType userId=${context.userId} role=${context.role} governance=${governanceResult}")
             if (governanceResult != null && !governanceResult.approved) {
                 return NodeExecutionResult.Failure(
-                    "Governance denied: ${governanceResult.reason} (riskLevel=${governanceResult.riskLevel}, role=${context.role})"
+                    "Governance denied: ${governanceResult.reason} (riskLevel=${governanceResult.riskLevel}, role=${context.role})",
+                    gate = gateTrace
                 )
             }
 
@@ -194,7 +197,7 @@ class HlxNodeExecutor(
             )
             val executionResult = executor!!.execute(executionStep, executionContext)
 
-            // 5. ExecutionResult → NodeExecutionResult
+            // 5. ExecutionResult → NodeExecutionResult (Phase D3: gate trace 첨부)
             when (executionResult) {
                 is ExecutionResult.Success -> {
                     // HTTP 4xx/5xx 에러 감지 — 빈 body가 다음 노드로 전달되는 것을 방지
@@ -203,7 +206,8 @@ class HlxNodeExecutor(
                         val code = statusCode.intOrNull ?: 0
                         if (code in 400..599) {
                             return NodeExecutionResult.Failure(
-                                "HTTP $code error from ACT node '${node.id}': ${executionResult.output.stdout ?: "no body"}"
+                                "HTTP $code error from ACT node '${node.id}': ${executionResult.output.stdout ?: "no body"}",
+                                gate = gateTrace
                             )
                         }
                     }
@@ -215,13 +219,13 @@ class HlxNodeExecutor(
                     } else {
                         JsonPrimitive(executionResult.output.stdout ?: "executed")
                     }
-                    NodeExecutionResult.Success(output)
+                    NodeExecutionResult.Success(output, gate = gateTrace)
                 }
                 is ExecutionResult.Failure -> {
-                    NodeExecutionResult.Failure("Executor failed: ${executionResult.error.message}")
+                    NodeExecutionResult.Failure("Executor failed: ${executionResult.error.message}", gate = gateTrace)
                 }
                 is ExecutionResult.Cancelled -> {
-                    NodeExecutionResult.Failure("Executor cancelled: ${executionResult.reason}")
+                    NodeExecutionResult.Failure("Executor cancelled: ${executionResult.reason}", gate = gateTrace)
                 }
             }
         } catch (e: Exception) {
@@ -318,9 +322,27 @@ class HlxNodeExecutor(
     private data class GovernanceResult(
         val approved: Boolean,
         val riskLevel: String?,
-        val reason: String?
+        val maxRiskLevel: String?,
+        val role: String?,
+        val scheme: String?,
+        val action: String?,
+        val reason: String?,
+        val deniedBy: String? = null,
+        val gatesPassed: Int = 0
     ) {
         override fun toString(): String = if (approved) "APPROVED(risk=$riskLevel)" else "DENIED($reason)"
+
+        fun toJson(): JsonElement = buildJsonObject {
+            put("approved", JsonPrimitive(approved))
+            riskLevel?.let { put("riskLevel", JsonPrimitive(it)) }
+            maxRiskLevel?.let { put("maxRiskLevel", JsonPrimitive(it)) }
+            role?.let { put("role", JsonPrimitive(it)) }
+            scheme?.let { put("scheme", JsonPrimitive(it)) }
+            action?.let { put("action", JsonPrimitive(it)) }
+            reason?.let { put("reason", JsonPrimitive(it)) }
+            deniedBy?.let { put("deniedBy", JsonPrimitive(it)) }
+            put("gatesPassed", JsonPrimitive(gatesPassed))
+        }
     }
 
     /**
@@ -330,6 +352,8 @@ class HlxNodeExecutor(
      * 2. Role → maxRiskLevel 매핑
      * 3. RiskLevel 정책 검사
      * 4. GateChain 검사
+     *
+     * Phase D3: 결과에 전체 평가 내역(gate trace)을 포함한다.
      */
     private fun evaluateGovernance(
         step: ExecutionStep,
@@ -344,18 +368,10 @@ class HlxNodeExecutor(
         val scheme = meta?.scheme
 
         // 2. Role → maxRiskLevel 매핑
-        val maxRisk = roleToMaxRisk(context.role)
+        val role = context.role
+        val maxRisk = roleToMaxRisk(role)
 
-        // 3. RiskLevel 정책 검사
-        if (riskLevel > maxRisk) {
-            return GovernanceResult(
-                approved = false,
-                riskLevel = riskLevel.name,
-                reason = "Risk level $riskLevel exceeds maximum $maxRisk for role ${context.role ?: "default"}"
-            )
-        }
-
-        // 4. GateChain 검사 (Capability 기반 action 결정)
+        // 3. Capability 기반 action 결정
         val action = when {
             meta?.capabilities?.contains(Capability.EXECUTE) == true -> "EXECUTE"
             meta?.capabilities?.contains(Capability.WRITE) == true -> "WRITE"
@@ -363,6 +379,22 @@ class HlxNodeExecutor(
             meta?.capabilities?.contains(Capability.DELETE) == true -> "DELETE"
             else -> "READ"
         }
+
+        // 4. RiskLevel 정책 검사
+        if (riskLevel > maxRisk) {
+            return GovernanceResult(
+                approved = false,
+                riskLevel = riskLevel.name,
+                maxRiskLevel = maxRisk.name,
+                role = role,
+                scheme = scheme,
+                action = action,
+                reason = "Risk level $riskLevel exceeds maximum $maxRisk for role ${role ?: "default"}",
+                deniedBy = "RiskLevelPolicy"
+            )
+        }
+
+        // 5. GateChain 검사
         val gateContext = GateContext(
             requestId = "hlx-${context.meta.workflowId}-${step.stepId}",
             blueprintId = context.meta.workflowId,
@@ -377,11 +409,26 @@ class HlxNodeExecutor(
             return GovernanceResult(
                 approved = false,
                 riskLevel = riskLevel.name,
-                reason = "Gate denied: ${deny.code} at ${chainResult.stoppedAt}"
+                maxRiskLevel = maxRisk.name,
+                role = role,
+                scheme = scheme,
+                action = action,
+                reason = "Gate denied: ${deny.code} at ${chainResult.stoppedAt}",
+                deniedBy = "GateChain:${chainResult.stoppedAt}",
+                gatesPassed = chainResult.passedCount
             )
         }
 
-        return GovernanceResult(approved = true, riskLevel = riskLevel.name, reason = null)
+        return GovernanceResult(
+            approved = true,
+            riskLevel = riskLevel.name,
+            maxRiskLevel = maxRisk.name,
+            role = role,
+            scheme = scheme,
+            action = action,
+            reason = null,
+            gatesPassed = chainResult.passedCount
+        )
     }
 
     private fun roleToMaxRisk(role: String?): RiskLevel = when (role?.uppercase()) {

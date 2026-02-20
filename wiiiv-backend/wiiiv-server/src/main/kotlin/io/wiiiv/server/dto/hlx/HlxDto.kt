@@ -10,7 +10,8 @@ data class HlxWorkflowCreateRequest(val workflow: String)
 
 @Serializable
 data class HlxExecuteRequest(
-    val variables: Map<String, JsonElement> = emptyMap()
+    val variables: Map<String, JsonElement> = emptyMap(),
+    val role: String? = null  // Phase D3: 실행 Role (ADMIN/OPERATOR/VIEWER)
 )
 
 // === Response ===
@@ -75,7 +76,8 @@ data class HlxNodeRecordDto(
     val durationMs: Long,
     val error: String? = null,
     val selectedBranch: String? = null,
-    val iterationCount: Int? = null
+    val iterationCount: Int? = null,
+    val gate: JsonElement? = null  // Phase D3: 거버넌스 평가 결과
 )
 
 @Serializable

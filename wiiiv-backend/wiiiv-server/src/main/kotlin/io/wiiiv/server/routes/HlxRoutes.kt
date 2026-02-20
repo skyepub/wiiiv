@@ -244,8 +244,14 @@ fun Route.hlxRoutes() {
                     )
 
                 val request = call.receive<HlxExecuteRequest>()
+                val role = request.role ?: "OPERATOR"
 
-                val result = runner.run(entry.workflow, request.variables)
+                val result = runner.run(
+                    workflow = entry.workflow,
+                    initialVariables = request.variables,
+                    userId = "dev-user",
+                    role = role
+                )
 
                 val executionId = UUID.randomUUID().toString()
                 val executedAt = Instant.now().toString()
@@ -311,7 +317,8 @@ private fun toExecutionResponse(entry: HlxExecutionEntry): HlxExecutionResponse 
                 durationMs = record.durationMs,
                 error = record.error,
                 selectedBranch = record.selectedBranch,
-                iterationCount = record.iterationCount
+                iterationCount = record.iterationCount,
+                gate = record.gate
             )
         },
         totalDurationMs = result.totalDurationMs,

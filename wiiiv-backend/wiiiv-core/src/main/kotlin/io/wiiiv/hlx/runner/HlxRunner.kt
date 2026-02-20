@@ -32,7 +32,8 @@ data class HlxNodeExecutionRecord(
     val error: String? = null,
     val retryCount: Int = 0,
     val selectedBranch: String? = null,
-    val iterationCount: Int? = null
+    val iterationCount: Int? = null,
+    val gate: JsonElement? = null  // Phase D3: ACT 노드 거버넌스 결과
 )
 
 /**
@@ -366,7 +367,8 @@ class HlxRunner(
                         input = inputValue,
                         output = result.output,
                         durationMs = durationMs,
-                        retryCount = retryCount
+                        retryCount = retryCount,
+                        gate = result.gate
                     )
                 )
                 FlowControl.Continue
@@ -380,7 +382,8 @@ class HlxRunner(
                         input = inputValue,
                         durationMs = durationMs,
                         error = result.error,
-                        retryCount = retryCount
+                        retryCount = retryCount,
+                        gate = result.gate
                     )
                 )
                 FlowControl.Failed(result.error)

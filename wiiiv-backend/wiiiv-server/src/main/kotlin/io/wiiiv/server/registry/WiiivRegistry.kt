@@ -30,6 +30,13 @@ object WiiivRegistry {
         if (key.isNotBlank()) OpenAIProvider.fromEnv(model = "gpt-4o-mini") else null
     }
 
+    // === DB Provider (환경변수 기반 — WIIIV_DB_URL 없으면 비활성화) ===
+    private val dbConnectionProvider: DbConnectionProvider? = run {
+        val url = System.getenv("WIIIV_DB_URL")
+        if (url.isNullOrBlank()) null
+        else SimpleConnectionProvider(url, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
+    }
+
     // === Executors ===
     private val fileExecutor = FileExecutor()
     private val commandExecutor = CommandExecutor()
@@ -37,9 +44,10 @@ object WiiivRegistry {
     private val noopExecutor = NoopExecutor(handleAll = false)  // NoopStep만 처리
     private val llmExecutor: LlmExecutor? = llmProvider?.let { LlmExecutor.create(it) }
     private val mqExecutor = MessageQueueExecutor(DefaultProviderRegistry(InMemoryMessageQueueProvider()))
+    private val dbExecutor: DbExecutor? = dbConnectionProvider?.let { DbExecutor.create(it) }
 
     val compositeExecutor = CompositeExecutor(
-        executors = listOfNotNull(fileExecutor, commandExecutor, apiExecutor, noopExecutor, llmExecutor, mqExecutor)
+        executors = listOfNotNull(fileExecutor, commandExecutor, apiExecutor, noopExecutor, llmExecutor, mqExecutor, dbExecutor)
     )
 
     val executorRunner = ExecutionRunner.create(compositeExecutor)

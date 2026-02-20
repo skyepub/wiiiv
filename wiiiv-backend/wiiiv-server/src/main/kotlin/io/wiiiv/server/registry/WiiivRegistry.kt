@@ -24,23 +24,24 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object WiiivRegistry {
 
+    // === LLM Provider (Executor보다 먼저 초기화 — LlmExecutor가 참조) ===
+    val llmProvider: LlmProvider? = run {
+        val key = System.getenv("OPENAI_API_KEY") ?: ""
+        if (key.isNotBlank()) OpenAIProvider.fromEnv(model = "gpt-4o-mini") else null
+    }
+
     // === Executors ===
     private val fileExecutor = FileExecutor()
     private val commandExecutor = CommandExecutor()
     private val apiExecutor = ApiExecutor()
     private val noopExecutor = NoopExecutor(handleAll = false)  // NoopStep만 처리
+    private val llmExecutor: LlmExecutor? = llmProvider?.let { LlmExecutor.create(it) }
 
     val compositeExecutor = CompositeExecutor(
-        executors = listOf(fileExecutor, commandExecutor, apiExecutor, noopExecutor)
+        executors = listOfNotNull(fileExecutor, commandExecutor, apiExecutor, noopExecutor, llmExecutor)
     )
 
     val executorRunner = ExecutionRunner.create(compositeExecutor)
-
-    // === LLM Provider ===
-    val llmProvider: LlmProvider? = run {
-        val key = System.getenv("OPENAI_API_KEY") ?: ""
-        if (key.isNotBlank()) OpenAIProvider.fromEnv(model = "gpt-4o-mini") else null
-    }
 
     // === DACS ===
     val dacs: DACS = if (llmProvider != null) {

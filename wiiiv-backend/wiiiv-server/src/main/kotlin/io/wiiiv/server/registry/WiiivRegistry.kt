@@ -36,9 +36,10 @@ object WiiivRegistry {
     private val apiExecutor = ApiExecutor()
     private val noopExecutor = NoopExecutor(handleAll = false)  // NoopStep만 처리
     private val llmExecutor: LlmExecutor? = llmProvider?.let { LlmExecutor.create(it) }
+    private val mqExecutor = MessageQueueExecutor(DefaultProviderRegistry(InMemoryMessageQueueProvider()))
 
     val compositeExecutor = CompositeExecutor(
-        executors = listOfNotNull(fileExecutor, commandExecutor, apiExecutor, noopExecutor, llmExecutor)
+        executors = listOfNotNull(fileExecutor, commandExecutor, apiExecutor, noopExecutor, llmExecutor, mqExecutor)
     )
 
     val executorRunner = ExecutionRunner.create(compositeExecutor)

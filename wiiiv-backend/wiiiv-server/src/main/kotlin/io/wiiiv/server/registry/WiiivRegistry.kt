@@ -93,6 +93,100 @@ object WiiivRegistry {
         )
     }
 
+    // === Executor Meta Registry (거버넌스 메타데이터) ===
+    val executorMetaRegistry = ExecutorMetaRegistry().apply {
+        register(ExecutorMeta(
+            scheme = "file",
+            name = "FileExecutor",
+            capabilities = setOf(Capability.READ, Capability.WRITE, Capability.DELETE),
+            idempotent = false,
+            riskLevel = RiskLevel.MEDIUM,
+            stepType = StepType.FILE_OPERATION,
+            description = "파일 읽기/쓰기/복사/이동/삭제"
+        ))
+        register(ExecutorMeta(
+            scheme = "os",
+            name = "CommandExecutor",
+            capabilities = setOf(Capability.EXECUTE),
+            idempotent = false,
+            riskLevel = RiskLevel.HIGH,
+            stepType = StepType.COMMAND,
+            description = "셸 명령 실행"
+        ))
+        register(ExecutorMeta(
+            scheme = "http",
+            name = "ApiExecutor",
+            capabilities = setOf(Capability.READ, Capability.WRITE, Capability.SEND),
+            idempotent = false,
+            riskLevel = RiskLevel.MEDIUM,
+            stepType = StepType.API_CALL,
+            description = "HTTP API 호출"
+        ))
+        register(ExecutorMeta(
+            scheme = "db",
+            name = "DbExecutor",
+            capabilities = setOf(Capability.READ, Capability.WRITE, Capability.DELETE),
+            idempotent = false,
+            riskLevel = RiskLevel.HIGH,
+            stepType = StepType.DB_OPERATION,
+            description = "데이터베이스 쿼리/변경/DDL"
+        ))
+        register(ExecutorMeta(
+            scheme = "llm",
+            name = "LlmExecutor",
+            capabilities = setOf(Capability.READ),
+            idempotent = true,
+            riskLevel = RiskLevel.LOW,
+            stepType = StepType.LLM_CALL,
+            description = "LLM 텍스트 생성/분석/요약"
+        ))
+        register(ExecutorMeta(
+            scheme = "ws",
+            name = "WebSocketExecutor",
+            capabilities = setOf(Capability.READ, Capability.SEND),
+            idempotent = false,
+            riskLevel = RiskLevel.MEDIUM,
+            stepType = StepType.WEBSOCKET,
+            description = "WebSocket 연결 및 메시지 송수신"
+        ))
+        register(ExecutorMeta(
+            scheme = "mq",
+            name = "MessageQueueExecutor",
+            capabilities = setOf(Capability.READ, Capability.SEND),
+            idempotent = false,
+            riskLevel = RiskLevel.MEDIUM,
+            stepType = StepType.MESSAGE_QUEUE,
+            description = "메시지 큐 발행/구독"
+        ))
+        register(ExecutorMeta(
+            scheme = "grpc",
+            name = "GrpcExecutor",
+            capabilities = setOf(Capability.READ, Capability.WRITE),
+            idempotent = false,
+            riskLevel = RiskLevel.MEDIUM,
+            stepType = StepType.GRPC,
+            description = "gRPC 서비스 호출"
+        ))
+        register(ExecutorMeta(
+            scheme = "multimodal",
+            name = "MultimodalExecutor",
+            capabilities = setOf(Capability.READ),
+            idempotent = true,
+            riskLevel = RiskLevel.LOW,
+            stepType = StepType.MULTIMODAL,
+            description = "이미지/문서/오디오 분석"
+        ))
+        register(ExecutorMeta(
+            scheme = "rag",
+            name = "RagExecutor",
+            capabilities = setOf(Capability.READ, Capability.WRITE, Capability.DELETE),
+            idempotent = false,
+            riskLevel = RiskLevel.LOW,
+            stepType = StepType.RAG,
+            description = "RAG 문서 수집/검색/삭제"
+        ))
+    }
+
     // === Conversational Governor (세션 API용) ===
     val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
         id = "gov-server",

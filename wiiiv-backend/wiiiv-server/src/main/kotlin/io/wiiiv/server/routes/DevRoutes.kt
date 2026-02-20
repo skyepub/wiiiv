@@ -6,6 +6,8 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.wiiiv.execution.*
+import io.wiiiv.gate.GateContext
+import io.wiiiv.gate.GateResult
 import io.wiiiv.server.dto.common.ApiError
 import io.wiiiv.server.dto.common.ApiResponse
 import io.wiiiv.server.registry.WiiivRegistry
@@ -131,7 +133,11 @@ fun Route.devRoutes() {
             call.respond(ApiResponse.success(response))
         }
 
-        // 멀티 Executor 체인 테스트 — step간 데이터 파이프라인
+        // 멀티 Executor 체인 테스트 — step간 데이터 파이프라인 + 거버넌스
+        //
+        // governance: true  → 각 step에 RiskLevel 정책 + GateChain 평가 적용
+        // governance: false → Gate 우회 (기존 동작)
+        // maxRiskLevel: "LOW" | "MEDIUM" | "HIGH" (기본 MEDIUM)
         post("/chain-test") {
             val body = call.receiveText()
             val json = try {
@@ -149,6 +155,15 @@ fun Route.devRoutes() {
                 return@post call.respond(HttpStatusCode.BadRequest,
                     ApiResponse.error<String>(ApiError("EMPTY_CHAIN", "At least one step required")))
             }
+
+            // 거버넌스 설정
+            val governance = json["governance"]?.jsonPrimitive?.booleanOrNull ?: false
+            val maxRiskLevel = if (governance) {
+                try {
+                    val level = json["maxRiskLevel"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
+                    RiskLevel.valueOf(level)
+                } catch (_: Exception) { RiskLevel.MEDIUM }
+            } else null
 
             val stepOutputs = mutableMapOf<String, Map<String, JsonElement>>()
             val results = mutableListOf<JsonObject>()
@@ -182,8 +197,26 @@ fun Route.devRoutes() {
                         ApiResponse.error<String>(ApiError("EXECUTOR_DISABLED", "Step $stepId: $executor executor is not active")))
                 }
 
+                // === 거버넌스 평가 ===
+                val governanceInfo = if (governance) {
+                    evaluateGovernance(executor, stepId, resolvedStep, maxRiskLevel!!)
+                } else null
+
+                if (governanceInfo != null && governanceInfo.denied) {
+                    println("[CHAIN] step=$stepId executor=$executor DENIED by ${governanceInfo.deniedBy}")
+                    chainSuccess = false
+                    results.add(buildJsonObject {
+                        put("stepId", JsonPrimitive(stepId))
+                        put("executor", JsonPrimitive(executor))
+                        put("success", JsonPrimitive(false))
+                        put("governance", governanceInfo.toJson())
+                    })
+                    break
+                }
+
                 // 실행
-                println("[CHAIN] step=$stepId executor=$executor")
+                println("[CHAIN] step=$stepId executor=$executor" +
+                    if (governanceInfo != null) " riskLevel=${governanceInfo.riskLevel} gate=APPROVED" else "")
                 val context = ExecutionContext(executionId = "chain-test", blueprintId = "chain-test", instructionId = stepId)
                 val result = try {
                     WiiivRegistry.compositeExecutor.execute(step, context)
@@ -194,13 +227,14 @@ fun Route.devRoutes() {
                         put("executor", JsonPrimitive(executor))
                         put("success", JsonPrimitive(false))
                         put("error", JsonPrimitive(e.message ?: "Execution error"))
+                        governanceInfo?.let { put("governance", it.toJson()) }
                     })
                     break
                 }
 
                 // 출력 저장 (다음 step의 템플릿 치환용)
-                if (result is ExecutionResult.Success && result.output != null) {
-                    stepOutputs[stepId] = result.output!!.json
+                if (result is ExecutionResult.Success) {
+                    stepOutputs[stepId] = result.output.json
                 }
 
                 // 결과 기록
@@ -208,8 +242,9 @@ fun Route.devRoutes() {
                     put("stepId", JsonPrimitive(stepId))
                     put("executor", JsonPrimitive(executor))
                     put("success", JsonPrimitive(result is ExecutionResult.Success))
+                    governanceInfo?.let { put("governance", it.toJson()) }
                     when (result) {
-                        is ExecutionResult.Success -> result.output?.let { put("output", JsonObject(it.json)) }
+                        is ExecutionResult.Success -> put("output", JsonObject(result.output.json))
                         is ExecutionResult.Failure -> put("error", JsonPrimitive(result.error.message))
                         is ExecutionResult.Cancelled -> put("cancelled", JsonPrimitive(result.reason.message))
                     }
@@ -227,9 +262,137 @@ fun Route.devRoutes() {
                 put("chainSuccess", JsonPrimitive(chainSuccess))
                 put("totalSteps", JsonPrimitive(steps.size))
                 put("completedSteps", JsonPrimitive(results.size))
+                if (governance) {
+                    put("governance", buildJsonObject {
+                        put("enabled", JsonPrimitive(true))
+                        put("maxRiskLevel", JsonPrimitive(maxRiskLevel!!.name))
+                    })
+                }
                 put("steps", JsonArray(results))
             }))
         }
+    }
+}
+
+// === Helper: 거버넌스 평가 ===
+
+private data class GovernanceDecision(
+    val riskLevel: String,
+    val capabilities: List<String>,
+    val maxAllowed: String,
+    val denied: Boolean,
+    val deniedBy: String?,
+    val reason: String?,
+    val gateDecision: String,
+    val gatesPassed: Int,
+    val stoppedAt: String?
+) {
+    fun toJson(): JsonObject = buildJsonObject {
+        put("riskLevel", JsonPrimitive(riskLevel))
+        put("capabilities", JsonArray(capabilities.map { JsonPrimitive(it) }))
+        put("maxAllowed", JsonPrimitive(maxAllowed))
+        put("decision", JsonPrimitive(if (denied) "DENIED" else "APPROVED"))
+        deniedBy?.let { put("deniedBy", JsonPrimitive(it)) }
+        reason?.let { put("reason", JsonPrimitive(it)) }
+        put("gateDecision", JsonPrimitive(gateDecision))
+        put("gatesPassed", JsonPrimitive(gatesPassed))
+        stoppedAt?.let { put("stoppedAt", JsonPrimitive(it)) }
+    }
+}
+
+private fun evaluateGovernance(
+    executor: String,
+    stepId: String,
+    step: JsonObject,
+    maxRiskLevel: RiskLevel
+): GovernanceDecision {
+    val scheme = executorToScheme(executor)
+    val meta = scheme?.let { WiiivRegistry.executorMetaRegistry.getByScheme(it) }
+
+    val riskLevel = meta?.riskLevel ?: RiskLevel.MEDIUM
+    val capabilities = meta?.capabilities?.map { it.name } ?: emptyList()
+
+    // 1. RiskLevel 정책 검사
+    if (riskLevel > maxRiskLevel) {
+        return GovernanceDecision(
+            riskLevel = riskLevel.name,
+            capabilities = capabilities,
+            maxAllowed = maxRiskLevel.name,
+            denied = true,
+            deniedBy = "RISK_POLICY",
+            reason = "Risk level $riskLevel exceeds maximum allowed $maxRiskLevel",
+            gateDecision = "SKIPPED",
+            gatesPassed = 0,
+            stoppedAt = "risk-policy"
+        )
+    }
+
+    // 2. GateChain 검사 (DACS=YES, UserApproved=true로 기본 통과시키고 Permission/Cost 검사)
+    val action = determineAction(executor, step)
+    val gateContext = GateContext(
+        requestId = "chain-$stepId",
+        blueprintId = "chain-test",
+        dacsConsensus = "YES",
+        userApproved = true,
+        executorId = "${scheme}-executor",
+        action = action,
+        estimatedCost = 0.0,
+        costLimit = 100.0
+    )
+    val gateResult = WiiivRegistry.gateChain.check(gateContext)
+
+    return if (gateResult.isDeny) {
+        val deny = gateResult.finalResult as GateResult.Deny
+        GovernanceDecision(
+            riskLevel = riskLevel.name,
+            capabilities = capabilities,
+            maxAllowed = maxRiskLevel.name,
+            denied = true,
+            deniedBy = "GATE_CHAIN",
+            reason = "Gate denied: ${deny.code}",
+            gateDecision = "DENIED",
+            gatesPassed = gateResult.passedCount,
+            stoppedAt = gateResult.stoppedAt
+        )
+    } else {
+        GovernanceDecision(
+            riskLevel = riskLevel.name,
+            capabilities = capabilities,
+            maxAllowed = maxRiskLevel.name,
+            denied = false,
+            deniedBy = null,
+            reason = null,
+            gateDecision = "APPROVED",
+            gatesPassed = gateResult.passedCount,
+            stoppedAt = null
+        )
+    }
+}
+
+private fun executorToScheme(executor: String): String? = when (executor) {
+    "DB" -> "db"
+    "LLM" -> "llm"
+    "MQ" -> "mq"
+    "FILE" -> "file"
+    "COMMAND" -> "os"
+    "API" -> "http"
+    else -> null
+}
+
+private fun determineAction(executor: String, step: JsonObject): String {
+    return when (executor) {
+        "DB" -> {
+            val mode = step["mode"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "QUERY"
+            if (mode == "QUERY") "READ" else "WRITE"
+        }
+        "LLM" -> "READ"
+        "MQ" -> {
+            val action = step["action"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "PUBLISH"
+            if (action == "CONSUME") "READ" else "SEND"
+        }
+        "FILE" -> step["action"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "READ"
+        "COMMAND" -> "EXECUTE"
+        else -> "EXECUTE"
     }
 }
 

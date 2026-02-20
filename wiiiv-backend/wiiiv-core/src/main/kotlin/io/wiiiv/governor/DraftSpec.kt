@@ -307,6 +307,27 @@ enum class ActionType {
 }
 
 /**
+ * Route Mode - EXECUTE 시 실행 경로 판단
+ *
+ * Canonical: Executor Governance Spec v1.0 §5
+ *
+ * executeTurn() 진입 시 결정되며, "이번 요청을 어떻게 실행할 것인가"를 나타낸다.
+ * 판단 기준은 Executor의 메타가 아닌 "이번 요청의 행위"이다.
+ *
+ * ## 판단 우선순위
+ *
+ * 1. 결정론적 강제 규칙 (무조건)
+ * 2. LLM routeHint (참고 — Phase B2에서 도입)
+ * 3. 기본값 = HLX (보수적)
+ */
+enum class RouteMode {
+    /** 단일 Executor 직접 실행 (READ 중심, 무부작용, 단일 스텝) */
+    DIRECT,
+    /** HLX 워크플로우 실행 (복합/쓰기/다중 Executor/분기/반복) */
+    HLX
+}
+
+/**
  * 대화 메시지
  */
 @Serializable

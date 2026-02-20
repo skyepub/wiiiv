@@ -595,7 +595,12 @@ class ConversationalGovernor(
             if (dacsResponse != null) return dacsResponse
         }
 
-        // 5. LLM 결정이 필요한 작업인지 판단
+        // 5. Route Mode 판단 (Phase B: 거버넌스 로그)
+        val routeMode = determineRouteMode(draftSpec)
+        val actualPath = if (needsLlmDecision(draftSpec)) "LLM_DECIDED" else "DIRECT"
+        println("[ROUTE] mode=$routeMode actual=$actualPath taskType=${draftSpec.taskType} intent=${draftSpec.intent?.take(50)}")
+
+        // 6. LLM 결정이 필요한 작업인지 판단 (기존 실행 경로 유지)
         return if (needsLlmDecision(draftSpec)) {
             executeLlmDecidedTurn(session, draftSpec, spec)
         } else {
@@ -609,6 +614,62 @@ class ConversationalGovernor(
     private fun needsLlmDecision(draftSpec: DraftSpec): Boolean = when (draftSpec.taskType) {
         TaskType.API_WORKFLOW -> true
         else -> false
+    }
+
+    /**
+     * Route Mode 결정 — EXECUTE 시 DIRECT vs HLX 판단
+     *
+     * Canonical: Executor Governance Spec v1.0 §5
+     *
+     * "이번 요청이 무엇을 하려는가"를 기준으로 판단한다.
+     * Executor의 메타(riskLevel)는 보조 신호이며, 요청의 행위가 1차 기준이다.
+     *
+     * ## 판단 우선순위
+     * 1. 결정론적 강제 규칙 (무조건)
+     * 2. LLM routeHint (참고 — Phase B2에서 도입)
+     * 3. 기본값 = HLX (보수적)
+     *
+     * ## DIRECT 조건 (전부 충족)
+     * - 단일 Executor로 끝남
+     * - 요청 행위가 READ
+     * - 분기/반복 불필요
+     *
+     * ## HLX 강제 조건 (하나라도 해당)
+     * - WRITE/SEND/DELETE/EXECUTE 포함
+     * - 다중 Executor 필요
+     * - 조건 분기/반복 필요
+     * - PROJECT_CREATE (항상 복합)
+     */
+    private fun determineRouteMode(draftSpec: DraftSpec): RouteMode {
+        val taskType = draftSpec.taskType
+
+        // === 결정론적 강제: HLX ===
+
+        // PROJECT_CREATE → 항상 HLX (Multi-turn + IntegrityAnalyzer, 복합 작업)
+        if (taskType == TaskType.PROJECT_CREATE) return RouteMode.HLX
+
+        // API_WORKFLOW → 항상 HLX (다중 스텝, 외부 상호작용)
+        if (taskType == TaskType.API_WORKFLOW) return RouteMode.HLX
+
+        // FILE_WRITE → HLX (WRITE = 부작용)
+        if (taskType == TaskType.FILE_WRITE) return RouteMode.HLX
+
+        // FILE_DELETE → HLX (DELETE = 부작용)
+        if (taskType == TaskType.FILE_DELETE) return RouteMode.HLX
+
+        // COMMAND → HLX (EXECUTE 능력, HIGH risk)
+        if (taskType == TaskType.COMMAND) return RouteMode.HLX
+
+        // === 결정론적 허용: DIRECT ===
+
+        // FILE_READ → DIRECT (READ only, 단일 Executor, 무부작용)
+        if (taskType == TaskType.FILE_READ) return RouteMode.DIRECT
+
+        // CONVERSATION, INFORMATION → DIRECT (실행 불필요, 응답만)
+        if (taskType == TaskType.CONVERSATION || taskType == TaskType.INFORMATION) return RouteMode.DIRECT
+
+        // === 기본값: HLX (보수적) ===
+        return RouteMode.HLX
     }
 
     /**

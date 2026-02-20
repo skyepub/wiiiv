@@ -6,6 +6,7 @@ import io.wiiiv.execution.*
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
 import io.wiiiv.gate.Gate
+import io.wiiiv.gate.GateChain
 import io.wiiiv.gate.GateContext
 import io.wiiiv.gate.GateResult
 import io.wiiiv.hlx.model.HlxContext
@@ -40,7 +41,9 @@ class HlxNodeExecutor(
     private val llmProvider: LlmProvider,
     private val model: String? = null,
     private val executor: Executor? = null,
-    private val gate: Gate? = null
+    private val gate: Gate? = null,
+    private val gateChain: GateChain? = null,
+    private val executorMetaRegistry: ExecutorMetaRegistry? = null
 ) {
 
     /**
@@ -173,22 +176,17 @@ class HlxNodeExecutor(
                 params = params
             )
 
-            // 3. Gate 체크
-            // Phase D: userId/role이 HlxContext를 통해 전달됨 (D2에서 GateChain 교체 예정)
-            println("[HLX-ACT] node=${node.id} stepType=$stepType userId=${context.userId} role=${context.role}")
-            if (gate != null) {
-                val gateContext = GateContext.forPermission(
-                    executorId = "hlx-executor",
-                    action = stepType.name
+            // 3. Governed Gate 체크 (Phase D2: GateChain + RiskLevel + Role 기반)
+            val executionStep = blueprintStep.toExecutionStep()
+            val governanceResult = evaluateGovernance(executionStep, context)
+            println("[HLX-ACT] node=${node.id} stepType=$stepType userId=${context.userId} role=${context.role} governance=${governanceResult}")
+            if (governanceResult != null && !governanceResult.approved) {
+                return NodeExecutionResult.Failure(
+                    "Governance denied: ${governanceResult.reason} (riskLevel=${governanceResult.riskLevel}, role=${context.role})"
                 )
-                val gateResult = gate.check(gateContext)
-                if (gateResult is GateResult.Deny) {
-                    return NodeExecutionResult.Failure("Gate denied: ${gateResult.code}")
-                }
             }
 
-            // 4. BlueprintStep → ExecutionStep → executor.execute()
-            val executionStep = blueprintStep.toExecutionStep()
+            // 4. executor.execute() (executionStep은 Step 3에서 이미 생성됨)
             val executionContext = ExecutionContext.create(
                 executionId = "hlx-exec-${UUID.randomUUID().toString().take(8)}",
                 blueprintId = "hlx-${node.id}",
@@ -313,6 +311,84 @@ class HlxNodeExecutor(
         }
 
         return resolved
+    }
+
+    // === Governance 평가 (Phase D2) ===
+
+    private data class GovernanceResult(
+        val approved: Boolean,
+        val riskLevel: String?,
+        val reason: String?
+    ) {
+        override fun toString(): String = if (approved) "APPROVED(risk=$riskLevel)" else "DENIED($reason)"
+    }
+
+    /**
+     * Executor 실행 전 거버넌스 평가
+     *
+     * 1. ExecutorMetaRegistry에서 StepType 기반으로 RiskLevel 조회
+     * 2. Role → maxRiskLevel 매핑
+     * 3. RiskLevel 정책 검사
+     * 4. GateChain 검사
+     */
+    private fun evaluateGovernance(
+        step: ExecutionStep,
+        context: HlxContext
+    ): GovernanceResult? {
+        // GateChain이 없으면 거버넌스 스킵 (기존 동작 호환)
+        if (gateChain == null) return null
+
+        // 1. ExecutorMeta에서 RiskLevel 조회 (StepType 기반 — 전체 enum 커버)
+        val meta = executorMetaRegistry?.getByStepType(step.type)
+        val riskLevel = meta?.riskLevel ?: RiskLevel.MEDIUM
+        val scheme = meta?.scheme
+
+        // 2. Role → maxRiskLevel 매핑
+        val maxRisk = roleToMaxRisk(context.role)
+
+        // 3. RiskLevel 정책 검사
+        if (riskLevel > maxRisk) {
+            return GovernanceResult(
+                approved = false,
+                riskLevel = riskLevel.name,
+                reason = "Risk level $riskLevel exceeds maximum $maxRisk for role ${context.role ?: "default"}"
+            )
+        }
+
+        // 4. GateChain 검사 (Capability 기반 action 결정)
+        val action = when {
+            meta?.capabilities?.contains(Capability.EXECUTE) == true -> "EXECUTE"
+            meta?.capabilities?.contains(Capability.WRITE) == true -> "WRITE"
+            meta?.capabilities?.contains(Capability.SEND) == true -> "SEND"
+            meta?.capabilities?.contains(Capability.DELETE) == true -> "DELETE"
+            else -> "READ"
+        }
+        val gateContext = GateContext(
+            requestId = "hlx-${context.meta.workflowId}-${step.stepId}",
+            blueprintId = context.meta.workflowId,
+            dacsConsensus = "YES",
+            userApproved = true,
+            executorId = "${scheme ?: "unknown"}-executor",
+            action = action
+        )
+        val chainResult = gateChain.check(gateContext)
+        if (chainResult.isDeny) {
+            val deny = chainResult.finalResult as GateResult.Deny
+            return GovernanceResult(
+                approved = false,
+                riskLevel = riskLevel.name,
+                reason = "Gate denied: ${deny.code} at ${chainResult.stoppedAt}"
+            )
+        }
+
+        return GovernanceResult(approved = true, riskLevel = riskLevel.name, reason = null)
+    }
+
+    private fun roleToMaxRisk(role: String?): RiskLevel = when (role?.uppercase()) {
+        "ADMIN" -> RiskLevel.HIGH
+        "OPERATOR" -> RiskLevel.MEDIUM
+        "VIEWER" -> RiskLevel.LOW
+        else -> RiskLevel.MEDIUM  // default = OPERATOR 수준
     }
 
     companion object {

@@ -1,6 +1,7 @@
 package io.wiiiv.hlx.runner
 
 import io.wiiiv.execution.Executor
+import io.wiiiv.execution.ExecutorMetaRegistry
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.gate.Gate
 import io.wiiiv.hlx.model.*
@@ -766,13 +767,15 @@ class HlxRunner(
             llmProvider: LlmProvider,
             executor: Executor,
             gate: Gate? = null,
+            gateChain: io.wiiiv.gate.GateChain? = null,
+            executorMetaRegistry: ExecutorMetaRegistry? = null,
             model: String? = null,
             maxRetries: Int = 3,
             retryDelayMs: Long = 1000,
             workflowResolver: WorkflowResolver? = null,
             maxSubWorkflowDepth: Int = 10
         ): HlxRunner {
-            val nodeExecutor = HlxNodeExecutor(llmProvider, model, executor, gate)
+            val nodeExecutor = HlxNodeExecutor(llmProvider, model, executor, gate, gateChain, executorMetaRegistry)
             return HlxRunner(nodeExecutor, maxRetries, retryDelayMs, workflowResolver, maxSubWorkflowDepth)
         }
     }

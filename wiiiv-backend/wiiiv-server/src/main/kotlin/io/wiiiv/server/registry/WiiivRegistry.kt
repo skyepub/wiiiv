@@ -92,18 +92,7 @@ object WiiivRegistry {
         }
     }
 
-    // === HLX Runner (Phase 4: Executor/Gate 연동, Phase 5: SubWorkflow) ===
-    val hlxRunner: HlxRunner? = llmProvider?.let { provider ->
-        HlxRunner.createWithExecutor(
-            llmProvider = provider,
-            executor = compositeExecutor,
-            gate = permissionGate,
-            model = "gpt-4o-mini",
-            workflowResolver = { id -> getHlxWorkflow(id)?.workflow }
-        )
-    }
-
-    // === Executor Meta Registry (거버넌스 메타데이터) ===
+    // === Executor Meta Registry (거버넌스 메타데이터 — HlxRunner보다 먼저 초기화) ===
     val executorMetaRegistry = ExecutorMetaRegistry().apply {
         register(ExecutorMeta(
             scheme = "file",
@@ -195,6 +184,19 @@ object WiiivRegistry {
             stepType = StepType.RAG,
             description = "RAG 문서 수집/검색/삭제"
         ))
+    }
+
+    // === HLX Runner (Phase D: Governed Execution — GateChain + ExecutorMeta 연동) ===
+    val hlxRunner: HlxRunner? = llmProvider?.let { provider ->
+        HlxRunner.createWithExecutor(
+            llmProvider = provider,
+            executor = compositeExecutor,
+            gate = permissionGate,
+            gateChain = gateChain,
+            executorMetaRegistry = executorMetaRegistry,
+            model = "gpt-4o-mini",
+            workflowResolver = { id -> getHlxWorkflow(id)?.workflow }
+        )
     }
 
     // === Conversational Governor (세션 API용) ===

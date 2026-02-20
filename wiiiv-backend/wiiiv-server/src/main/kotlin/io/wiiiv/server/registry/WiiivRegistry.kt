@@ -14,6 +14,8 @@ import io.wiiiv.rag.RagPipeline
 import io.wiiiv.rag.embedding.OpenAIEmbeddingProvider
 import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
+import io.wiiiv.audit.AuditStore
+import io.wiiiv.audit.JdbcAuditStore
 import io.wiiiv.server.session.SessionManager
 import java.util.concurrent.ConcurrentHashMap
 
@@ -199,6 +201,27 @@ object WiiivRegistry {
         )
     }
 
+    // === Audit Store (감사 DB — H2 파일 기본, MySQL 전환 가능) ===
+    val auditStore: AuditStore? = run {
+        val auditUrl = System.getenv("WIIIV_AUDIT_DB_URL")
+            ?: System.getenv("WIIIV_DB_URL")
+
+        val provider = if (!auditUrl.isNullOrBlank()) {
+            println("[AUDIT] Using external DB: ${auditUrl.take(40)}...")
+            SimpleConnectionProvider(auditUrl, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
+        } else {
+            println("[AUDIT] Using H2 file mode: ./data/wiiiv-audit")
+            SimpleConnectionProvider("jdbc:h2:file:./data/wiiiv-audit;AUTO_SERVER=TRUE")
+        }
+
+        try {
+            JdbcAuditStore(provider)
+        } catch (e: Exception) {
+            println("[AUDIT] Failed to initialize: ${e.message}")
+            null
+        }
+    }
+
     // === Conversational Governor (세션 API용) ===
     val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
         id = "gov-server",
@@ -207,7 +230,8 @@ object WiiivRegistry {
         model = if (llmProvider != null) "gpt-4o-mini" else null,
         blueprintRunner = blueprintRunner,
         ragPipeline = ragPipeline,
-        hlxRunner = hlxRunner
+        hlxRunner = hlxRunner,
+        auditStore = auditStore
     )
 
     // === Session Manager ===

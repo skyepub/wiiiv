@@ -30,6 +30,7 @@ fun Application.configureRouting() {
             hlxRoutes()
             sessionRoutes()
             devRoutes()
+            auditRoutes()
         }
     }
 }

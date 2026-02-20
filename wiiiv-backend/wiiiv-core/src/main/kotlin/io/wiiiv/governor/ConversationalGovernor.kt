@@ -11,8 +11,12 @@ import io.wiiiv.execution.impl.LlmImage
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
 import io.wiiiv.execution.impl.LlmResponse
+import io.wiiiv.audit.AuditRecordFactory
+import io.wiiiv.audit.AuditStore
+import io.wiiiv.audit.ExecutionPath
 import io.wiiiv.hlx.model.HlxNode
 import io.wiiiv.hlx.model.HlxNodeType
+import io.wiiiv.hlx.model.HlxWorkflow
 import io.wiiiv.hlx.parser.HlxParser
 import io.wiiiv.hlx.validation.HlxValidator
 import io.wiiiv.hlx.runner.HlxExecutionResult
@@ -60,7 +64,8 @@ class ConversationalGovernor(
     private val model: String? = null,
     private val blueprintRunner: BlueprintRunner? = null,
     private val ragPipeline: RagPipeline? = null,
-    private val hlxRunner: HlxRunner? = null
+    private val hlxRunner: HlxRunner? = null,
+    private val auditStore: AuditStore? = null
 ) : Governor {
 
     var progressListener: GovernorProgressListener? = null
@@ -770,6 +775,23 @@ class ConversationalGovernor(
                 emitProgress(ProgressPhase.DONE)
                 val summary = formatExecutionResult(fileResult)
                 session.integrateResult(blueprint, fileResult, summary)
+                // Audit hook: DIRECT_BLUEPRINT 파일 생성 실패
+                try {
+                    auditStore?.insert(
+                        AuditRecordFactory.fromBlueprintResult(
+                            blueprint = blueprint,
+                            result = fileResult,
+                            sessionId = session.sessionId,
+                            userId = "dev-user",
+                            role = "OPERATOR",
+                            intent = draftSpec.intent,
+                            taskType = "PROJECT_CREATE",
+                            dacsConsensus = blueprint.specSnapshot.dacsResult
+                        )
+                    )
+                } catch (e: Exception) {
+                    println("[AUDIT] Failed to record DIRECT_BLUEPRINT: ${e.message}")
+                }
                 session.resetSpec()
                 session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
                 session.context.activeTaskId = null
@@ -799,6 +821,26 @@ class ConversationalGovernor(
             // 통합 결과
             val summary = formatProjectResult(fileResult, cmdResult)
             session.integrateResult(blueprint, fileResult, summary)
+            // Audit hook: DIRECT_BLUEPRINT PROJECT_CREATE 완료
+            try {
+                auditStore?.insert(
+                    AuditRecordFactory.fromBlueprintResult(
+                        blueprint = blueprint,
+                        result = fileResult,
+                        sessionId = session.sessionId,
+                        userId = "dev-user",
+                        role = "OPERATOR",
+                        intent = draftSpec.intent,
+                        taskType = "PROJECT_CREATE",
+                        dacsConsensus = blueprint.specSnapshot.dacsResult,
+                        meta = if (cmdResult != null) mapOf(
+                            "cmdSuccess" to cmdResult.isSuccess.toString()
+                        ) else null
+                    )
+                )
+            } catch (e: Exception) {
+                println("[AUDIT] Failed to record DIRECT_BLUEPRINT: ${e.message}")
+            }
             session.resetSpec()
             session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
             session.context.activeTaskId = null
@@ -829,6 +871,23 @@ class ConversationalGovernor(
         // 결과를 session context에 적재
         val summary = formatExecutionResult(executionResult)
         session.integrateResult(blueprint, executionResult, summary)
+        // Audit hook: DIRECT_BLUEPRINT 일반 실행 기록
+        try {
+            auditStore?.insert(
+                AuditRecordFactory.fromBlueprintResult(
+                    blueprint = blueprint,
+                    result = executionResult,
+                    sessionId = session.sessionId,
+                    userId = "dev-user",
+                    role = "OPERATOR",
+                    intent = draftSpec.intent,
+                    taskType = draftSpec.taskType?.name ?: "UNKNOWN",
+                    dacsConsensus = blueprint.specSnapshot.dacsResult
+                )
+            )
+        } catch (e: Exception) {
+            println("[AUDIT] Failed to record DIRECT_BLUEPRINT: ${e.message}")
+        }
 
         // 작업 완료: Spec 초기화 + 작업 상태 전이
         session.resetSpec()
@@ -1170,6 +1229,25 @@ class ConversationalGovernor(
         }
 
         session.integrateResult(null, null, "DB-QUERY-HLX: ${hlxResult.status}")
+
+        // Audit hook: DB_QUERY_HLX 실행 기록
+        try {
+            auditStore?.insert(
+                AuditRecordFactory.fromHlxResult(
+                    hlxResult = hlxResult,
+                    workflow = workflow,
+                    executionPath = ExecutionPath.DB_QUERY_HLX,
+                    sessionId = session.sessionId,
+                    userId = "dev-user",
+                    role = role,
+                    intent = draftSpec.intent,
+                    taskType = "DB_QUERY"
+                )
+            )
+        } catch (e: Exception) {
+            println("[AUDIT] Failed to record DB_QUERY_HLX: ${e.message}")
+        }
+
         session.resetSpec()
         session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
         session.context.activeTaskId = null
@@ -1311,6 +1389,25 @@ class ConversationalGovernor(
 
         // 8. 세션에 결과 적재
         session.integrateResult(null, null, "HLX: ${hlxResult.status} - ${workflow.name}")
+
+        // Audit hook: API_WORKFLOW_HLX 실행 기록
+        try {
+            auditStore?.insert(
+                AuditRecordFactory.fromHlxResult(
+                    hlxResult = hlxResult,
+                    workflow = workflow,
+                    executionPath = ExecutionPath.API_WORKFLOW_HLX,
+                    sessionId = session.sessionId,
+                    userId = "dev-user",
+                    role = sessionRole,
+                    intent = draftSpec.intent,
+                    taskType = "API_WORKFLOW"
+                )
+            )
+        } catch (e: Exception) {
+            println("[AUDIT] Failed to record API_WORKFLOW_HLX: ${e.message}")
+        }
+
         session.resetSpec()
         session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
         session.context.activeTaskId = null
@@ -3310,9 +3407,10 @@ class ConversationalGovernor(
             model: String? = null,
             blueprintRunner: BlueprintRunner? = null,
             ragPipeline: RagPipeline? = null,
-            hlxRunner: HlxRunner? = null
+            hlxRunner: HlxRunner? = null,
+            auditStore: AuditStore? = null
         ): ConversationalGovernor {
-            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner)
+            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner, auditStore)
         }
     }
 }

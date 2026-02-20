@@ -6,6 +6,8 @@ import io.ktor.server.auth.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.wiiiv.audit.AuditRecordFactory
+import io.wiiiv.audit.ExecutionPath
 import io.wiiiv.hlx.parser.HlxParseResult
 import io.wiiiv.hlx.parser.HlxParser
 import io.wiiiv.server.dto.common.ApiError
@@ -263,6 +265,22 @@ fun Route.hlxRoutes() {
                     executedAt = executedAt
                 )
                 WiiivRegistry.storeHlxExecution(execEntry)
+
+                // Audit hook: DIRECT_HLX_API 실행 기록
+                try {
+                    WiiivRegistry.auditStore?.insert(
+                        AuditRecordFactory.fromHlxResult(
+                            hlxResult = result,
+                            workflow = entry.workflow,
+                            executionPath = ExecutionPath.DIRECT_HLX_API,
+                            userId = "dev-user",
+                            role = role,
+                            taskType = "DIRECT_HLX"
+                        )
+                    )
+                } catch (e: Exception) {
+                    println("[AUDIT] Failed to record DIRECT_HLX_API: ${e.message}")
+                }
 
                 call.respond(
                     ApiResponse.success(toExecutionResponse(execEntry))

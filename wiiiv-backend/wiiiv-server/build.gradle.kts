@@ -25,6 +25,7 @@ dependencies {
 
     // JDBC Drivers (runtime — DbExecutor용)
     implementation("com.mysql:mysql-connector-j:8.3.0")
+    implementation("com.h2database:h2:2.2.224")
 
     // Testing
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")

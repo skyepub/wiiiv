@@ -29,6 +29,7 @@ fun Application.configureRouting() {
             ragRoutes()
             hlxRoutes()
             sessionRoutes()
+            devRoutes()
         }
     }
 }

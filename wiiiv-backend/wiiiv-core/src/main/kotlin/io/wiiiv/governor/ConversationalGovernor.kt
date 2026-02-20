@@ -595,10 +595,10 @@ class ConversationalGovernor(
             if (dacsResponse != null) return dacsResponse
         }
 
-        // 5. Route Mode 판단 (Phase B: 거버넌스 로그)
+        // 5. Route Mode 판단 (Phase B2: 거버넌스 판단 vs 실행 엔진 관찰)
         val routeMode = determineRouteMode(draftSpec)
-        val actualPath = if (needsLlmDecision(draftSpec)) "LLM_DECIDED" else "DIRECT"
-        println("[ROUTE] mode=$routeMode actual=$actualPath taskType=${draftSpec.taskType} intent=${draftSpec.intent?.take(50)}")
+        val enginePath = if (needsLlmDecision(draftSpec)) "HLX_ENGINE" else "BLUEPRINT_ENGINE"
+        println("[ROUTE] mode=$routeMode engine=$enginePath taskType=${draftSpec.taskType} intent=${draftSpec.intent?.take(50)}")
 
         // 6. LLM 결정이 필요한 작업인지 판단 (기존 실행 경로 유지)
         return if (needsLlmDecision(draftSpec)) {

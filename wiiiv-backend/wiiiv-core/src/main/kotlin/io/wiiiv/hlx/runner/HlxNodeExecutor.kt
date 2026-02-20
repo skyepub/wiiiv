@@ -174,6 +174,8 @@ class HlxNodeExecutor(
             )
 
             // 3. Gate 체크
+            // Phase D: userId/role이 HlxContext를 통해 전달됨 (D2에서 GateChain 교체 예정)
+            println("[HLX-ACT] node=${node.id} stepType=$stepType userId=${context.userId} role=${context.role}")
             if (gate != null) {
                 val gateContext = GateContext.forPermission(
                     executorId = "hlx-executor",

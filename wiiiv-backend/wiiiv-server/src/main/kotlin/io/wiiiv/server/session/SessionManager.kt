@@ -81,5 +81,6 @@ class SessionManager(private val governor: ConversationalGovernor) {
 data class SessionInfo(
     val sessionId: String,
     val userId: String,
-    val createdAt: String
+    val createdAt: String,
+    val role: String = "OPERATOR"  // Phase D: 기본 OPERATOR (ADMIN/OPERATOR/VIEWER)
 )

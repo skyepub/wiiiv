@@ -79,10 +79,14 @@ data class HlxIteration(
  * @property variables 워크플로우 변수 (노드 간 데이터 전달)
  * @property meta 실행 메타데이터
  * @property iteration 반복 실행 상태 (Repeat 노드 내부)
+ * @property userId 실행 사용자 ID (Phase D: 거버넌스)
+ * @property role 사용자 역할 (Phase D: Role 기반 정책)
  */
 @Serializable
 data class HlxContext(
     val variables: MutableMap<String, JsonElement> = mutableMapOf(),
     val meta: HlxMeta = HlxMeta(),
-    val iteration: HlxIteration? = null
+    val iteration: HlxIteration? = null,
+    val userId: String? = null,
+    val role: String? = null
 )

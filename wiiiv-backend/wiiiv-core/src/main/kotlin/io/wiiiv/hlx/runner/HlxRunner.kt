@@ -123,8 +123,10 @@ class HlxRunner(
      */
     suspend fun run(
         workflow: HlxWorkflow,
-        initialVariables: Map<String, JsonElement> = emptyMap()
-    ): HlxExecutionResult = run(workflow, initialVariables, depth = 0, visited = emptySet())
+        initialVariables: Map<String, JsonElement> = emptyMap(),
+        userId: String? = null,
+        role: String? = null
+    ): HlxExecutionResult = run(workflow, initialVariables, userId, role, depth = 0, visited = emptySet())
 
     /**
      * 워크플로우 실행 (내부 — depth/visited 추적)
@@ -132,6 +134,8 @@ class HlxRunner(
     private suspend fun run(
         workflow: HlxWorkflow,
         initialVariables: Map<String, JsonElement>,
+        userId: String?,
+        role: String?,
         depth: Int,
         visited: Set<String>
     ): HlxExecutionResult {
@@ -144,7 +148,9 @@ class HlxRunner(
             meta = HlxMeta(
                 workflowId = workflow.id,
                 status = HlxStatus.RUNNING
-            )
+            ),
+            userId = userId,
+            role = role
         )
 
         // 2. 노드 인덱스 맵 구성
@@ -632,8 +638,8 @@ class HlxRunner(
             context.variables[parentVar]?.let { childVars[childVar] = it }
         }
 
-        // 5. 재귀 호출
-        val childResult = run(childWorkflow, childVars, depth + 1, visited + node.workflowRef)
+        // 5. 재귀 호출 (userId/role을 자식 워크플로우에도 전달)
+        val childResult = run(childWorkflow, childVars, context.userId, context.role, depth + 1, visited + node.workflowRef)
 
         // 6. outputMapping: 자식 context → 부모 context
         for ((childVar, parentVar) in node.outputMapping) {

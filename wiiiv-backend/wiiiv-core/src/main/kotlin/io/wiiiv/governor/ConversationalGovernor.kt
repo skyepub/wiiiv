@@ -494,8 +494,8 @@ class ConversationalGovernor(
             )
         }
 
-        // 2. Spec 완성 확인
-        if (!draftSpec.isComplete()) {
+        // 2. Spec 완성 확인 (WorkOrder가 있으면 스킵 — 이미 충분한 정보 보유)
+        if (!draftSpec.isComplete() && draftSpec.workOrderContent == null) {
             val missing = draftSpec.getMissingSlots()
             return ConversationResponse(
                 action = ActionType.ASK,
@@ -1579,7 +1579,9 @@ class ConversationalGovernor(
                 turnFiles = filesArray.mapNotNull { elem ->
                     val obj = elem.jsonObject
                     val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val rawContent = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+                    // LLM이 JSON에서 \\n (double-escaped)을 사용한 경우 복구
+                    val content = unescapeDoubleEscapedContent(rawContent)
                     IntegrityAnalyzer.GeneratedFile(path, content)
                 }
 
@@ -1702,7 +1704,8 @@ class ConversationalGovernor(
         val rawFiles = filesArray.mapNotNull { elem ->
             val obj = elem.jsonObject
             val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+            val rawContent = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+            val content = unescapeDoubleEscapedContent(rawContent)
             IntegrityAnalyzer.GeneratedFile(path, content)
         }
         val integrityResult = IntegrityAnalyzer.analyze(rawFiles)
@@ -1790,7 +1793,12 @@ class ConversationalGovernor(
             !file.path.contains("config/", ignoreCase = true)
         }
 
-        // 최소 기준: Entity가 있으면 Controller/Service 커버리지 50% 이상
+        val repositoryCount = files.count { file ->
+            file.path.contains("Repository.kt", ignoreCase = true) ||
+            file.content.contains("JpaRepository")
+        }
+
+        // 최소 기준: Entity가 있으면 Controller/Service/Repository 커버리지 50% 이상
         val minRequired = if (entityCount > 0) maxOf(1, entityCount / 2) else 1
 
         if (controllerCount < minRequired) {
@@ -1798,6 +1806,9 @@ class ConversationalGovernor(
         }
         if (serviceCount < minRequired) {
             missing.add("Service(${serviceCount}/${minRequired})")
+        }
+        if (repositoryCount < minRequired) {
+            missing.add("Repository(${repositoryCount}/${minRequired})")
         }
 
         return missing
@@ -2286,6 +2297,37 @@ class ConversationalGovernor(
      * LLM이 코드에서 \d, \s, \w 등 regex 패턴을 그대로 쓰면 JSON 파싱 에러.
      * \X (X가 유효하지 않은 문자) → \\X 로 변환
      */
+    /**
+     * LLM이 JSON content에서 \\n (double-escaped)을 사용한 경우 복구.
+     * 조건: 실제 줄바꿈(0x0A)이 없고 리터럴 \n(0x5C 0x6E)이 있으면 double-escaped로 판정.
+     * 한 레벨만 unescape하여 \n→newline, \\→\, \"→" 등을 복구한다.
+     */
+    private fun unescapeDoubleEscapedContent(s: String): String {
+        // 실제 줄바꿈이 있으면 정상 — 그대로 반환
+        if ('\n' in s) return s
+        // 리터럴 \n이 없으면 unescape 불필요
+        if (!s.contains("\\n")) return s
+
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            if (s[i] == '\\' && i + 1 < s.length) {
+                when (s[i + 1]) {
+                    'n' -> { sb.append('\n'); i += 2 }
+                    't' -> { sb.append('\t'); i += 2 }
+                    'r' -> { sb.append('\r'); i += 2 }
+                    '"' -> { sb.append('"'); i += 2 }
+                    '\\' -> { sb.append('\\'); i += 2 }
+                    else -> { sb.append(s[i]); i++ }
+                }
+            } else {
+                sb.append(s[i])
+                i++
+            }
+        }
+        return sb.toString()
+    }
+
     private fun sanitizeInvalidEscapes(json: String): String {
         val validEscapeChars = setOf('"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u')
         val sb = StringBuilder(json.length)

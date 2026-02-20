@@ -137,7 +137,8 @@ fun Route.devRoutes() {
         //
         // governance: true  → 각 step에 RiskLevel 정책 + GateChain 평가 적용
         // governance: false → Gate 우회 (기존 동작)
-        // maxRiskLevel: "LOW" | "MEDIUM" | "HIGH" (기본 MEDIUM)
+        // role: "ADMIN" | "OPERATOR" | "VIEWER" → maxRiskLevel 자동 결정
+        // maxRiskLevel: "LOW" | "MEDIUM" | "HIGH" (role보다 명시적 지정이 우선)
         post("/chain-test") {
             val body = call.receiveText()
             val json = try {
@@ -156,13 +157,18 @@ fun Route.devRoutes() {
                     ApiResponse.error<String>(ApiError("EMPTY_CHAIN", "At least one step required")))
             }
 
-            // 거버넌스 설정
+            // 거버넌스 설정: role → maxRiskLevel 자동 매핑, 명시적 maxRiskLevel이 있으면 우선
             val governance = json["governance"]?.jsonPrimitive?.booleanOrNull ?: false
+            val role = json["role"]?.jsonPrimitive?.contentOrNull?.uppercase()
             val maxRiskLevel = if (governance) {
-                try {
-                    val level = json["maxRiskLevel"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "MEDIUM"
-                    RiskLevel.valueOf(level)
-                } catch (_: Exception) { RiskLevel.MEDIUM }
+                // 명시적 maxRiskLevel이 있으면 우선
+                val explicit = json["maxRiskLevel"]?.jsonPrimitive?.contentOrNull?.uppercase()
+                if (explicit != null) {
+                    try { RiskLevel.valueOf(explicit) } catch (_: Exception) { RiskLevel.MEDIUM }
+                } else {
+                    // role 기반 자동 결정
+                    resolveRolePolicy(role)?.maxRisk ?: RiskLevel.MEDIUM
+                }
             } else null
 
             val stepOutputs = mutableMapOf<String, Map<String, JsonElement>>()
@@ -265,6 +271,7 @@ fun Route.devRoutes() {
                 if (governance) {
                     put("governance", buildJsonObject {
                         put("enabled", JsonPrimitive(true))
+                        role?.let { put("role", JsonPrimitive(it)) }
                         put("maxRiskLevel", JsonPrimitive(maxRiskLevel!!.name))
                     })
                 }
@@ -273,6 +280,23 @@ fun Route.devRoutes() {
         }
     }
 }
+
+// === Helper: Role 기반 정책 ===
+
+private data class RolePolicy(
+    val role: String,
+    val maxRisk: RiskLevel
+    // 확장 여지: allowedExecutors, timeWindow, costLimit 등
+)
+
+private val rolePolicies = mapOf(
+    "ADMIN" to RolePolicy("ADMIN", RiskLevel.HIGH),
+    "OPERATOR" to RolePolicy("OPERATOR", RiskLevel.MEDIUM),
+    "VIEWER" to RolePolicy("VIEWER", RiskLevel.LOW)
+)
+
+private fun resolveRolePolicy(role: String?): RolePolicy? =
+    role?.let { rolePolicies[it.uppercase()] }
 
 // === Helper: 거버넌스 평가 ===
 

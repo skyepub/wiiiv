@@ -14,8 +14,9 @@ import kotlinx.serialization.json.*
 /**
  * Dev Routes - Executor 스모크 테스트 (개발 전용)
  *
- * POST /api/v2/dev/executor-test - 단일 Executor 직접 실행
  * GET  /api/v2/dev/executor-status - 활성 Executor 목록
+ * POST /api/v2/dev/executor-test  - 단일 Executor 직접 실행
+ * POST /api/v2/dev/chain-test     - 멀티 Executor 체인 실행 (step간 데이터 파이프라인)
  *
  * Gate/Blueprint/Governor를 우회하여 CompositeExecutor를 직접 호출한다.
  */
@@ -129,5 +130,192 @@ fun Route.devRoutes() {
 
             call.respond(ApiResponse.success(response))
         }
+
+        // 멀티 Executor 체인 테스트 — step간 데이터 파이프라인
+        post("/chain-test") {
+            val body = call.receiveText()
+            val json = try {
+                Json.parseToJsonElement(body).jsonObject
+            } catch (e: Exception) {
+                return@post call.respond(HttpStatusCode.BadRequest,
+                    ApiResponse.error<String>(ApiError("INVALID_JSON", e.message ?: "Invalid JSON")))
+            }
+
+            val steps = json["steps"]?.jsonArray
+                ?: return@post call.respond(HttpStatusCode.BadRequest,
+                    ApiResponse.error<String>(ApiError("MISSING_FIELD", "steps array required")))
+
+            if (steps.isEmpty()) {
+                return@post call.respond(HttpStatusCode.BadRequest,
+                    ApiResponse.error<String>(ApiError("EMPTY_CHAIN", "At least one step required")))
+            }
+
+            val stepOutputs = mutableMapOf<String, Map<String, JsonElement>>()
+            val results = mutableListOf<JsonObject>()
+            var chainSuccess = true
+
+            for ((index, stepJson) in steps.withIndex()) {
+                val stepObj = stepJson.jsonObject
+                val stepId = stepObj["id"]?.jsonPrimitive?.contentOrNull ?: "step${index + 1}"
+                val executor = stepObj["executor"]?.jsonPrimitive?.contentOrNull?.uppercase()
+                    ?: return@post call.respond(HttpStatusCode.BadRequest,
+                        ApiResponse.error<String>(ApiError("MISSING_FIELD", "executor required in step $stepId")))
+
+                // 템플릿 치환: {{stepId.path}} → 이전 step 결과값
+                val resolvedStep = resolveTemplates(stepObj, stepOutputs)
+
+                // ExecutionStep 생성
+                val step = try {
+                    buildExecutionStep(executor, stepId, resolvedStep)
+                } catch (e: Exception) {
+                    return@post call.respond(HttpStatusCode.BadRequest,
+                        ApiResponse.error<String>(ApiError("INVALID_STEP", "Step $stepId: ${e.message}")))
+                }
+                if (step == null) {
+                    return@post call.respond(HttpStatusCode.BadRequest,
+                        ApiResponse.error<String>(ApiError("UNKNOWN_EXECUTOR", "Step $stepId: unknown executor $executor")))
+                }
+
+                // canHandle 확인
+                if (!WiiivRegistry.compositeExecutor.canHandle(step)) {
+                    return@post call.respond(HttpStatusCode.ServiceUnavailable,
+                        ApiResponse.error<String>(ApiError("EXECUTOR_DISABLED", "Step $stepId: $executor executor is not active")))
+                }
+
+                // 실행
+                println("[CHAIN] step=$stepId executor=$executor")
+                val context = ExecutionContext(executionId = "chain-test", blueprintId = "chain-test", instructionId = stepId)
+                val result = try {
+                    WiiivRegistry.compositeExecutor.execute(step, context)
+                } catch (e: Exception) {
+                    chainSuccess = false
+                    results.add(buildJsonObject {
+                        put("stepId", JsonPrimitive(stepId))
+                        put("executor", JsonPrimitive(executor))
+                        put("success", JsonPrimitive(false))
+                        put("error", JsonPrimitive(e.message ?: "Execution error"))
+                    })
+                    break
+                }
+
+                // 출력 저장 (다음 step의 템플릿 치환용)
+                if (result is ExecutionResult.Success && result.output != null) {
+                    stepOutputs[stepId] = result.output!!.json
+                }
+
+                // 결과 기록
+                results.add(buildJsonObject {
+                    put("stepId", JsonPrimitive(stepId))
+                    put("executor", JsonPrimitive(executor))
+                    put("success", JsonPrimitive(result is ExecutionResult.Success))
+                    when (result) {
+                        is ExecutionResult.Success -> result.output?.let { put("output", JsonObject(it.json)) }
+                        is ExecutionResult.Failure -> put("error", JsonPrimitive(result.error.message))
+                        is ExecutionResult.Cancelled -> put("cancelled", JsonPrimitive(result.reason.message))
+                    }
+                    result.meta?.let { put("durationMs", JsonPrimitive(it.durationMs)) }
+                })
+
+                // Fail-fast: step 실패 시 체인 중단
+                if (result !is ExecutionResult.Success) {
+                    chainSuccess = false
+                    break
+                }
+            }
+
+            call.respond(ApiResponse.success(buildJsonObject {
+                put("chainSuccess", JsonPrimitive(chainSuccess))
+                put("totalSteps", JsonPrimitive(steps.size))
+                put("completedSteps", JsonPrimitive(results.size))
+                put("steps", JsonArray(results))
+            }))
+        }
     }
+}
+
+// === Helper: ExecutionStep 생성 ===
+
+private fun buildExecutionStep(executor: String, stepId: String, step: JsonObject): ExecutionStep? {
+    return when (executor) {
+        "DB" -> {
+            val sql = step["sql"]?.jsonPrimitive?.contentOrNull ?: "SELECT 1"
+            val mode = step["mode"]?.jsonPrimitive?.contentOrNull?.let { DbMode.valueOf(it.uppercase()) } ?: DbMode.QUERY
+            ExecutionStep.DbStep(stepId = stepId, sql = sql, mode = mode)
+        }
+        "LLM" -> {
+            val prompt = step["prompt"]?.jsonPrimitive?.contentOrNull ?: "Say hello."
+            val action = step["action"]?.jsonPrimitive?.contentOrNull?.let { LlmAction.valueOf(it.uppercase()) } ?: LlmAction.COMPLETE
+            ExecutionStep.LlmCallStep(stepId = stepId, action = action, prompt = prompt)
+        }
+        "MQ" -> {
+            val topic = step["topic"]?.jsonPrimitive?.contentOrNull ?: "chain-test"
+            val message = step["message"]?.jsonPrimitive?.contentOrNull ?: """{"event":"chain-test"}"""
+            val action = step["action"]?.jsonPrimitive?.contentOrNull?.let { MessageQueueAction.valueOf(it.uppercase()) } ?: MessageQueueAction.PUBLISH
+            ExecutionStep.MessageQueueStep(stepId = stepId, action = action, topic = topic, message = message)
+        }
+        "FILE" -> {
+            val path = step["path"]?.jsonPrimitive?.contentOrNull ?: "/tmp/wiiiv-chain-test.txt"
+            val action = step["action"]?.jsonPrimitive?.contentOrNull?.let { FileAction.valueOf(it.uppercase()) } ?: FileAction.READ
+            val content = step["content"]?.jsonPrimitive?.contentOrNull
+            ExecutionStep.FileStep(stepId = stepId, action = action, path = path, content = content)
+        }
+        else -> null
+    }
+}
+
+// === Helper: 템플릿 치환 ===
+
+private val templatePattern = Regex("""\{\{(\w+)\.(.+?)\}\}""")
+
+/**
+ * step 정의의 문자열 필드에서 {{stepId.jsonPath}} 패턴을 이전 step 결과값으로 치환.
+ * 예: {{step1.rows[0].total}} → "42"
+ */
+private fun resolveTemplates(stepObj: JsonObject, outputs: Map<String, Map<String, JsonElement>>): JsonObject {
+    if (outputs.isEmpty()) return stepObj
+    return JsonObject(stepObj.mapValues { (key, value) ->
+        if (key == "id" || key == "executor") value  // 메타 필드는 건드리지 않음
+        else if (value is JsonPrimitive && value.isString) {
+            JsonPrimitive(resolveTemplateString(value.content, outputs))
+        } else value
+    })
+}
+
+private fun resolveTemplateString(template: String, outputs: Map<String, Map<String, JsonElement>>): String {
+    return templatePattern.replace(template) { match ->
+        val stepId = match.groupValues[1]
+        val path = match.groupValues[2]
+        val output = outputs[stepId] ?: return@replace match.value
+        val resolved = resolveJsonPath(output, path)
+        if (resolved == null || resolved is JsonNull) match.value
+        else if (resolved is JsonPrimitive) resolved.content
+        else resolved.toString()
+    }
+}
+
+/**
+ * JSON path 해석: "rows[0].total" → json["rows"][0]["total"]
+ * 지원 패턴: dot notation + array index
+ */
+private fun resolveJsonPath(json: Map<String, JsonElement>, path: String): JsonElement? {
+    val segments = mutableListOf<Any>() // String=key, Int=array index
+    for (part in path.split(".")) {
+        val arrayMatch = Regex("""(\w+)\[(\d+)]""").matchEntire(part)
+        if (arrayMatch != null) {
+            segments.add(arrayMatch.groupValues[1])
+            segments.add(arrayMatch.groupValues[2].toInt())
+        } else {
+            segments.add(part)
+        }
+    }
+
+    var current: JsonElement = JsonObject(json)
+    for (segment in segments) {
+        current = when {
+            segment is String && current is JsonObject -> (current as JsonObject)[segment] ?: return null
+            segment is Int && current is JsonArray -> (current as JsonArray).getOrNull(segment) ?: return null
+            else -> return null
+        }
+    }
+    return current
 }

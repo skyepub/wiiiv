@@ -23,6 +23,9 @@ dependencies {
     // Logging
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
 
+    // JDBC Drivers (runtime — DbExecutor용)
+    implementation("com.mysql:mysql-connector-j:8.3.0")
+
     // Testing
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")

@@ -10,6 +10,7 @@ import io.wiiiv.execution.LlmAction
 import io.wiiiv.execution.impl.LlmImage
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.execution.impl.LlmRequest
+import io.wiiiv.execution.impl.LlmResponse
 import io.wiiiv.hlx.model.HlxNode
 import io.wiiiv.hlx.model.HlxNodeType
 import io.wiiiv.hlx.parser.HlxParser
@@ -1474,29 +1475,155 @@ class ConversationalGovernor(
      * 작업지시서가 있으면 풍부한 컨텍스트로 코드 생성, 없으면 기존 DraftSpec 기반.
      */
     private suspend fun generateProjectBlueprint(draftSpec: DraftSpec, basePath: String): List<BlueprintStep> {
-        // 작업지시서가 있으면 사용, 없으면 기존 방식
         val workOrder = draftSpec.workOrderContent
-        val prompt = if (workOrder != null) {
-            GovernorPrompt.projectGenerationFromWorkOrderPrompt(workOrder)
-        } else {
-            GovernorPrompt.projectGenerationPrompt(draftSpec)
+
+        // WorkOrder가 없으면 기존 단일턴 방식
+        if (workOrder == null) {
+            return generateProjectBlueprintSingleTurn(draftSpec, basePath)
         }
 
-        // 작업지시서 기반이면 토큰 한도 대폭 증가 (전체 프로젝트 코드 생성)
-        val maxTokens = if (workOrder != null) 16384 else 4096
+        // ── Multi-turn Generation ──
+        val log = org.slf4j.LoggerFactory.getLogger("MultiTurnGeneration")
+        log.info("[MULTI-TURN] Starting multi-turn project generation for basePath={}", basePath)
 
-        // 작업지시서 기반 대규모 생성 시 timeout 180초, 아닐 경우 기본값
+        val allFiles = mutableMapOf<String, IntegrityAnalyzer.GeneratedFile>() // path → file (후속 덮어쓰기)
+        var buildCommand: String? = null
+        var testCommand: String? = null
+        val maxTurns = 3
+
+        for (turn in 1..maxTurns) {
+            val prompt = if (turn == 1) {
+                GovernorPrompt.multiTurnFirstPrompt(workOrder)
+            } else {
+                val generatedPaths = allFiles.keys.sorted()
+                val gradleDeps = extractGradleDependencies(allFiles.values.toList())
+                val basePackage = inferBasePackage(allFiles.values.toList())
+                GovernorPrompt.multiTurnContinuationPrompt(
+                    workOrderContent = workOrder,
+                    generatedPaths = generatedPaths,
+                    gradleDependencies = gradleDeps,
+                    basePackage = basePackage,
+                    turnNumber = turn
+                )
+            }
+
+            val response: LlmResponse
+            try {
+                response = llmProvider!!.call(
+                    LlmRequest(
+                        action = LlmAction.COMPLETE,
+                        prompt = prompt,
+                        model = model ?: llmProvider.defaultModel,
+                        maxTokens = 16384,
+                        timeoutMs = 180_000L
+                    )
+                )
+            } catch (e: Exception) {
+                log.warn("[MULTI-TURN] Turn {} LLM call failed: {}, proceeding with collected files", turn, e.message)
+                break
+            }
+
+            // JSON 파싱
+            val turnFiles: List<IntegrityAnalyzer.GeneratedFile>
+            var turnBuildCmd: String? = null
+            var turnTestCmd: String? = null
+            try {
+                val rawJson = extractJson(response.content)
+                val jsonStr = sanitizeInvalidEscapes(sanitizeTripleQuotes(rawJson))
+                val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
+
+                val filesArray = jsonElement["files"]?.jsonArray
+                if (filesArray == null || filesArray.isEmpty()) {
+                    log.info("[MULTI-TURN] Turn {} returned empty files[], ending", turn)
+                    break
+                }
+
+                turnFiles = filesArray.mapNotNull { elem ->
+                    val obj = elem.jsonObject
+                    val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+                    IntegrityAnalyzer.GeneratedFile(path, content)
+                }
+
+                // Turn 1에서만 buildCommand/testCommand 추출
+                if (turn == 1) {
+                    turnBuildCmd = jsonElement["buildCommand"]?.jsonPrimitive?.contentOrNull
+                    turnTestCmd = jsonElement["testCommand"]?.jsonPrimitive?.contentOrNull
+                }
+            } catch (e: Exception) {
+                log.warn("[MULTI-TURN] Turn {} JSON parse failed: {}, proceeding with collected files", turn, e.message)
+                break
+            }
+
+            if (turnFiles.isEmpty()) {
+                log.info("[MULTI-TURN] Turn {} parsed 0 files, ending", turn)
+                break
+            }
+
+            // 파일 병합 (퇴화 방지: 후속 턴 파일이 기존보다 현저히 짧으면 교체 안 함)
+            var newPathCount = 0
+            var overwrittenCount = 0
+            var skippedDegradation = 0
+            for (file in turnFiles) {
+                val existing = allFiles[file.path]
+                if (existing != null) {
+                    // 퇴화 방지: 기존 대비 30% 미만 길이면 교체 안 함
+                    if (file.content.length < existing.content.length * 0.3) {
+                        skippedDegradation++
+                        log.debug("[MULTI-TURN] Skipped degraded overwrite: {} ({}→{} chars)",
+                            file.path, existing.content.length, file.content.length)
+                        continue
+                    }
+                    overwrittenCount++
+                } else {
+                    newPathCount++
+                }
+                allFiles[file.path] = file
+            }
+
+            if (turnBuildCmd != null && turnBuildCmd != "null" && turnBuildCmd.isNotBlank()) buildCommand = turnBuildCmd
+            if (turnTestCmd != null && turnTestCmd != "null" && turnTestCmd.isNotBlank()) testCommand = turnTestCmd
+
+            log.info("[MULTI-TURN] Turn {} complete: finishReason={}, filesReturned={}, newPaths={}, overwritten={}, skippedDegradation={}, totalAccumulated={}",
+                turn, response.finishReason, turnFiles.size, newPathCount, overwrittenCount, skippedDegradation, allFiles.size)
+
+            // 종료 조건: finishReason이 end_turn/stop이면 LLM이 스스로 완료 판단
+            if (response.finishReason in listOf("end_turn", "stop")) {
+                log.info("[MULTI-TURN] LLM signaled completion (finishReason={}), ending after turn {}", response.finishReason, turn)
+                break
+            }
+
+            // 종료 조건: 신규 path가 0개면 더 생성할 것이 없음
+            if (newPathCount == 0) {
+                log.info("[MULTI-TURN] No new paths in turn {}, ending", turn)
+                break
+            }
+        }
+
+        log.info("[MULTI-TURN] Generation complete: total {} files collected", allFiles.size)
+
+        // ★ Integrity Gate: 전체 합산 파일에 대해 1번 실행
+        val integrityResult = IntegrityAnalyzer.analyze(allFiles.values.toList())
+        val verifiedFiles = integrityResult.files
+
+        return buildBlueprintSteps(verifiedFiles, basePath, workOrder, buildCommand, testCommand)
+    }
+
+    /**
+     * 기존 단일턴 프로젝트 생성 (비WorkOrder용)
+     */
+    private suspend fun generateProjectBlueprintSingleTurn(draftSpec: DraftSpec, basePath: String): List<BlueprintStep> {
+        val prompt = GovernorPrompt.projectGenerationPrompt(draftSpec)
+
         val response = llmProvider!!.call(
             LlmRequest(
                 action = LlmAction.COMPLETE,
                 prompt = prompt,
                 model = model ?: llmProvider.defaultModel,
-                maxTokens = maxTokens,
-                timeoutMs = if (workOrder != null) 180_000L else null
+                maxTokens = 4096
             )
         )
 
-        // JSON 파싱 (LLM이 triple-quote, 잘못된 이스케이프를 쓸 경우 교정)
         val rawJson = extractJson(response.content)
         val jsonStr = sanitizeInvalidEscapes(sanitizeTripleQuotes(rawJson))
         val jsonElement = json.parseToJsonElement(jsonStr).jsonObject
@@ -1504,6 +1631,76 @@ class ConversationalGovernor(
         val filesArray = jsonElement["files"]?.jsonArray
             ?: throw IllegalStateException("LLM response missing 'files' array")
 
+        val rawFiles = filesArray.mapNotNull { elem ->
+            val obj = elem.jsonObject
+            val path = obj["path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+            IntegrityAnalyzer.GeneratedFile(path, content)
+        }
+        val integrityResult = IntegrityAnalyzer.analyze(rawFiles)
+        val verifiedFiles = integrityResult.files
+
+        val buildCommand = jsonElement["buildCommand"]?.jsonPrimitive?.contentOrNull
+        val testCommand = jsonElement["testCommand"]?.jsonPrimitive?.contentOrNull
+
+        return buildBlueprintSteps(verifiedFiles, basePath, null, buildCommand, testCommand)
+    }
+
+    /**
+     * build.gradle.kts에서 dependencies { ... } 블록 추출
+     *
+     * brace matching으로 안정적으로 추출한다.
+     */
+    private fun extractGradleDependencies(files: List<IntegrityAnalyzer.GeneratedFile>): String? {
+        val gradleFile = files.find { it.path.endsWith("build.gradle.kts") } ?: return null
+        val content = gradleFile.content
+        val startIdx = content.indexOf("dependencies {")
+        if (startIdx == -1) return null
+
+        // brace matching
+        var braceCount = 0
+        var foundFirst = false
+        for (i in startIdx until content.length) {
+            when (content[i]) {
+                '{' -> { braceCount++; foundFirst = true }
+                '}' -> { braceCount-- }
+            }
+            if (foundFirst && braceCount == 0) {
+                return content.substring(startIdx, i + 1)
+            }
+        }
+        // 닫는 brace를 못 찾으면 끝까지
+        return content.substring(startIdx)
+    }
+
+    /**
+     * 생성된 파일에서 루트 패키지를 추론한다.
+     *
+     * Application.kt 또는 첫 번째 Kotlin 파일의 package 선언에서 추출.
+     */
+    private fun inferBasePackage(files: List<IntegrityAnalyzer.GeneratedFile>): String? {
+        // Application 클래스 우선
+        val appFile = files.find { it.path.contains("Application.kt") }
+        val targetFile = appFile ?: files.find { it.path.endsWith(".kt") }
+        targetFile ?: return null
+
+        val packageLine = targetFile.content.lineSequence()
+            .firstOrNull { it.trimStart().startsWith("package ") }
+            ?: return null
+
+        return packageLine.trim().removePrefix("package ").trim()
+    }
+
+    /**
+     * 검증된 파일 목록 → BlueprintStep 리스트 생성 (공통 로직)
+     */
+    private fun buildBlueprintSteps(
+        verifiedFiles: List<IntegrityAnalyzer.GeneratedFile>,
+        basePath: String,
+        workOrder: String?,
+        buildCommand: String?,
+        testCommand: String?
+    ): List<BlueprintStep> {
         val steps = mutableListOf<BlueprintStep>()
 
         // 1. 루트 디렉토리 생성
@@ -1532,10 +1729,8 @@ class ConversationalGovernor(
 
         // 2. 필요한 디렉토리 수집 및 생성
         val dirs = mutableSetOf<String>()
-        for (fileElement in filesArray) {
-            val fileObj = fileElement.jsonObject
-            val relativePath = fileObj["path"]?.jsonPrimitive?.contentOrNull ?: continue
-            val fullPath = "$basePath/$relativePath"
+        for (file in verifiedFiles) {
+            val fullPath = "$basePath/${file.path}"
             val parentDir = java.io.File(fullPath).parent
             if (parentDir != null && parentDir != basePath) {
                 dirs.add(parentDir)
@@ -1551,21 +1746,16 @@ class ConversationalGovernor(
         }
 
         // 3. 파일 쓰기
-        for (fileElement in filesArray) {
-            val fileObj = fileElement.jsonObject
-            val relativePath = fileObj["path"]?.jsonPrimitive?.contentOrNull ?: continue
-            val content = fileObj["content"]?.jsonPrimitive?.contentOrNull ?: ""
-            val fullPath = "$basePath/$relativePath"
-
+        for (file in verifiedFiles) {
+            val fullPath = "$basePath/${file.path}"
             steps.add(BlueprintStep(
                 stepId = "step-write-${UUID.randomUUID().toString().take(4)}",
                 type = BlueprintStepType.FILE_WRITE,
-                params = mapOf("path" to fullPath, "content" to content)
+                params = mapOf("path" to fullPath, "content" to file.content)
             ))
         }
 
         // 4. 빌드 명령어 (있으면)
-        val buildCommand = jsonElement["buildCommand"]?.jsonPrimitive?.contentOrNull
         if (!buildCommand.isNullOrBlank() && buildCommand != "null") {
             steps.add(BlueprintStep(
                 stepId = "step-build-${UUID.randomUUID().toString().take(4)}",
@@ -1580,7 +1770,6 @@ class ConversationalGovernor(
         }
 
         // 5. 테스트 명령어 (있으면)
-        val testCommand = jsonElement["testCommand"]?.jsonPrimitive?.contentOrNull
         if (!testCommand.isNullOrBlank() && testCommand != "null") {
             steps.add(BlueprintStep(
                 stepId = "step-test-${UUID.randomUUID().toString().take(4)}",

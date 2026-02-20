@@ -1038,6 +1038,118 @@ plugins {
         appendLine("⚠ 버전이 명시되어 있으면 반드시 해당 버전을 사용하라 (예: Spring Boot 4.0 → id(\"org.springframework.boot\") version \"4.0.0\").")
     }
 
+    // ──────────────────────────────────────────────────────────
+    // Multi-turn Project Generation 프롬프트
+    // ──────────────────────────────────────────────────────────
+
+    /**
+     * 멀티턴 프로젝트 생성 — 첫 번째 턴 프롬프트
+     *
+     * 기존 projectGenerationFromWorkOrderPrompt()와 동일 구조이나,
+     * "여러 턴에 걸쳐 생성"한다는 지시와 기반 파일 우선 생성 지시를 추가한다.
+     */
+    fun multiTurnFirstPrompt(workOrderContent: String): String = buildString {
+        appendLine(PROJECT_GENERATION)
+        appendLine()
+        appendLine("## 멀티턴 생성 모드 ⚡ 중요!")
+        appendLine()
+        appendLine("이 프로젝트는 **여러 턴에 걸쳐** 파일을 분할 생성한다.")
+        appendLine("이번 턴에서는 **기반 파일을 우선 생성**하라.")
+        appendLine()
+        appendLine("### 이번 턴 생성 우선순위")
+        appendLine("1. build.gradle.kts + settings.gradle.kts + application.yml")
+        appendLine("2. Entity 클래스 + Repository 인터페이스")
+        appendLine("3. SecurityConfig + JwtProvider + JwtAuthFilter")
+        appendLine("4. Application.kt (메인 클래스)")
+        appendLine("5. (토큰 여유가 있으면) Service 클래스")
+        appendLine()
+        appendLine("### 절대 규칙")
+        appendLine("- 코드 중간이 잘릴 바엔 파일을 **덜 생성**해도 좋다")
+        appendLine("- 단, 생성하는 파일은 반드시 **컴파일 가능한 완결 형태**로 작성하라")
+        appendLine("- 나머지 파일(Service, Controller, DTO, Test 등)은 다음 턴에서 생성한다")
+        appendLine()
+        appendLine("## 작업지시서")
+        appendLine()
+        appendLine(workOrderContent)
+        appendLine()
+        appendLine("⚠ 위 작업지시서의 **모든** 사항을 빠짐없이 구현하라 (여러 턴에 걸쳐).")
+        appendLine("⚠ 패키지명, 프로젝트명, 포트, 엔티티 필드, API 경로, 보안 설정 등 명시된 모든 것을 정확히 따르라.")
+        appendLine("⚠ 버전이 명시되어 있으면 반드시 해당 버전을 사용하라.")
+    }
+
+    /**
+     * 멀티턴 프로젝트 생성 — 후속 턴 프롬프트
+     *
+     * 이미 생성된 파일의 path 목록과 build.gradle.kts dependencies를 전달하여
+     * 나머지 파일을 생성하게 한다. content는 전달하지 않아 입력 토큰을 절약한다.
+     *
+     * @param workOrderContent 작업지시서 전문
+     * @param generatedPaths 이미 생성된 파일 path 목록
+     * @param gradleDependencies build.gradle.kts의 dependencies 블록 (있으면)
+     * @param basePackage 루트 패키지 (경로 드리프트 방지)
+     * @param turnNumber 현재 턴 번호 (2, 3, ...)
+     */
+    fun multiTurnContinuationPrompt(
+        workOrderContent: String,
+        generatedPaths: List<String>,
+        gradleDependencies: String?,
+        basePackage: String?,
+        turnNumber: Int
+    ): String = buildString {
+        appendLine(PROJECT_GENERATION)
+        appendLine()
+        appendLine("## 멀티턴 생성 모드 — Turn $turnNumber ⚡ 중요!")
+        appendLine()
+        appendLine("이 프로젝트는 여러 턴에 걸쳐 파일을 분할 생성 중이다.")
+        appendLine("아래는 **이미 생성 완료된 파일 목록**이다. 이 파일들은 다시 생성하지 마라.")
+        appendLine()
+        appendLine("### 이미 생성된 파일 (${generatedPaths.size}개)")
+        appendLine("```")
+        for (path in generatedPaths) {
+            appendLine(path)
+        }
+        appendLine("```")
+        appendLine()
+
+        // build.gradle.kts의 dependencies 블록 전달
+        if (!gradleDependencies.isNullOrBlank()) {
+            appendLine("### 사용 가능한 의존성 (build.gradle.kts)")
+            appendLine("```kotlin")
+            appendLine(gradleDependencies)
+            appendLine("```")
+            appendLine("⚠ 위 의존성에 포함된 라이브러리만 import하라. 없는 라이브러리를 import하면 컴파일 에러.")
+            appendLine()
+        }
+
+        // 패키지 베이스 고정 (경로 드리프트 방지)
+        if (!basePackage.isNullOrBlank()) {
+            appendLine("### 패키지 규칙")
+            appendLine("- 루트 패키지: `$basePackage`")
+            appendLine("- 파일 경로: `src/main/kotlin/${basePackage.replace('.', '/')}/` 하위에 생성")
+            appendLine("- 이미 생성된 파일의 패키지 구조를 따를 것")
+            appendLine()
+        }
+
+        appendLine("### 이번 턴 지시")
+        appendLine("- 위 목록에 **없는 파일만** 생성하라")
+        appendLine("- 이미 생성된 파일의 클래스/메서드를 참조할 때, 정확한 패키지 경로로 import하라")
+        appendLine("- 코드 중간이 잘릴 바엔 파일을 **덜 생성**해도 좋다")
+        appendLine("- 단, 생성하는 파일은 반드시 **컴파일 가능한 완결 형태**로 작성하라")
+        appendLine("- **모든 파일 생성이 완료되었으면 빈 files[] 배열을 반환하라**")
+        appendLine()
+        appendLine("## 작업지시서")
+        appendLine()
+        appendLine(workOrderContent)
+        appendLine()
+        appendLine("## 응답 형식")
+        appendLine()
+        appendLine("반드시 아래 JSON 형식으로만 응답하라 (buildCommand/testCommand 없음):")
+        appendLine("```json")
+        appendLine("""{"files": [{"path": "...", "content": "..."}]}""")
+        appendLine("```")
+        appendLine("모든 파일이 이미 생성되었으면: `{\"files\": []}`")
+    }
+
     /**
      * 파일 패치 프롬프트 (Patch READ→WRITE)
      *

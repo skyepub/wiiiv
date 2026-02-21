@@ -122,6 +122,8 @@ object HlxPrompt {
             appendLine("- FILE_DELETE: Delete a file. Params: path (required)")
             appendLine("- FILE_MKDIR: Create a directory. Params: path (required)")
             appendLine("- API_CALL: Make an HTTP request. Params: url (required), method (GET/POST/PUT/DELETE/PATCH), body (JSON string), header:<HeaderName> (e.g. header:Authorization, header:Content-Type)")
+            appendLine("- PLUGIN: Execute a plugin action. Params: pluginId (required), action (required), plus action-specific params (e.g. url, body, form_data, header:<Name>)")
+            appendLine("  Available plugins: webhook (actions: ping [GET healthcheck], send [POST JSON], send_form [POST form-encoded])")
             appendLine("- NOOP: Do nothing (test/placeholder). Params: any key-value pairs")
             appendLine()
             appendLine("## IMPORTANT: Variable References")
@@ -139,6 +141,8 @@ object HlxPrompt {
             appendLine("""{ "step": { "type": "COMMAND", "params": { "command": "echo", "args": "hello world" } } }""")
             appendLine()
             appendLine("""{ "step": { "type": "API_CALL", "params": { "method": "POST", "url": "http://host:9091/api/orders", "body": "{\"supplierId\":1,\"items\":[{\"skymallProductId\":{item.id},\"quantity\":50}]}", "header:Authorization": "Bearer {skystock_token}", "header:Content-Type": "application/json" } } }""")
+            appendLine()
+            appendLine("""{ "step": { "type": "PLUGIN", "params": { "pluginId": "webhook", "action": "ping", "url": "http://example.com/health" } } }""")
         }
     }
 

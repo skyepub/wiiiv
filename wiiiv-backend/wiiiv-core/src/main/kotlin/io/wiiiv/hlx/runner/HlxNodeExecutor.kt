@@ -362,9 +362,19 @@ class HlxNodeExecutor(
         // GateChain이 없으면 거버넌스 스킵 (기존 동작 호환)
         if (gateChain == null) return null
 
-        // 1. ExecutorMeta에서 RiskLevel 조회 (StepType 기반 — 전체 enum 커버)
-        val meta = executorMetaRegistry?.getByStepType(step.type)
-        val riskLevel = meta?.riskLevel ?: RiskLevel.MEDIUM
+        // 1. ExecutorMeta에서 RiskLevel 조회
+        //    PluginStep → scheme 기반 조회 + 액션별 riskLevel
+        //    기타 → StepType 기반 조회
+        val meta = if (step is ExecutionStep.PluginStep) {
+            executorMetaRegistry?.getByScheme(step.pluginId)
+        } else {
+            executorMetaRegistry?.getByStepType(step.type)
+        }
+        val riskLevel = if (step is ExecutionStep.PluginStep && meta != null) {
+            meta.riskLevelFor(step.action)
+        } else {
+            meta?.riskLevel ?: RiskLevel.MEDIUM
+        }
         val scheme = meta?.scheme
 
         // 2. Role → maxRiskLevel 매핑

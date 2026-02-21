@@ -76,7 +76,15 @@ enum class StepType {
      *
      * 문서 수집, 임베딩, 벡터 검색
      */
-    RAG
+    RAG,
+
+    /**
+     * 플러그인 실행
+     *
+     * 외부 플러그인(Webhook, Slack, SAP 등)이 제공하는 액션 실행.
+     * pluginId + action으로 대상을 식별한다.
+     */
+    PLUGIN
 }
 
 /**
@@ -298,6 +306,27 @@ sealed class ExecutionStep {
         override val params: Map<String, String> = emptyMap()
     ) : ExecutionStep() {
         override val type: StepType = StepType.RAG
+    }
+
+    /**
+     * Plugin Step - 플러그인 실행 Step
+     *
+     * pluginId + action으로 대상 플러그인과 액션을 식별한다.
+     * 같은 플러그인 안에서도 액션별로 riskLevel이 다를 수 있다.
+     *
+     * @property pluginId 플러그인 식별자 ("webhook", "slack", "sap" 등)
+     * @property action 실행할 액션 ("send", "ping", "send_form" 등)
+     * @property timeoutMs 타임아웃 (밀리초)
+     */
+    @Serializable
+    data class PluginStep(
+        override val stepId: String,
+        val pluginId: String,
+        val action: String,
+        override val params: Map<String, String> = emptyMap(),
+        val timeoutMs: Long = 60_000
+    ) : ExecutionStep() {
+        override val type: StepType = StepType.PLUGIN
     }
 }
 

@@ -16,6 +16,8 @@ import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
 import io.wiiiv.audit.AuditStore
 import io.wiiiv.audit.JdbcAuditStore
+import io.wiiiv.plugin.PluginLoader
+import io.wiiiv.plugin.PluginRegistry
 import io.wiiiv.server.session.SessionManager
 import java.util.concurrent.ConcurrentHashMap
 
@@ -186,6 +188,19 @@ object WiiivRegistry {
             stepType = StepType.RAG,
             description = "RAG 문서 수집/검색/삭제"
         ))
+    }
+
+    // === Plugin Registry (Phase D-1: Executor 플러그인 인프라) ===
+    val pluginRegistry: PluginRegistry = run {
+        val loader = PluginLoader()
+        val loaded = loader.loadAll()
+        loaded.forEach { lp ->
+            compositeExecutor.addExecutor(lp.executor)
+            executorMetaRegistry.register(lp.meta)
+            println("[PLUGIN] Loaded: ${lp.plugin.pluginId} v${lp.plugin.version} " +
+                    "(actions=${lp.actions.map { it.name }}, jar=${lp.jarPath})")
+        }
+        PluginRegistry(loaded)
     }
 
     // === HLX Runner (Phase D: Governed Execution — GateChain + ExecutorMeta 연동) ===

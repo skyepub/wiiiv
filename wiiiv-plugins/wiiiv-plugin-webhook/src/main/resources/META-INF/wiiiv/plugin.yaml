@@ -1,0 +1,11 @@
+# Webhook Plugin — 표시용 메타 정보
+# 코드가 진실: actions, risk, capability는 WebhookPlugin.kt에서 제공
+plugin.id: webhook
+plugin.displayName: Webhook Executor
+plugin.description: HTTP Webhook 전송 (JSON/Form) 및 헬스체크
+plugin.vendor: wiiiv-team
+
+# 설정 스키마 (문서화용 — 실제 값은 System.getenv)
+# WIIIV_PLUGIN_WEBHOOK_DEFAULT_TIMEOUT_MS: 기본 타임아웃 (ms, 기본 30000)
+# WIIIV_PLUGIN_WEBHOOK_ALLOW_PRIVATE_IP: private IP 허용 여부 (기본 false)
+# WIIIV_PLUGIN_WEBHOOK_ALLOW_LOCALHOST: localhost 허용 여부 (기본 true)

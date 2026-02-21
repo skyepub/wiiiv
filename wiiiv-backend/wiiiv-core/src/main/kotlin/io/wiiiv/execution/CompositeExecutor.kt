@@ -1,5 +1,7 @@
 package io.wiiiv.execution
 
+import java.util.concurrent.CopyOnWriteArrayList
+
 /**
  * Composite Executor
  *
@@ -17,14 +19,23 @@ package io.wiiiv.execution
  * 자동 선택(우선순위 기반)은 구현자 판단이 개입될 여지가 크므로 허용하지 않는다.
  */
 class CompositeExecutor(
-    private val executors: List<Executor>
+    executors: List<Executor>
 ) : Executor {
+
+    private val _executors = CopyOnWriteArrayList(executors)
+
+    /**
+     * 런타임에 executor 추가 (플러그인 로딩 시, 서버 init 시점에만 호출)
+     */
+    fun addExecutor(executor: Executor) {
+        _executors.add(executor)
+    }
 
     override suspend fun execute(
         step: ExecutionStep,
         context: ExecutionContext
     ): ExecutionResult {
-        val matchingExecutors = executors.filter { it.canHandle(step) }
+        val matchingExecutors = _executors.filter { it.canHandle(step) }
 
         return when (matchingExecutors.size) {
             0 -> {
@@ -55,25 +66,25 @@ class CompositeExecutor(
     override suspend fun cancel(executionId: String, reason: CancelReason): Boolean {
         // Delegate cancel to all executors
         // At least one successful cancel is considered success
-        return executors.any { executor ->
+        return _executors.any { executor ->
             runCatching { executor.cancel(executionId, reason) }.getOrDefault(false)
         }
     }
 
     override fun canHandle(step: ExecutionStep): Boolean {
         // Can handle if exactly one executor can handle
-        return executors.count { it.canHandle(step) } == 1
+        return _executors.count { it.canHandle(step) } == 1
     }
 
     /**
      * 등록된 executor 수
      */
-    val executorCount: Int get() = executors.size
+    val executorCount: Int get() = _executors.size
 
     /**
      * 특정 step을 처리할 수 있는 executor 수
      */
-    fun countHandlers(step: ExecutionStep): Int = executors.count { it.canHandle(step) }
+    fun countHandlers(step: ExecutionStep): Int = _executors.count { it.canHandle(step) }
 
     companion object {
         /**

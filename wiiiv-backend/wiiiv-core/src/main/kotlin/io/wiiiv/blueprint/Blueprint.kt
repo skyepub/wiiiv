@@ -263,6 +263,13 @@ data class BlueprintStep(
                 stepId = stepId,
                 params = params
             )
+            BlueprintStepType.PLUGIN -> ExecutionStep.PluginStep(
+                stepId = stepId,
+                pluginId = params["pluginId"] ?: error("PLUGIN requires 'pluginId' param"),
+                action = params["action"] ?: error("PLUGIN requires 'action' param"),
+                params = params,
+                timeoutMs = params["timeoutMs"]?.toLongOrNull() ?: 60_000
+            )
         }
     }
 }
@@ -299,5 +306,8 @@ enum class BlueprintStepType {
     API_CALL,
 
     @SerialName("noop")
-    NOOP
+    NOOP,
+
+    @SerialName("plugin")
+    PLUGIN
 }

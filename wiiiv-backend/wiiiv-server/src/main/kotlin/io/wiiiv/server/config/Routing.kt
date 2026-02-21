@@ -31,6 +31,7 @@ fun Application.configureRouting() {
             sessionRoutes()
             devRoutes()
             auditRoutes()
+            pluginRoutes()
         }
     }
 }

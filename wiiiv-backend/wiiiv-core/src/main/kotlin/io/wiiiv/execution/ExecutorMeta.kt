@@ -78,7 +78,9 @@ data class ExecutorMeta(
     val idempotent: Boolean,
     val riskLevel: RiskLevel,
     val stepType: StepType,
-    val description: String = ""
+    val description: String = "",
+    /** 액션별 riskLevel 오버라이드 (플러그인용). 키: 액션 이름, 값: 해당 액션의 riskLevel */
+    val actionRiskLevels: Map<String, RiskLevel> = emptyMap()
 ) {
     /** READ만 가능한 Executor인지 */
     val isReadOnly: Boolean get() =
@@ -87,6 +89,11 @@ data class ExecutorMeta(
     /** 외부에 영향을 줄 수 있는 행위(WRITE, SEND, DELETE, EXECUTE)를 포함하는지 */
     val hasSideEffect: Boolean get() =
         capabilities.any { it != Capability.READ }
+
+    /** 액션별 riskLevel 조회. 없으면 플러그인 기본값 반환 */
+    fun riskLevelFor(action: String?): RiskLevel {
+        return action?.let { actionRiskLevels[it] } ?: riskLevel
+    }
 }
 
 /**

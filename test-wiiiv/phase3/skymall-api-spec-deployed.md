@@ -15,12 +15,12 @@
 POST http://home.skyepub.net:9090/api/auth/login
 Content-Type: application/json
 
-{"username":"john_doe","password":"pass1234"}
+{"username":"jane_smith","password":"pass1234"}
 ```
 
 응답:
 ```json
-{"accessToken":"eyJ...","userId":1,"username":"john_doe","role":"ADMIN"}
+{"accessToken":"eyJ...","userId":2,"username":"jane_smith","role":"ADMIN"}
 ```
 
 > 토큰 필드명: **accessToken** (token 아님)

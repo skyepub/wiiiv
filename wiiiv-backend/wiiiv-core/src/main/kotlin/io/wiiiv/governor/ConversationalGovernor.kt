@@ -113,7 +113,16 @@ class ConversationalGovernor(
      * @param userMessage 사용자 메시지
      * @return Governor 응답
      */
-    suspend fun chat(sessionId: String, userMessage: String, images: List<LlmImage> = emptyList()): ConversationResponse {
+    suspend fun chat(
+        sessionId: String,
+        userMessage: String,
+        images: List<LlmImage> = emptyList(),
+        userId: String? = null,
+        role: String? = null
+    ): ConversationResponse {
+        val effectiveUserId = userId ?: "dev-user"
+        val effectiveRole = role ?: "OPERATOR"
+
         val session = sessions[sessionId]
             ?: return ConversationResponse(
                 action = ActionType.CANCEL,
@@ -128,7 +137,7 @@ class ConversationalGovernor(
         val pending = session.context.pendingAction
         if (pending is PendingAction.ContinueExecution) {
             session.context.pendingAction = null
-            val response = executeTurn(session)
+            val response = executeTurn(session, effectiveUserId, effectiveRole)
             session.addGovernorMessage(response.message)
             return response
         }
@@ -211,7 +220,7 @@ class ConversationalGovernor(
         }
 
         // 행동 처리
-        val response = processAction(session, finalAction)
+        val response = processAction(session, finalAction, effectiveUserId, effectiveRole)
 
         // Governor 메시지 기록
         session.addGovernorMessage(response.message)
@@ -415,7 +424,9 @@ class ConversationalGovernor(
      */
     private suspend fun processAction(
         session: ConversationSession,
-        action: GovernorAction
+        action: GovernorAction,
+        userId: String = "dev-user",
+        role: String = "OPERATOR"
     ): ConversationResponse {
         return when (action.action) {
             ActionType.REPLY -> {
@@ -462,7 +473,7 @@ class ConversationalGovernor(
             }
 
             ActionType.EXECUTE -> {
-                executeTurn(session)
+                executeTurn(session, userId, role)
             }
 
             ActionType.CANCEL -> {
@@ -486,7 +497,7 @@ class ConversationalGovernor(
      *    - true → executeLlmDecidedTurn() (API_WORKFLOW 등)
      *    - false → executeDirectTurn() (FILE_READ, COMMAND 등)
      */
-    private suspend fun executeTurn(session: ConversationSession): ConversationResponse {
+    private suspend fun executeTurn(session: ConversationSession, userId: String = "dev-user", role: String = "OPERATOR"): ConversationResponse {
         var draftSpec = session.draftSpec
         val workspace = session.context.workspace
 
@@ -607,9 +618,9 @@ class ConversationalGovernor(
 
         // 6. LLM 결정이 필요한 작업인지 판단 (기존 실행 경로 유지)
         return if (needsLlmDecision(draftSpec)) {
-            executeLlmDecidedTurn(session, draftSpec, spec)
+            executeLlmDecidedTurn(session, draftSpec, spec, userId, role)
         } else {
-            executeDirectTurn(session, draftSpec, spec, workspace)
+            executeDirectTurn(session, draftSpec, spec, workspace, userId, role)
         }
     }
 
@@ -751,7 +762,9 @@ class ConversationalGovernor(
         session: ConversationSession,
         draftSpec: DraftSpec,
         spec: Spec,
-        workspace: String? = null
+        workspace: String? = null,
+        userId: String = "dev-user",
+        role: String = "OPERATOR"
     ): ConversationResponse {
         // Blueprint 생성
         val blueprint = createBlueprintFromDraftSpec(draftSpec, spec, workspace)
@@ -782,11 +795,12 @@ class ConversationalGovernor(
                             blueprint = blueprint,
                             result = fileResult,
                             sessionId = session.sessionId,
-                            userId = "dev-user",
-                            role = "OPERATOR",
+                            userId = userId,
+                            role = role,
                             intent = draftSpec.intent,
                             taskType = "PROJECT_CREATE",
-                            dacsConsensus = blueprint.specSnapshot.dacsResult
+                            dacsConsensus = blueprint.specSnapshot.dacsResult,
+                            projectId = session.projectId
                         )
                     )
                 } catch (e: Exception) {
@@ -828,14 +842,15 @@ class ConversationalGovernor(
                         blueprint = blueprint,
                         result = fileResult,
                         sessionId = session.sessionId,
-                        userId = "dev-user",
-                        role = "OPERATOR",
+                        userId = userId,
+                        role = role,
                         intent = draftSpec.intent,
                         taskType = "PROJECT_CREATE",
                         dacsConsensus = blueprint.specSnapshot.dacsResult,
                         meta = if (cmdResult != null) mapOf(
                             "cmdSuccess" to cmdResult.isSuccess.toString()
-                        ) else null
+                        ) else null,
+                        projectId = session.projectId
                     )
                 )
             } catch (e: Exception) {
@@ -878,11 +893,12 @@ class ConversationalGovernor(
                     blueprint = blueprint,
                     result = executionResult,
                     sessionId = session.sessionId,
-                    userId = "dev-user",
-                    role = "OPERATOR",
+                    userId = userId,
+                    role = role,
                     intent = draftSpec.intent,
                     taskType = draftSpec.taskType?.name ?: "UNKNOWN",
-                    dacsConsensus = blueprint.specSnapshot.dacsResult
+                    dacsConsensus = blueprint.specSnapshot.dacsResult,
+                    projectId = session.projectId
                 )
             )
         } catch (e: Exception) {
@@ -912,7 +928,9 @@ class ConversationalGovernor(
     private suspend fun executeLlmDecidedTurn(
         session: ConversationSession,
         draftSpec: DraftSpec,
-        spec: Spec
+        spec: Spec,
+        userId: String = "dev-user",
+        role: String = "OPERATOR"
     ): ConversationResponse {
         // LLM이 없으면 실행 불가
         if (llmProvider == null) {
@@ -925,12 +943,12 @@ class ConversationalGovernor(
 
         // Phase E: DB_QUERY → Governed HLX 경로 (GateChain이 통제)
         if (hlxRunner != null && draftSpec.taskType == TaskType.DB_QUERY) {
-            return executeDbQueryHlx(session, draftSpec)
+            return executeDbQueryHlx(session, draftSpec, userId, role)
         }
 
         // HLX 자동생성 경로: hlxRunner가 있으면 워크플로우를 한번에 생성하고 실행
         if (hlxRunner != null) {
-            return executeHlxApiWorkflow(session, draftSpec)
+            return executeHlxApiWorkflow(session, draftSpec, userId, role)
         }
 
         // Fallback: 기존 turn-by-turn 결정 경로
@@ -1132,7 +1150,9 @@ class ConversationalGovernor(
      */
     private suspend fun executeDbQueryHlx(
         session: ConversationSession,
-        draftSpec: DraftSpec
+        draftSpec: DraftSpec,
+        userId: String = "dev-user",
+        role: String = "OPERATOR"
     ): ConversationResponse {
         emitProgress(ProgressPhase.LLM_THINKING, "Generating DB query workflow...")
         println("[DB-QUERY-HLX] intent=${draftSpec.intent} domain=${draftSpec.domain}")
@@ -1187,14 +1207,14 @@ class ConversationalGovernor(
 
         // 3. HlxRunner로 실행 (userId/role → GateChain 거버넌스)
         emitProgress(ProgressPhase.EXECUTING, "Executing DB query with governance...")
-        val role = "OPERATOR"
-        println("[DB-QUERY-HLX] Running with role=$role")
+        val hlxRole = role
+        println("[DB-QUERY-HLX] Running with role=$hlxRole")
 
         val hlxResult = try {
             hlxRunner!!.run(
                 workflow = workflow,
-                userId = "dev-user",
-                role = role
+                userId = userId,
+                role = hlxRole
             )
         } catch (e: Exception) {
             return ConversationResponse(
@@ -1238,10 +1258,11 @@ class ConversationalGovernor(
                     workflow = workflow,
                     executionPath = ExecutionPath.DB_QUERY_HLX,
                     sessionId = session.sessionId,
-                    userId = "dev-user",
-                    role = role,
+                    userId = userId,
+                    role = hlxRole,
                     intent = draftSpec.intent,
-                    taskType = "DB_QUERY"
+                    taskType = "DB_QUERY",
+                    projectId = session.projectId
                 )
             )
         } catch (e: Exception) {
@@ -1261,7 +1282,9 @@ class ConversationalGovernor(
 
     private suspend fun executeHlxApiWorkflow(
         session: ConversationSession,
-        draftSpec: DraftSpec
+        draftSpec: DraftSpec,
+        userId: String = "dev-user",
+        role: String = "OPERATOR"
     ): ConversationResponse {
         emitProgress(ProgressPhase.LLM_THINKING, "Generating HLX workflow...")
 
@@ -1353,10 +1376,10 @@ class ConversationalGovernor(
 
         // 4. HlxRunner로 실행 (Phase D: userId/role 전달 → GateChain 거버넌스)
         emitProgress(ProgressPhase.EXECUTING, "Executing HLX workflow: ${workflow.name}...")
-        val sessionRole = "OPERATOR"
+        val sessionRole = role
 
         val hlxResult = try {
-            hlxRunner!!.run(workflow, userId = "dev-user", role = sessionRole)
+            hlxRunner!!.run(workflow, userId = userId, role = sessionRole)
         } catch (e: Exception) {
             return ConversationResponse(
                 action = ActionType.EXECUTE,
@@ -1398,10 +1421,11 @@ class ConversationalGovernor(
                     workflow = workflow,
                     executionPath = ExecutionPath.API_WORKFLOW_HLX,
                     sessionId = session.sessionId,
-                    userId = "dev-user",
+                    userId = userId,
                     role = sessionRole,
                     intent = draftSpec.intent,
-                    taskType = "API_WORKFLOW"
+                    taskType = "API_WORKFLOW",
+                    projectId = session.projectId
                 )
             )
         } catch (e: Exception) {

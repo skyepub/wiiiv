@@ -22,7 +22,7 @@ import java.time.Instant
  */
 fun Route.blueprintRoutes() {
     route("/blueprints") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // List blueprints
             get {
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1

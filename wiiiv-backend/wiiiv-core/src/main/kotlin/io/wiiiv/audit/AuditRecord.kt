@@ -32,6 +32,7 @@ data class AuditRecord(
     val riskLevel: String? = null,
     val gatesPassed: String? = null,
     val deniedBy: String? = null,
+    val projectId: Long? = null,
     val nodeRecordsJson: String? = null,
     val gateTraceJson: String? = null
 )
@@ -68,7 +69,8 @@ object AuditRecordFactory {
         userId: String? = null,
         role: String? = null,
         intent: String? = null,
-        taskType: String? = null
+        taskType: String? = null,
+        projectId: Long? = null
     ): AuditRecord {
         val gateTraces = hlxResult.nodeRecords
             .filter { it.gate != null }
@@ -106,6 +108,7 @@ object AuditRecordFactory {
             riskLevel = riskLevel,
             gatesPassed = gatesPassed,
             deniedBy = deniedBy,
+            projectId = projectId,
             nodeRecordsJson = nodeRecordsJson,
             gateTraceJson = gateTraceJson
         )
@@ -127,7 +130,8 @@ object AuditRecordFactory {
         intent: String? = null,
         taskType: String? = null,
         dacsConsensus: String? = null,
-        meta: Map<String, String>? = null
+        meta: Map<String, String>? = null,
+        projectId: Long? = null
     ): AuditRecord {
         val status = when {
             result == null -> "ERROR"
@@ -158,6 +162,7 @@ object AuditRecordFactory {
             riskLevel = dacsConsensus,
             gatesPassed = null,
             deniedBy = null,
+            projectId = projectId,
             nodeRecordsJson = metaJson,
             gateTraceJson = null
         )

@@ -20,6 +20,9 @@ interface AuditStore {
 
     /** 통계 */
     fun stats(): AuditStats
+
+    /** 프로젝트별 요청 횟수 (특정 시점 이후) — F5-F6 */
+    fun countByProject(projectId: Long, from: Instant): Long
 }
 
 /**
@@ -32,6 +35,7 @@ data class AuditFilter(
     val executionPath: String? = null,
     val sessionId: String? = null,
     val workflowId: String? = null,
+    val projectId: Long? = null,
     val from: Instant? = null,
     val to: Instant? = null,
     val limit: Int = 50,

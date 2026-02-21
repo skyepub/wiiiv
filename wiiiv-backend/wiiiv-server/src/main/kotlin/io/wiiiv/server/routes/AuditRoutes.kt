@@ -21,7 +21,7 @@ import java.time.Instant
  */
 fun Route.auditRoutes() {
     route("/audit") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // GET /audit — 목록
             get {
                 val store = WiiivRegistry.auditStore
@@ -39,6 +39,7 @@ fun Route.auditRoutes() {
                     executionPath = call.parameters["executionPath"],
                     sessionId = call.parameters["sessionId"],
                     workflowId = call.parameters["workflowId"],
+                    projectId = call.parameters["projectId"]?.toLongOrNull(),
                     from = call.parameters["from"]?.let { runCatching { Instant.parse(it) }.getOrNull() },
                     to = call.parameters["to"]?.let { runCatching { Instant.parse(it) }.getOrNull() },
                     limit = call.parameters["limit"]?.toIntOrNull() ?: 50,

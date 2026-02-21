@@ -1,0 +1,11 @@
+# PDF Plugin — 표시용 메타 정보
+# 코드가 진실: actions, risk, capability는 PdfPlugin.kt에서 제공
+plugin.id: pdf
+plugin.displayName: PDF Generator
+plugin.description: HTML 템플릿 → PDF 생성, PDF 파싱, PDF 병합
+plugin.vendor: wiiiv-team
+
+# 설정 스키마 (문서화용)
+# WIIIV_PLUGIN_PDF_TEMPLATE_DIR: 템플릿 디렉토리 (기본 ~/.wiiiv/templates/pdf)
+# WIIIV_PLUGIN_PDF_OUTPUT_DIR: 출력 디렉토리 (기본 /tmp)
+# WIIIV_PLUGIN_PDF_MAX_SIZE_MB: 최대 출력 크기 (MB, 기본 50)

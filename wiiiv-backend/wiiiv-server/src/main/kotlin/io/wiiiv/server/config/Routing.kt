@@ -32,6 +32,8 @@ fun Application.configureRouting() {
             devRoutes()
             auditRoutes()
             pluginRoutes()
+            platformRoutes()
+            projectScopedRoutes()    // F-4: 프로젝트 스코프 라우트
         }
     }
 }

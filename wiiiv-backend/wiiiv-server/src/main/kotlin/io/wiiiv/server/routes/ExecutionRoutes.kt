@@ -38,7 +38,7 @@ import java.util.*
  */
 fun Route.executionRoutes() {
     route("/executions") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // Start new execution
             post {
                 val request = call.receive<ExecutionRequest>()

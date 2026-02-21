@@ -16,6 +16,8 @@ import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
 import io.wiiiv.audit.AuditStore
 import io.wiiiv.audit.JdbcAuditStore
+import io.wiiiv.platform.store.PlatformStore
+import io.wiiiv.platform.store.JdbcPlatformStore
 import io.wiiiv.plugin.PluginLoader
 import io.wiiiv.plugin.PluginRegistry
 import io.wiiiv.server.session.SessionManager
@@ -239,6 +241,27 @@ object WiiivRegistry {
         }
     }
 
+    // === Platform Store (멀티유저 — User, Project, Membership, API Key) ===
+    val platformStore: PlatformStore? = run {
+        val platformUrl = System.getenv("WIIIV_PLATFORM_DB_URL")
+            ?: System.getenv("WIIIV_DB_URL")
+
+        val provider = if (!platformUrl.isNullOrBlank()) {
+            println("[PLATFORM] Using external DB: ${platformUrl.take(40)}...")
+            SimpleConnectionProvider(platformUrl, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
+        } else {
+            println("[PLATFORM] Using H2 file mode: ./data/wiiiv-platform")
+            SimpleConnectionProvider("jdbc:h2:file:./data/wiiiv-platform;AUTO_SERVER=TRUE")
+        }
+
+        try {
+            JdbcPlatformStore(provider)
+        } catch (e: Exception) {
+            println("[PLATFORM] Failed to initialize: ${e.message}")
+            null
+        }
+    }
+
     // === Conversational Governor (세션 API용) ===
     val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
         id = "gov-server",
@@ -302,7 +325,14 @@ object WiiivRegistry {
     // === HLX Workflow Operations ===
     fun storeHlxWorkflow(entry: HlxWorkflowEntry) { hlxWorkflowStore[entry.id] = entry }
     fun getHlxWorkflow(id: String): HlxWorkflowEntry? = hlxWorkflowStore[id]
-    fun listHlxWorkflows(): List<HlxWorkflowEntry> = hlxWorkflowStore.values.toList()
+    fun listHlxWorkflows(projectId: Long? = null): List<HlxWorkflowEntry> {
+        val all = hlxWorkflowStore.values.toList()
+        return if (projectId != null) all.filter { it.projectId == projectId } else all
+    }
+    fun getHlxWorkflowScoped(id: String, projectId: Long): HlxWorkflowEntry? {
+        val entry = hlxWorkflowStore[id] ?: return null
+        return if (entry.projectId == projectId) entry else null
+    }
     fun deleteHlxWorkflow(id: String): Boolean = hlxWorkflowStore.remove(id) != null
 
     // === HLX Execution Operations ===
@@ -396,12 +426,14 @@ data class HlxWorkflowEntry(
     val id: String,
     val workflow: HlxWorkflow,
     val rawJson: String,
-    val createdAt: String
+    val createdAt: String,
+    val projectId: Long? = null          // F-4
 )
 
 data class HlxExecutionEntry(
     val executionId: String,
     val workflowId: String,
     val result: HlxExecutionResult,
-    val executedAt: String
+    val executedAt: String,
+    val projectId: Long? = null          // F-4
 )

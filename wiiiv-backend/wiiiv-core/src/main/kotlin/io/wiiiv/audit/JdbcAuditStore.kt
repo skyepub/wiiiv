@@ -58,6 +58,18 @@ class JdbcAuditStore(
                 stmt.execute(ddl)
                 indexes.forEach { stmt.execute(it) }
             }
+
+            // F-3: project_id 컬럼 마이그레이션
+            try {
+                conn.createStatement().use { stmt ->
+                    stmt.execute("ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS project_id BIGINT")
+                }
+                conn.createStatement().use { stmt ->
+                    stmt.execute("CREATE INDEX IF NOT EXISTS idx_audit_project_id ON audit_log(project_id)")
+                }
+            } catch (_: Exception) {
+                // MySQL에서 이미 존재하면 무시
+            }
         }
         println("[AUDIT] Table audit_log initialized")
     }
@@ -69,8 +81,8 @@ class JdbcAuditStore(
                 user_id, role, workflow_id, workflow_name, intent, task_type,
                 status, duration_ms, node_count, error,
                 governance_approved, risk_level, gates_passed, denied_by,
-                node_records_json, gate_trace_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                project_id, node_records_json, gate_trace_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent()
 
         connectionProvider.getConnection("audit-insert").use { conn ->
@@ -93,8 +105,13 @@ class JdbcAuditStore(
                 ps.setString(16, record.riskLevel)
                 ps.setString(17, record.gatesPassed)
                 ps.setString(18, record.deniedBy)
-                ps.setString(19, record.nodeRecordsJson)
-                ps.setString(20, record.gateTraceJson)
+                if (record.projectId != null) {
+                    ps.setLong(19, record.projectId)
+                } else {
+                    ps.setNull(19, java.sql.Types.BIGINT)
+                }
+                ps.setString(20, record.nodeRecordsJson)
+                ps.setString(21, record.gateTraceJson)
                 ps.executeUpdate()
             }
         }
@@ -122,6 +139,7 @@ class JdbcAuditStore(
         filter.executionPath?.let { conditions.add("execution_path = ?"); params.add(it) }
         filter.sessionId?.let { conditions.add("session_id = ?"); params.add(it) }
         filter.workflowId?.let { conditions.add("workflow_id = ?"); params.add(it) }
+        filter.projectId?.let { conditions.add("project_id = ?"); params.add(it) }
         filter.from?.let { conditions.add("timestamp >= ?"); params.add(Timestamp.from(it)) }
         filter.to?.let { conditions.add("timestamp <= ?"); params.add(Timestamp.from(it)) }
 
@@ -192,6 +210,20 @@ class JdbcAuditStore(
         }
     }
 
+    override fun countByProject(projectId: Long, from: Instant): Long {
+        connectionProvider.getConnection("audit-count").use { conn ->
+            conn.prepareStatement(
+                "SELECT COUNT(*) FROM audit_log WHERE project_id = ? AND timestamp >= ?"
+            ).use { ps ->
+                ps.setLong(1, projectId)
+                ps.setTimestamp(2, Timestamp.from(from))
+                ps.executeQuery().use { rs ->
+                    return if (rs.next()) rs.getLong(1) else 0L
+                }
+            }
+        }
+    }
+
     private fun mapRow(rs: ResultSet): AuditRecord = AuditRecord(
         auditId = rs.getString("audit_id"),
         timestamp = rs.getTimestamp("timestamp").toInstant(),
@@ -211,6 +243,7 @@ class JdbcAuditStore(
         riskLevel = rs.getString("risk_level"),
         gatesPassed = rs.getString("gates_passed"),
         deniedBy = rs.getString("denied_by"),
+        projectId = rs.getLong("project_id").let { if (rs.wasNull()) null else it },
         nodeRecordsJson = rs.getString("node_records_json"),
         gateTraceJson = rs.getString("gate_trace_json")
     )

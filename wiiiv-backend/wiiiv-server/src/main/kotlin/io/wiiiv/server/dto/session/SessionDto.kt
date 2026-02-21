@@ -30,7 +30,8 @@ data class SessionResponse(
     val sessionId: String,
     val userId: String,
     val createdAt: String,
-    val status: String = "ACTIVE"
+    val status: String = "ACTIVE",
+    val projectId: Long? = null          // F-4
 )
 
 @Serializable

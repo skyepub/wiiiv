@@ -1,0 +1,10 @@
+# Spreadsheet Plugin — 표시용 메타 정보
+# 코드가 진실: actions, risk, capability는 SpreadsheetPlugin.kt에서 제공
+plugin.id: spreadsheet
+plugin.displayName: Spreadsheet (Excel/CSV)
+plugin.description: Excel/CSV 파일 읽기/쓰기 데이터 변환
+plugin.vendor: wiiiv-team
+
+# 설정 스키마 (문서화용)
+# WIIIV_PLUGIN_SPREADSHEET_BASE_DIR: 허용 경로 기본 디렉토리 (기본 /tmp)
+# WIIIV_PLUGIN_SPREADSHEET_MAX_ROWS: 최대 행 수 (기본 100000)

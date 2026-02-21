@@ -1,5 +1,7 @@
 package io.wiiiv.execution
 
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -47,8 +49,21 @@ class CompositeExecutor(
                 )
             }
             1 -> {
-                // Exactly one executor - delegate
-                matchingExecutors[0].execute(step, context)
+                // Exactly one executor - delegate with timeout protection
+                val timeout = if (step is ExecutionStep.PluginStep) step.timeoutMs else 120_000L
+                try {
+                    withTimeout(timeout) {
+                        matchingExecutors[0].execute(step, context)
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    ExecutionResult.failure(
+                        error = ExecutionError.timeout(
+                            "EXECUTOR_TIMEOUT",
+                            "Executor timed out after ${timeout}ms for step: ${step.stepId}"
+                        ),
+                        meta = ExecutionMeta.now(step.stepId)
+                    )
+                }
             }
             else -> {
                 // Ambiguous - multiple executors can handle

@@ -55,7 +55,7 @@ fun Route.systemRoutes() {
         }
 
         // Protected introspection endpoints
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // List registered executors
             get("/executors") {
                 val executors = WiiivRegistry.getExecutorInfos().map {

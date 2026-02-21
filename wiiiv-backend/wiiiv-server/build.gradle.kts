@@ -27,6 +27,9 @@ dependencies {
     implementation("com.mysql:mysql-connector-j:8.3.0")
     implementation("com.h2database:h2:2.2.224")
 
+    // BCrypt (패스워드 해싱)
+    implementation("org.mindrot:jbcrypt:0.4")
+
     // Testing
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")

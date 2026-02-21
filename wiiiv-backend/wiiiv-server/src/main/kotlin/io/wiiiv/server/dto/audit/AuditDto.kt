@@ -21,7 +21,8 @@ data class AuditSummaryDto(
     val nodeCount: Int,
     val error: String? = null,
     val governanceApproved: Boolean,
-    val riskLevel: String? = null
+    val riskLevel: String? = null,
+    val projectId: Long? = null
 )
 
 @Serializable
@@ -44,6 +45,7 @@ data class AuditDetailDto(
     val riskLevel: String? = null,
     val gatesPassed: String? = null,
     val deniedBy: String? = null,
+    val projectId: Long? = null,
     val nodeRecordsJson: String? = null,
     val gateTraceJson: String? = null
 )
@@ -78,7 +80,8 @@ fun AuditRecord.toSummaryDto(): AuditSummaryDto = AuditSummaryDto(
     nodeCount = nodeCount,
     error = error,
     governanceApproved = governanceApproved,
-    riskLevel = riskLevel
+    riskLevel = riskLevel,
+    projectId = projectId
 )
 
 fun AuditRecord.toDetailDto(): AuditDetailDto = AuditDetailDto(
@@ -100,6 +103,7 @@ fun AuditRecord.toDetailDto(): AuditDetailDto = AuditDetailDto(
     riskLevel = riskLevel,
     gatesPassed = gatesPassed,
     deniedBy = deniedBy,
+    projectId = projectId,
     nodeRecordsJson = nodeRecordsJson,
     gateTraceJson = gateTraceJson
 )

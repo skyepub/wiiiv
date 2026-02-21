@@ -31,7 +31,7 @@ import java.util.*
  */
 fun Route.decisionRoutes() {
     route("/decisions") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // Request a new decision from Governor
             post {
                 val principal = call.principal<UserPrincipal>()!!

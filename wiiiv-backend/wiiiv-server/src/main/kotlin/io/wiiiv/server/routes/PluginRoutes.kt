@@ -18,7 +18,7 @@ import kotlinx.serialization.Serializable
  */
 fun Route.pluginRoutes() {
     route("/plugins") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // GET /plugins — 목록
             get {
                 val plugins = WiiivRegistry.pluginRegistry.all().map { lp ->

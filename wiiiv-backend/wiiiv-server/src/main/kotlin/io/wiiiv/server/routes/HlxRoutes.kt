@@ -12,6 +12,7 @@ import io.wiiiv.hlx.parser.HlxParseResult
 import io.wiiiv.hlx.parser.HlxParser
 import io.wiiiv.server.dto.common.ApiError
 import io.wiiiv.server.dto.common.ApiResponse
+import io.wiiiv.server.config.UserPrincipal
 import io.wiiiv.server.dto.hlx.*
 import io.wiiiv.server.registry.HlxExecutionEntry
 import io.wiiiv.server.registry.HlxWorkflowEntry
@@ -33,7 +34,7 @@ import java.util.UUID
  */
 fun Route.hlxRoutes() {
     route("/workflows") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // POST /workflows — 워크플로우 등록
             post {
                 val request = call.receive<HlxWorkflowCreateRequest>()
@@ -245,13 +246,14 @@ fun Route.hlxRoutes() {
                         )
                     )
 
+                val principal = call.principal<UserPrincipal>()!!
                 val request = call.receive<HlxExecuteRequest>()
-                val role = request.role ?: "OPERATOR"
+                val role = request.role ?: principal.roles.firstOrNull() ?: "OPERATOR"
 
                 val result = runner.run(
                     workflow = entry.workflow,
                     initialVariables = request.variables,
-                    userId = "dev-user",
+                    userId = principal.userId,
                     role = role
                 )
 
@@ -273,9 +275,10 @@ fun Route.hlxRoutes() {
                             hlxResult = result,
                             workflow = entry.workflow,
                             executionPath = ExecutionPath.DIRECT_HLX_API,
-                            userId = "dev-user",
+                            userId = principal.userId,
                             role = role,
-                            taskType = "DIRECT_HLX"
+                            taskType = "DIRECT_HLX",
+                            projectId = principal.projectId
                         )
                     )
                 } catch (e: Exception) {

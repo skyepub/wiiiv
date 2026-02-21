@@ -1,0 +1,13 @@
+# WebFetch Plugin — 표시용 메타 정보
+# 코드가 진실: actions, risk, capability는 WebFetchPlugin.kt에서 제공
+plugin.id: webfetch
+plugin.displayName: WebFetch
+plugin.description: URL 텍스트/JSON 추출 및 웹 검색
+plugin.vendor: wiiiv-team
+
+# 설정 스키마 (문서화용)
+# WIIIV_PLUGIN_WEBFETCH_SEARCH_API_KEY: 검색 API 키 (SerpAPI/Google CSE)
+# WIIIV_PLUGIN_WEBFETCH_SEARCH_ENGINE: 검색 엔진 (serpapi/google_cse, 기본 serpapi)
+# WIIIV_PLUGIN_WEBFETCH_MAX_LENGTH: 응답 최대 길이 (기본 51200)
+# WIIIV_PLUGIN_WEBFETCH_ALLOW_PRIVATE_IP: private IP 허용 (기본 false)
+# WIIIV_PLUGIN_WEBFETCH_ALLOW_LOCALHOST: localhost 허용 (기본 true)

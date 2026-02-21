@@ -67,7 +67,7 @@ fun Route.authRoutes() {
         }
 
         // Get current user info (authenticated)
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             get("/me") {
                 val principal = call.principal<UserPrincipal>()!!
                 call.respond(

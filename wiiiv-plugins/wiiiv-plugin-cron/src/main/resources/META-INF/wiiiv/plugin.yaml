@@ -1,0 +1,6 @@
+# Cron/Scheduler Plugin — 표시용 메타 정보
+# 코드가 진실: actions, risk, capability는 CronPlugin.kt에서 제공
+plugin.id: cron
+plugin.displayName: Cron/Scheduler
+plugin.description: 워크플로우 지연(delay) 및 크론 기반 반복 실행 스케줄링
+plugin.vendor: wiiiv-team

@@ -34,7 +34,7 @@ import java.io.File
  */
 fun Route.ragRoutes() {
     route("/rag") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             // Ingest single document
             post("/ingest") {
                 val rag = requireRag() ?: return@post

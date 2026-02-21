@@ -1,0 +1,16 @@
+# Mail Plugin — 표시용 메타 정보
+# 코드가 진실: actions, risk, capability는 MailPlugin.kt에서 제공
+plugin.id: mail
+plugin.displayName: Mail (SMTP/IMAP)
+plugin.description: SMTP 이메일 발송 및 IMAP 수신함 읽기/검색/삭제
+plugin.vendor: wiiiv-team
+
+# 설정 스키마 (문서화용)
+# WIIIV_PLUGIN_MAIL_SMTP_HOST: SMTP 서버 호스트
+# WIIIV_PLUGIN_MAIL_SMTP_PORT: SMTP 포트 (기본 587)
+# WIIIV_PLUGIN_MAIL_SMTP_USER: SMTP 사용자
+# WIIIV_PLUGIN_MAIL_SMTP_PASSWORD: SMTP 비밀번호
+# WIIIV_PLUGIN_MAIL_IMAP_HOST: IMAP 서버 호스트
+# WIIIV_PLUGIN_MAIL_IMAP_PORT: IMAP 포트 (기본 993)
+# WIIIV_PLUGIN_MAIL_IMAP_USER: IMAP 사용자
+# WIIIV_PLUGIN_MAIL_IMAP_PASSWORD: IMAP 비밀번호

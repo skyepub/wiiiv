@@ -6,28 +6,14 @@ import io.ktor.server.auth.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import io.wiiiv.execution.ExecutionResult
 import io.wiiiv.execution.impl.LlmImage
-import io.wiiiv.governor.ActionType
-import io.wiiiv.governor.ConversationResponse
-import io.wiiiv.governor.NextAction
 import io.wiiiv.governor.TaskStatus
 import io.wiiiv.server.config.UserPrincipal
 import io.wiiiv.server.dto.common.ApiError
 import io.wiiiv.server.dto.common.ApiResponse
 import io.wiiiv.server.dto.session.*
 import io.wiiiv.server.registry.WiiivRegistry
-import io.wiiiv.server.session.SseEvent
-import io.wiiiv.server.session.SseProgressBridge
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import java.util.Base64
-
-private val chatMutex = Mutex()
-private val sseJson = Json { encodeDefaults = false }
 
 /**
  * Session Routes - 대화형 세션 API
@@ -43,7 +29,7 @@ private val sseJson = Json { encodeDefaults = false }
  */
 fun Route.sessionRoutes() {
     route("/sessions") {
-        authenticate("auth-jwt") {
+        authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
 
             // POST /sessions - 세션 생성
             post {
@@ -54,7 +40,10 @@ fun Route.sessionRoutes() {
                     CreateSessionRequest()
                 }
 
-                val session = WiiivRegistry.sessionManager.createSession(principal.userId)
+                val session = WiiivRegistry.sessionManager.createSession(
+                    principal.userId,
+                    principal.roles.firstOrNull() ?: "MEMBER"
+                )
 
                 // workspace 설정
                 request.workspace?.let {
@@ -69,7 +58,8 @@ fun Route.sessionRoutes() {
                         SessionResponse(
                             sessionId = info.sessionId,
                             userId = info.userId,
-                            createdAt = info.createdAt
+                            createdAt = info.createdAt,
+                            projectId = info.projectId
                         )
                     )
                 )
@@ -87,7 +77,8 @@ fun Route.sessionRoutes() {
                                 SessionResponse(
                                     sessionId = info.sessionId,
                                     userId = info.userId,
-                                    createdAt = info.createdAt
+                                    createdAt = info.createdAt,
+                                    projectId = info.projectId
                                 )
                             },
                             total = sessions.size
@@ -120,7 +111,8 @@ fun Route.sessionRoutes() {
                         SessionResponse(
                             sessionId = info.sessionId,
                             userId = info.userId,
-                            createdAt = info.createdAt
+                            createdAt = info.createdAt,
+                            projectId = info.projectId
                         )
                     )
                 )
@@ -183,7 +175,6 @@ fun Route.sessionRoutes() {
                     throw IllegalArgumentException("Invalid chat request: ${e.message}")
                 }
 
-                // 이미지 변환
                 val images = request.images?.map { img ->
                     LlmImage(
                         data = Base64.getDecoder().decode(img.base64),
@@ -193,115 +184,7 @@ fun Route.sessionRoutes() {
 
                 val maxContinue = request.maxContinue.coerceIn(1, 20)
 
-                // SSE 스트림 응답
-                call.respondTextWriter(contentType = ContentType.Text.EventStream) {
-                    val bridge = SseProgressBridge()
-
-                    // Channel 소비 코루틴 — SSE 이벤트를 writer로 출력
-                    val writerJob = launch(kotlinx.coroutines.Dispatchers.IO) {
-                        for (event in bridge.channel) {
-                            val (eventType, data) = when (event) {
-                                is SseEvent.Progress -> "progress" to sseJson.encodeToString(
-                                    ProgressEventDto(
-                                        phase = event.phase,
-                                        detail = event.detail,
-                                        stepIndex = event.stepIndex,
-                                        totalSteps = event.totalSteps
-                                    )
-                                )
-                                is SseEvent.Response -> "response" to sseJson.encodeToString(
-                                    ChatResponse(
-                                        action = event.action,
-                                        message = event.message,
-                                        sessionId = event.sessionId,
-                                        isFinal = event.isFinal,
-                                        askingFor = event.askingFor,
-                                        confirmationSummary = event.confirmationSummary,
-                                        blueprintId = event.blueprintId,
-                                        executionSuccess = event.executionSuccess,
-                                        executionStepCount = event.executionStepCount,
-                                        error = event.error,
-                                        nextAction = event.nextAction,
-                                        executionSummary = event.executionSummary
-                                    )
-                                )
-                                is SseEvent.Error -> "error" to """{"message":"${event.message}"}"""
-                                is SseEvent.Done -> "done" to "{}"
-                            }
-                            write("event: $eventType\ndata: $data\n\n")
-                            flush()
-                        }
-                    }
-
-                    // chat 실행
-                    try {
-                        chatMutex.withLock {
-                            val governor = WiiivRegistry.conversationalGovernor
-                            governor.progressListener = bridge
-
-                            try {
-                                var response = governor.chat(sessionId, request.message, images)
-                                var continueCount = 0
-
-                                // auto-continue 루프
-                                while (
-                                    request.autoContinue &&
-                                    response.nextAction == NextAction.CONTINUE_EXECUTION &&
-                                    continueCount < maxContinue
-                                ) {
-                                    // 중간 결과 전송
-                                    bridge.sendResponse(
-                                        action = response.action.name,
-                                        message = response.message,
-                                        sessionId = response.sessionId,
-                                        isFinal = false,
-                                        askingFor = response.askingFor,
-                                        confirmationSummary = response.confirmationSummary,
-                                        blueprintId = response.blueprint?.id,
-                                        executionSuccess = response.executionResult?.isSuccess,
-                                        executionStepCount = response.executionResult?.let {
-                                            it.successCount + it.failureCount
-                                        },
-                                        error = response.error,
-                                        nextAction = response.nextAction?.name,
-                                        executionSummary = buildExecutionSummary(response)
-                                    )
-
-                                    continueCount++
-                                    response = governor.chat(sessionId, "/continue", emptyList())
-                                }
-
-                                // 최종 결과 전송
-                                bridge.sendResponse(
-                                    action = response.action.name,
-                                    message = response.message,
-                                    sessionId = response.sessionId,
-                                    isFinal = true,
-                                    askingFor = response.askingFor,
-                                    confirmationSummary = response.confirmationSummary,
-                                    blueprintId = response.blueprint?.id,
-                                    executionSuccess = response.executionResult?.isSuccess,
-                                    executionStepCount = response.executionResult?.let {
-                                        it.successCount + it.failureCount
-                                    },
-                                    error = response.error,
-                                    nextAction = response.nextAction?.name,
-                                    executionSummary = buildExecutionSummary(response)
-                                )
-                            } finally {
-                                governor.progressListener = null
-                            }
-                        }
-                    } catch (e: Exception) {
-                        bridge.sendError(e.message ?: "Unknown error")
-                    } finally {
-                        bridge.sendDone()
-                        bridge.close()
-                    }
-
-                    // writer 코루틴 완료 대기
-                    writerJob.join()
-                }
+                handleChatSse(call, sessionId, principal, request, images, maxContinue)
             }
 
             // GET /sessions/{id}/state - 세션 상태 조회
@@ -520,37 +403,3 @@ private fun taskToDto(task: io.wiiiv.governor.TaskSlot): TaskSummaryDto {
     )
 }
 
-/**
- * ConversationResponse → ExecutionSummaryDto 변환 (EXECUTE 액션일 때)
- */
-private fun buildExecutionSummary(response: ConversationResponse): ExecutionSummaryDto? {
-    if (response.action != ActionType.EXECUTE) return null
-    val blueprint = response.blueprint ?: return null
-    val execResult = response.executionResult ?: return null
-
-    val results = execResult.runnerResult.results
-    val steps = blueprint.steps.mapIndexed { i, step ->
-        val result = results.getOrNull(i)
-        val output = execResult.getStepOutput(step.stepId)
-        StepSummaryDto(
-            stepId = step.stepId,
-            type = step.type.name,
-            params = step.params.filterValues { it.length <= 200 },
-            success = result is ExecutionResult.Success,
-            durationMs = result?.meta?.durationMs ?: 0,
-            stdout = output?.stdout,
-            stderr = output?.stderr,
-            exitCode = output?.exitCode,
-            error = if (result is ExecutionResult.Failure) result.error.message else null,
-            artifacts = output?.artifacts?.mapValues { it.value.toString() } ?: emptyMap()
-        )
-    }
-
-    return ExecutionSummaryDto(
-        blueprintId = blueprint.id,
-        steps = steps,
-        totalDurationMs = results.sumOf { it.meta.durationMs },
-        successCount = execResult.successCount,
-        failureCount = execResult.failureCount
-    )
-}

@@ -74,8 +74,19 @@ fun Route.devRoutes() {
                         val content = json["content"]?.jsonPrimitive?.contentOrNull
                         ExecutionStep.FileStep(stepId = "smoke-file", action = action, path = path, content = content)
                     }
+                    "PLUGIN" -> {
+                        val pluginId = json["pluginId"]?.jsonPrimitive?.contentOrNull
+                            ?: return@post call.respond(HttpStatusCode.BadRequest,
+                                ApiResponse.error<String>(ApiError("MISSING_FIELD", "pluginId required")))
+                        val action = json["action"]?.jsonPrimitive?.contentOrNull
+                            ?: return@post call.respond(HttpStatusCode.BadRequest,
+                                ApiResponse.error<String>(ApiError("MISSING_FIELD", "action required")))
+                        val params = json.filterKeys { it !in setOf("executor", "pluginId", "action") }
+                            .mapValues { it.value.jsonPrimitive.content }
+                        ExecutionStep.PluginStep(stepId = "smoke-plugin-$pluginId", pluginId = pluginId, action = action, params = params)
+                    }
                     else -> return@post call.respond(HttpStatusCode.BadRequest,
-                        ApiResponse.error<String>(ApiError("UNKNOWN_EXECUTOR", "Supported: DB, LLM, MQ, FILE")))
+                        ApiResponse.error<String>(ApiError("UNKNOWN_EXECUTOR", "Supported: DB, LLM, MQ, FILE, PLUGIN")))
                 }
             } catch (e: Exception) {
                 return@post call.respond(HttpStatusCode.BadRequest,

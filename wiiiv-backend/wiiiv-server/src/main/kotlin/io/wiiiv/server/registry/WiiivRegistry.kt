@@ -203,6 +203,8 @@ object WiiivRegistry {
 
     // === Audit Store (감사 DB — H2 파일 기본, MySQL 전환 가능) ===
     val auditStore: AuditStore? = run {
+        // H2 JDBC 드라이버 명시적 로드 (shadow JAR에서 ServiceLoader 누락 방지)
+        try { Class.forName("org.h2.Driver") } catch (_: Exception) {}
         val auditUrl = System.getenv("WIIIV_AUDIT_DB_URL")
             ?: System.getenv("WIIIV_DB_URL")
 

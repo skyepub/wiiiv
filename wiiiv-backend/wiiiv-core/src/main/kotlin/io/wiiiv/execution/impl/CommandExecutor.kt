@@ -124,17 +124,20 @@ class CommandExecutor : Executor {
      * 명령 실행
      */
     private fun executeCommand(step: ExecutionStep.CommandStep, context: ExecutionContext): CommandResult {
-        // Build command
-        val commandList = buildList {
-            add(step.command)
-            addAll(step.args)
+        // Build command — 셸을 통해 실행하여 파이프/리디렉션/공백 인자 처리
+        // LLM이 command="echo hello" 형태로 생성하는 경우에도 정상 동작
+        val fullCommand = if (step.args.isEmpty()) {
+            step.command
+        } else {
+            "${step.command} ${step.args.joinToString(" ")}"
         }
+        val commandList = listOf("/bin/sh", "-c", fullCommand)
 
         // Create process builder
         val processBuilder = ProcessBuilder(commandList)
 
-        // Set working directory
-        step.workingDir?.let { dir ->
+        // Set working directory (빈 문자열은 null 처리)
+        step.workingDir?.takeIf { it.isNotBlank() }?.let { dir ->
             val workDir = File(PathResolver.resolve(dir))
             if (!workDir.exists()) {
                 return CommandResult.Error(

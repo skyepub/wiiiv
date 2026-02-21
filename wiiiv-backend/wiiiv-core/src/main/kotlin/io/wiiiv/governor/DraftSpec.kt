@@ -124,7 +124,11 @@ data class DraftSpec(
      */
     fun isRisky(): Boolean = when (taskType) {
         TaskType.FILE_DELETE -> true
-        TaskType.COMMAND -> true
+        TaskType.COMMAND -> {
+            // COMMAND: 위험 패턴 포함 시만 risky
+            // echo, ls, cat, pwd 등 안전 명령은 DACS 불필요
+            content?.let { isDangerousCommand(it) } ?: true
+        }
         TaskType.PROJECT_CREATE -> {
             // PROJECT_CREATE: 시스템 경로일 때만 위험
             // workspace 하위, /tmp, 상대 경로 등은 안전
@@ -146,6 +150,25 @@ data class DraftSpec(
         path.contains("/**") ||
         path.contains("C:\\Windows") ||
         path.contains("C:\\Program")
+
+    private fun isDangerousCommand(cmd: String): Boolean {
+        val lower = cmd.lowercase().trim()
+        val dangerousPatterns = listOf(
+            "rm ", "rm\t", "rmdir", "rm -",
+            "kill ", "kill\t", "pkill", "killall",
+            "mkfs", "dd ", "dd\t",
+            "shutdown", "reboot", "halt", "poweroff",
+            "chmod 777", "chown ",
+            "> /dev/", ">/dev/",
+            "format ", "fdisk",
+            ":(){", "fork bomb",
+            "wget ", "curl.*|.*sh", "curl.*|.*bash"
+        )
+        return dangerousPatterns.any { pattern ->
+            if (pattern.contains(".*")) Regex(pattern).containsMatchIn(lower)
+            else lower.contains(pattern)
+        }
+    }
 
     /**
      * 완성된 Spec으로 변환

@@ -153,6 +153,8 @@ data class DraftSpec(
 
     private fun isDangerousCommand(cmd: String): Boolean {
         val lower = cmd.lowercase().trim()
+
+        // 파괴적 명령 패턴
         val dangerousPatterns = listOf(
             "rm ", "rm\t", "rmdir", "rm -",
             "kill ", "kill\t", "pkill", "killall",
@@ -164,9 +166,31 @@ data class DraftSpec(
             ":(){", "fork bomb",
             "wget ", "curl.*|.*sh", "curl.*|.*bash"
         )
-        return dangerousPatterns.any { pattern ->
-            if (pattern.contains(".*")) Regex(pattern).containsMatchIn(lower)
-            else lower.contains(pattern)
+
+        // 민감 파일/디렉토리 접근 패턴
+        val sensitivePathPatterns = listOf(
+            "/etc/passwd", "/etc/shadow", "/etc/sudoers", "/etc/gshadow",
+            "/etc/ssl/private", "/etc/ssh/",
+            "/.ssh/", "/id_rsa", "/id_ed25519", "/id_ecdsa",
+            "/authorized_keys",
+            "/root/.", // /root/.bashrc, /root/.ssh 등
+            "/proc/", "/sys/",
+            ".env", "credentials", "secret"
+        )
+
+        // 1. 전체 문자열에서 민감 파일 접근 검사
+        if (sensitivePathPatterns.any { lower.contains(it) }) return true
+
+        // 2. 명령 체인(;, &&, ||)으로 분리하여 각 서브 명령 개별 검사
+        val subCommands = lower.split(Regex("""\s*;\s*|\s*&&\s*|\s*\|\|\s*"""))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        return subCommands.any { sub ->
+            dangerousPatterns.any { pattern ->
+                if (pattern.contains(".*")) Regex(pattern).containsMatchIn(sub)
+                else sub.contains(pattern)
+            }
         }
     }
 

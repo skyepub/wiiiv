@@ -115,6 +115,15 @@ object HlxPrompt {
             node.target?.let { appendLine("- Target: $it") }
             appendLine()
             appendContextVariables(this, node.input, context)
+
+            // BUG-003: RAG API 스펙 주입
+            if (context.ragContext != null) {
+                appendLine("## API Reference (from RAG)")
+                appendLine("The following API specifications are available. Use ACTUAL URLs from this reference, NOT template variables like {baseUrl}.")
+                appendLine(context.ragContext)
+                appendLine()
+            }
+
             appendLine("## Available Action Types")
             appendLine("- COMMAND: Execute a shell command. Params: command (required), args, workingDir, timeoutMs")
             appendLine("- FILE_READ: Read a file. Params: path (required)")

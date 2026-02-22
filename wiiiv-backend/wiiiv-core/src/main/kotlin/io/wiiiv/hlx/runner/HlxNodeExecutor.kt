@@ -64,6 +64,19 @@ class HlxNodeExecutor(
      * - description에 "Parse the body ... as JSON" 포함
      */
     suspend fun executeTransform(node: HlxNode.Transform, context: HlxContext): NodeExecutionResult {
+        // BUG-004: 입력 데이터가 실패한 노드에서 온 것인지 확인
+        val inputVar = node.input
+        if (inputVar != null) {
+            val inputValue = context.variables[inputVar]
+            if (inputValue is JsonObject && inputValue["_error"]?.jsonPrimitive?.booleanOrNull == true) {
+                val failedNode = inputValue["_nodeId"]?.jsonPrimitive?.contentOrNull ?: "unknown"
+                val errorMsg = inputValue["_message"]?.jsonPrimitive?.contentOrNull ?: "upstream node failed"
+                return NodeExecutionResult.Failure(
+                    "Transform '${node.id}' cannot proceed: input '$inputVar' from failed node '$failedNode': $errorMsg"
+                )
+            }
+        }
+
         // Phase 1: 코드 추출 가능 여부 판단
         val descLower = node.description.lowercase()
         val canTryCode = node.hint in setOf(

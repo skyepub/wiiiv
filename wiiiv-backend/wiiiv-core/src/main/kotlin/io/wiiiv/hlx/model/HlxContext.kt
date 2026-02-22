@@ -81,6 +81,7 @@ data class HlxIteration(
  * @property iteration 반복 실행 상태 (Repeat 노드 내부)
  * @property userId 실행 사용자 ID (Phase D: 거버넌스)
  * @property role 사용자 역할 (Phase D: Role 기반 정책)
+ * @property ragContext RAG에서 조회된 API 스펙 컨텍스트 (BUG-003: ACT 노드에 전달)
  */
 @Serializable
 data class HlxContext(
@@ -88,5 +89,6 @@ data class HlxContext(
     val meta: HlxMeta = HlxMeta(),
     val iteration: HlxIteration? = null,
     val userId: String? = null,
-    val role: String? = null
+    val role: String? = null,
+    val ragContext: String? = null
 )

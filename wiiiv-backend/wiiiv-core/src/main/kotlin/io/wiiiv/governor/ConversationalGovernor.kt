@@ -1387,7 +1387,7 @@ class ConversationalGovernor(
         val sessionRole = role
 
         val hlxResult = try {
-            hlxRunner!!.run(workflow, userId = userId, role = sessionRole)
+            hlxRunner!!.run(workflow, userId = userId, role = sessionRole, ragContext = mergedRagContext)
         } catch (e: Exception) {
             return ConversationResponse(
                 action = ActionType.EXECUTE,

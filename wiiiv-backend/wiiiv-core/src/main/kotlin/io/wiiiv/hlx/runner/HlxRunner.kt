@@ -127,8 +127,9 @@ class HlxRunner(
         workflow: HlxWorkflow,
         initialVariables: Map<String, JsonElement> = emptyMap(),
         userId: String? = null,
-        role: String? = null
-    ): HlxExecutionResult = run(workflow, initialVariables, userId, role, depth = 0, visited = emptySet())
+        role: String? = null,
+        ragContext: String? = null
+    ): HlxExecutionResult = run(workflow, initialVariables, userId, role, ragContext, depth = 0, visited = emptySet())
 
     /**
      * 워크플로우 실행 (내부 — depth/visited 추적)
@@ -138,6 +139,7 @@ class HlxRunner(
         initialVariables: Map<String, JsonElement>,
         userId: String?,
         role: String?,
+        ragContext: String?,
         depth: Int,
         visited: Set<String>
     ): HlxExecutionResult {
@@ -152,7 +154,8 @@ class HlxRunner(
                 status = HlxStatus.RUNNING
             ),
             userId = userId,
-            role = role
+            role = role,
+            ragContext = ragContext
         )
 
         // 2. 노드 인덱스 맵 구성
@@ -374,6 +377,14 @@ class HlxRunner(
                 FlowControl.Continue
             }
             is NodeExecutionResult.Failure -> {
+                // BUG-004: 실패 출력을 context에 기록하여 후속 노드에 전파
+                node.output?.let {
+                    context.variables[it] = buildJsonObject {
+                        put("_error", JsonPrimitive(true))
+                        put("_nodeId", JsonPrimitive(node.id))
+                        put("_message", JsonPrimitive(result.error))
+                    }
+                }
                 records.add(
                     HlxNodeExecutionRecord(
                         nodeId = node.id,
@@ -643,7 +654,7 @@ class HlxRunner(
         }
 
         // 5. 재귀 호출 (userId/role을 자식 워크플로우에도 전달)
-        val childResult = run(childWorkflow, childVars, context.userId, context.role, depth + 1, visited + node.workflowRef)
+        val childResult = run(childWorkflow, childVars, context.userId, context.role, context.ragContext, depth + 1, visited + node.workflowRef)
 
         // 6. outputMapping: 자식 context → 부모 context
         for ((childVar, parentVar) in node.outputMapping) {

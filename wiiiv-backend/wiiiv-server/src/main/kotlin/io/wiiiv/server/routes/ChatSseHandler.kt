@@ -15,6 +15,8 @@ import io.wiiiv.server.session.SseEvent
 import io.wiiiv.server.session.SseProgressBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -74,6 +76,19 @@ suspend fun handleChatSse(
                 }
                 write("event: $eventType\ndata: $data\n\n")
                 flush()
+            }
+        }
+
+        // SSE heartbeat: 15초 간격으로 keep-alive 코멘트 전송 (ISSUE-001)
+        val heartbeatJob = scope.launch {
+            while (isActive) {
+                delay(15_000)
+                try {
+                    write(": heartbeat\n\n")
+                    flush()
+                } catch (_: Exception) {
+                    break
+                }
             }
         }
 
@@ -148,6 +163,7 @@ suspend fun handleChatSse(
         } finally {
             bridge.sendDone()
             bridge.close()
+            heartbeatJob.cancel()
         }
 
         writerJob.join()

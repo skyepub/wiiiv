@@ -16,6 +16,8 @@ import io.wiiiv.rag.vector.InMemoryVectorStore
 import io.wiiiv.runner.*
 import io.wiiiv.audit.AuditStore
 import io.wiiiv.audit.JdbcAuditStore
+import io.wiiiv.hlx.store.WorkflowStore
+import io.wiiiv.hlx.store.JdbcWorkflowStore
 import io.wiiiv.platform.store.PlatformStore
 import io.wiiiv.platform.store.JdbcPlatformStore
 import io.wiiiv.plugin.PluginLoader
@@ -241,6 +243,25 @@ object WiiivRegistry {
         }
     }
 
+    // === Workflow Store (HLX 워크플로우 영구 저장) ===
+    val workflowStore: WorkflowStore? = run {
+        val wfUrl = System.getenv("WIIIV_AUDIT_DB_URL")
+            ?: System.getenv("WIIIV_DB_URL")
+
+        val provider = if (!wfUrl.isNullOrBlank()) {
+            SimpleConnectionProvider(wfUrl, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
+        } else {
+            SimpleConnectionProvider("jdbc:h2:file:./data/wiiiv-audit;AUTO_SERVER=TRUE")
+        }
+
+        try {
+            JdbcWorkflowStore(provider)
+        } catch (e: Exception) {
+            println("[WORKFLOW-STORE] Failed to initialize: ${e.message}")
+            null
+        }
+    }
+
     // === Platform Store (멀티유저 — User, Project, Membership, API Key) ===
     val platformStore: PlatformStore? = run {
         val platformUrl = System.getenv("WIIIV_PLATFORM_DB_URL")
@@ -271,7 +292,8 @@ object WiiivRegistry {
         blueprintRunner = blueprintRunner,
         ragPipeline = ragPipeline,
         hlxRunner = hlxRunner,
-        auditStore = auditStore
+        auditStore = auditStore,
+        workflowStore = workflowStore
     )
 
     // === Session Manager ===

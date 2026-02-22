@@ -561,8 +561,13 @@ class ConversationSession(
             }
         }
 
+    /** 마지막 사용자 입력 — Audit 기록용 */
+    var lastUserInput: String? = null
+        private set
+
     fun addUserMessage(content: String) {
         history.add(ConversationMessage(MessageRole.USER, content))
+        lastUserInput = content
     }
 
     fun addGovernorMessage(content: String) {

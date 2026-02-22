@@ -70,6 +70,15 @@ class JdbcAuditStore(
             } catch (_: Exception) {
                 // MySQL에서 이미 존재하면 무시
             }
+
+            // user_input 컬럼 마이그레이션
+            try {
+                conn.createStatement().use { stmt ->
+                    stmt.execute("ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_input VARCHAR(2048)")
+                }
+            } catch (_: Exception) {
+                // 이미 존재하면 무시
+            }
         }
         println("[AUDIT] Table audit_log initialized")
     }
@@ -78,11 +87,11 @@ class JdbcAuditStore(
         val sql = """
             INSERT INTO audit_log (
                 audit_id, timestamp, execution_path, session_id,
-                user_id, role, workflow_id, workflow_name, intent, task_type,
+                user_id, role, user_input, workflow_id, workflow_name, intent, task_type,
                 status, duration_ms, node_count, error,
                 governance_approved, risk_level, gates_passed, denied_by,
                 project_id, node_records_json, gate_trace_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent()
 
         connectionProvider.getConnection("audit-insert").use { conn ->
@@ -93,25 +102,26 @@ class JdbcAuditStore(
                 ps.setString(4, record.sessionId)
                 ps.setString(5, record.userId)
                 ps.setString(6, record.role)
-                ps.setString(7, record.workflowId)
-                ps.setString(8, record.workflowName)
-                ps.setString(9, record.intent?.take(1024))
-                ps.setString(10, record.taskType)
-                ps.setString(11, record.status)
-                ps.setLong(12, record.durationMs)
-                ps.setInt(13, record.nodeCount)
-                ps.setString(14, record.error?.take(2048))
-                ps.setBoolean(15, record.governanceApproved)
-                ps.setString(16, record.riskLevel)
-                ps.setString(17, record.gatesPassed)
-                ps.setString(18, record.deniedBy)
+                ps.setString(7, record.userInput?.take(2048))
+                ps.setString(8, record.workflowId)
+                ps.setString(9, record.workflowName)
+                ps.setString(10, record.intent?.take(1024))
+                ps.setString(11, record.taskType)
+                ps.setString(12, record.status)
+                ps.setLong(13, record.durationMs)
+                ps.setInt(14, record.nodeCount)
+                ps.setString(15, record.error?.take(2048))
+                ps.setBoolean(16, record.governanceApproved)
+                ps.setString(17, record.riskLevel)
+                ps.setString(18, record.gatesPassed)
+                ps.setString(19, record.deniedBy)
                 if (record.projectId != null) {
-                    ps.setLong(19, record.projectId)
+                    ps.setLong(20, record.projectId)
                 } else {
-                    ps.setNull(19, java.sql.Types.BIGINT)
+                    ps.setNull(20, java.sql.Types.BIGINT)
                 }
-                ps.setString(20, record.nodeRecordsJson)
-                ps.setString(21, record.gateTraceJson)
+                ps.setString(21, record.nodeRecordsJson)
+                ps.setString(22, record.gateTraceJson)
                 ps.executeUpdate()
             }
         }
@@ -231,6 +241,7 @@ class JdbcAuditStore(
         sessionId = rs.getString("session_id"),
         userId = rs.getString("user_id"),
         role = rs.getString("role"),
+        userInput = try { rs.getString("user_input") } catch (_: Exception) { null },
         workflowId = rs.getString("workflow_id"),
         workflowName = rs.getString("workflow_name"),
         intent = rs.getString("intent"),

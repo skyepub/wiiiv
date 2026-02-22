@@ -65,7 +65,8 @@ class ConversationalGovernor(
     private val blueprintRunner: BlueprintRunner? = null,
     private val ragPipeline: RagPipeline? = null,
     private val hlxRunner: HlxRunner? = null,
-    private val auditStore: AuditStore? = null
+    private val auditStore: AuditStore? = null,
+    private val workflowStore: io.wiiiv.hlx.store.WorkflowStore? = null
 ) : Governor {
 
     var progressListener: GovernorProgressListener? = null
@@ -805,6 +806,7 @@ class ConversationalGovernor(
                             sessionId = session.sessionId,
                             userId = userId,
                             role = role,
+                            userInput = session.lastUserInput,
                             intent = draftSpec.intent,
                             taskType = "PROJECT_CREATE",
                             dacsConsensus = blueprint.specSnapshot.dacsResult,
@@ -852,6 +854,7 @@ class ConversationalGovernor(
                         sessionId = session.sessionId,
                         userId = userId,
                         role = role,
+                        userInput = session.lastUserInput,
                         intent = draftSpec.intent,
                         taskType = "PROJECT_CREATE",
                         dacsConsensus = blueprint.specSnapshot.dacsResult,
@@ -903,6 +906,7 @@ class ConversationalGovernor(
                     sessionId = session.sessionId,
                     userId = userId,
                     role = role,
+                    userInput = session.lastUserInput,
                     intent = draftSpec.intent,
                     taskType = draftSpec.taskType?.name ?: "UNKNOWN",
                     dacsConsensus = blueprint.specSnapshot.dacsResult,
@@ -1268,6 +1272,7 @@ class ConversationalGovernor(
                     sessionId = session.sessionId,
                     userId = userId,
                     role = hlxRole,
+                    userInput = session.lastUserInput,
                     intent = draftSpec.intent,
                     taskType = "DB_QUERY",
                     projectId = session.projectId
@@ -1276,6 +1281,9 @@ class ConversationalGovernor(
         } catch (e: Exception) {
             println("[AUDIT] Failed to record DB_QUERY_HLX: ${e.message}")
         }
+
+        // 워크플로우 영구 저장
+        persistWorkflow(workflow, hlxJson, session, userId)
 
         session.resetSpec()
         session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
@@ -1432,6 +1440,7 @@ class ConversationalGovernor(
                     sessionId = session.sessionId,
                     userId = userId,
                     role = sessionRole,
+                    userInput = session.lastUserInput,
                     intent = draftSpec.intent,
                     taskType = "API_WORKFLOW",
                     projectId = session.projectId
@@ -1440,6 +1449,9 @@ class ConversationalGovernor(
         } catch (e: Exception) {
             println("[AUDIT] Failed to record API_WORKFLOW_HLX: ${e.message}")
         }
+
+        // 워크플로우 영구 저장
+        persistWorkflow(workflow, hlxJson, session, userId)
 
         session.resetSpec()
         session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
@@ -3420,6 +3432,49 @@ class ConversationalGovernor(
         return slug.ifBlank { "wiiiv-project" }
     }
 
+    // === 워크플로우 영구 저장/로드 ===
+
+    /**
+     * 워크플로우 실행 후 자동 영구 저장
+     */
+    private fun persistWorkflow(
+        workflow: io.wiiiv.hlx.model.HlxWorkflow,
+        workflowJson: String,
+        session: ConversationSession,
+        userId: String
+    ) {
+        try {
+            workflowStore?.save(
+                io.wiiiv.hlx.store.WorkflowRecord(
+                    workflowId = workflow.id,
+                    name = workflow.name,
+                    description = workflow.description,
+                    workflowJson = workflowJson,
+                    sessionId = session.sessionId,
+                    userId = userId,
+                    projectId = session.projectId
+                )
+            )
+            println("[WORKFLOW-STORE] Saved: ${workflow.name} (id=${workflow.id})")
+        } catch (e: Exception) {
+            println("[WORKFLOW-STORE] Failed to save: ${e.message}")
+        }
+    }
+
+    /**
+     * 이름으로 워크플로우 로드 (외부에서 호출 가능)
+     */
+    fun loadWorkflow(name: String, projectId: Long? = null): io.wiiiv.hlx.store.WorkflowRecord? {
+        return workflowStore?.findByName(name, projectId)
+    }
+
+    /**
+     * 프로젝트별 저장된 워크플로우 목록
+     */
+    fun listWorkflows(projectId: Long? = null): List<io.wiiiv.hlx.store.WorkflowRecord> {
+        return workflowStore?.listByProject(projectId) ?: emptyList()
+    }
+
     companion object {
         /** 쓰기 HTTP 메서드 */
         private val WRITE_HTTP_METHODS = setOf("PUT", "POST", "DELETE", "PATCH")
@@ -3441,9 +3496,10 @@ class ConversationalGovernor(
             blueprintRunner: BlueprintRunner? = null,
             ragPipeline: RagPipeline? = null,
             hlxRunner: HlxRunner? = null,
-            auditStore: AuditStore? = null
+            auditStore: AuditStore? = null,
+            workflowStore: io.wiiiv.hlx.store.WorkflowStore? = null
         ): ConversationalGovernor {
-            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner, auditStore)
+            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner, auditStore, workflowStore)
         }
     }
 }

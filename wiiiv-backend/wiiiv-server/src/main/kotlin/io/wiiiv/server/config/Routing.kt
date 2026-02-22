@@ -33,6 +33,7 @@ fun Application.configureRouting() {
             auditRoutes()
             pluginRoutes()
             platformRoutes()
+            workflowRoutes()         // 저장된 워크플로우 관리
             projectScopedRoutes()    // F-4: 프로젝트 스코프 라우트
         }
     }

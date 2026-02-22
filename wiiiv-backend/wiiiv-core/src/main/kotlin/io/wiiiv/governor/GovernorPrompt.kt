@@ -238,6 +238,25 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 - 사용자가 **실시간 데이터**(현재 재고, 현재 상태, 성과 수치)를 물으면 RAG 문서 내용으로 답하지 말고 API를 호출하라
 - "그 상품", "해당 공급사" 등 대명사는 이전 대화 컨텍스트에서 구체적 식별자를 파악하여 intent에 포함하라
 
+### 예시 4-4: 탐색적 질문 (시스템의 실제 데이터 확인) ⚡ 최우선!
+"~에 어떤 데이터가 있어?", "~에 뭐가 들어있어?", "~의 현재 상태 알려줘" 처럼 특정 시스템의 실제 상태를 확인하려는 질문.
+RAG에 해당 시스템의 API 스펙이 있으면 **반드시 API_WORKFLOW로 EXECUTE** 하라. REPLY/CONVERSATION 절대 금지!
+
+사용자: "skymall에 어떤 데이터가 있는지 알려줘" (RAG에 skymall API 스펙이 있을 때)
+```json
+{
+  "action": "EXECUTE",
+  "message": "skymall의 데이터를 조회하겠습니다.",
+  "specUpdates": {
+    "intent": "skymall 카테고리 및 상품 목록 조회",
+    "taskType": "API_WORKFLOW",
+    "domain": "skymall"
+  }
+}
+```
+⚠ 이 질문은 "데이터가 있는지"를 물어보는 것이므로 **실제 API를 호출하여 라이브 데이터를 보여줘야** 한다. 스펙 문서를 읽어주거나 일반 지식으로 "카테고리, 상품 등이 있습니다"라고 답하면 안 된다.
+⚠ 시스템명(skymall, skystock 등) + "데이터", "어떤 것", "뭐가 있", "현재 상태", "알려줘" 패턴 → API_WORKFLOW
+
 ### 예시 5: RAG 문서 기반 질문 (문서 참조 답변) ⚡ 중요!
 "참고 문서 (RAG)" 섹션이 있으면 그 내용을 **근거로** 직접 답변하라.
 사용자가 사용법, 예제, 설명을 요청할 때 RAG 문서가 있으면 **절대로 ASK하지 말고 REPLY로 바로 답변**하라.
@@ -362,7 +381,7 @@ RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가
 6. 불명확한 요청은 추측하지 말고 질문한다
 7. DACS가 REVISION을 반환한 경우, 히스토리에 SYSTEM 메시지로 사유가 기록된다. 이를 참고하여 사용자에게 추가 질문을 하라.
 
-## ⚡ API_WORKFLOW vs DB_QUERY 우선순위 규칙 — 반드시 지켜라!
+## ⚡ API_WORKFLOW vs DB_QUERY vs CONVERSATION 우선순위 규칙 — 반드시 지켜라!
 
 1. 위의 '참고 문서 (RAG)' 섹션에 API 스펙(endpoint, baseUrl, REST API, swagger)이 포함되어 있으면 → **무조건 API_WORKFLOW**
 2. DB_QUERY는 오직 다음 경우에만 선택:
@@ -373,9 +392,19 @@ RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가
    - RAG에 API 스펙 없음 + DB 관련 문맥 → DB_QUERY
    - 둘 다 없음 → CONVERSATION (할 수 없는 일)
 
+## ⚡ 라이브 데이터 vs API 스펙 구분 — 핵심 원칙
+
+RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
+- 사용자가 특정 시스템의 **실제 데이터**(목록, 상태, 통계 등)를 요청하면, RAG 스펙에 비슷한 예시가 있어도 **API_WORKFLOW로 실행하여 라이브 데이터를 가져와야 한다.**
+- "~에서 ~보여줘", "~에서 ~조회해줘", "~에서 ~알려줘" 처럼 **특정 시스템명 + 데이터 요청** 패턴은 항상 **API_WORKFLOW**
+- CONVERSATION/REPLY로 응답하면 사용자는 스펙 문서의 예시 데이터를 실제 데이터로 오인할 수 있다
+- **API 스펙 자체**에 대한 질문 ("이 API는 어떤 엔드포인트가 있어?") → CONVERSATION
+- **시스템의 실제 데이터**에 대한 질문 ("상품 목록 보여줘", "가장 비싼 것 알려줘") → API_WORKFLOW
+- **탐색적 질문도 포함**: "~에 어떤 데이터가 있어?", "~에 뭐가 들어있어?", "~의 현재 상태 알려줘" 처럼 특정 시스템의 **실제 상태를 확인**하려는 질문도 API_WORKFLOW. 스펙 문서를 읽어주는 것이 아니라 **실제 API를 호출해서 라이브 데이터를 보여줘야** 한다.
+
 ## 작업 유형 분류 기준
 
-- CONVERSATION: 일반 대화, 지식 질문, 감상, 후속 대화, 이미지에 대한 대화 — **판단이 애매하면 CONVERSATION으로 분류하라**
+- CONVERSATION: 일반 대화, 지식 질문, 감상, 후속 대화, 이미지에 대한 대화 — **판단이 애매하면 CONVERSATION으로 분류하라** (단, RAG에 API 스펙이 있고 특정 시스템의 데이터를 묻는 경우는 반드시 API_WORKFLOW)
 - FILE_READ: 파일 읽기, 내용 보기
 - FILE_WRITE: 파일 생성, 쓰기, 수정
 - FILE_DELETE: 파일/폴더 삭제
@@ -1528,7 +1557,7 @@ isAbort=true일 때는 summary에 실패 사유를 포함하라.
 
 | 타입 | 역할 | 용도 |
 |------|------|------|
-| act | 외부에 영향을 줌 | API 호출 (GET/POST/PUT/DELETE). 모든 HTTP 요청은 act로 한다 |
+| act | 외부에 영향을 줌 | API 호출 (GET/POST/PUT/DELETE), 파일 쓰기/읽기. 모든 HTTP 요청과 파일 작업은 act로 한다 |
 | transform | 데이터 가공 | 응답에서 토큰 추출, 데이터 필터링/정렬/분석, 매핑, "가장 ~한 것 찾기" 등 |
 | decide | 조건 분기 | **미리 정의된 2~4개 경로** 중 하나를 선택할 때만 사용. 데이터 분석/필터링에는 쓰지 마라 |
 | repeat | 반복 | 배열의 각 항목에 대해 동일 작업 반복 |
@@ -1718,8 +1747,36 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
 ```
 
 ⚠ 워크플로우가 완전해야 한다. 모든 인증, 데이터 조회, 데이터 변환, 최종 작업을 빠짐없이 포함하라.
+⚠ **파일 저장 요청이 있으면 반드시 FILE_WRITE act 노드를 워크플로우 마지막에 포함하라.** "~로 저장해줘", "~.json으로 저장", "~파일로 만들어줘" 패턴은 FILE_WRITE 필수. 조회만 하고 저장 노드를 빠뜨리면 불완전한 워크플로우다.
 ⚠ 추측하지 마라. API 스펙에 없는 엔드포인트는 사용하지 마라.
 ⚠ 각 시스템의 Base URL(host:port)을 정확히 구분하라. 스펙에 Base URL이 다르면 절대 섞지 마라.
+
+### 9. 파일 저장 작업
+사용자가 "~파일로 저장해줘", "~.json으로 저장" 같은 파일 쓰기를 요청하면:
+- act 노드의 description에 `FILE_WRITE to /exact/user/path/file.json with content from {변수}` 형식으로 작성하라
+- ⚠ **사용자가 지정한 파일 경로를 반드시 그대로 사용하라.** 임의로 다른 경로로 변경하지 마라.
+  - 사용자가 `/tmp/wiiiv-test/data.json`이라 했으면 → `/tmp/wiiiv-test/data.json` 그대로 사용
+  - 경로를 `/tmp/output/` 등으로 바꾸면 안 된다
+- act 노드에서 FILE_WRITE step type이 자동으로 선택된다
+- HTTP API로 파일을 저장하려 하지 마라. 로컬 파일 쓰기는 FILE_WRITE를 사용하라
+
+예시 (사용자가 "/tmp/reports/categories.json으로 저장해줘"라고 했을 때):
+```json
+{
+  "id": "save-to-file",
+  "type": "act",
+  "description": "FILE_WRITE to /tmp/reports/categories.json with content from {extracted_data}",
+  "input": "extracted_data",
+  "output": "file_result"
+}
+```
+
+### 10. 여러 시스템을 포함하는 워크플로우 ⚡
+사용자의 요청이 **2개 이상의 시스템(host:port가 다른)**에 걸쳐 있으면:
+- **모든 시스템의 인증 + API 호출 노드를 빠짐없이 포함하라**
+- 각 시스템별 login → extract-token → API call → extract 체인을 모두 생성하라
+- 한 시스템만 처리하고 나머지를 생략하면 **불완전한 워크플로우**다
+- 시스템 간 데이터를 연결할 때는 변수 참조 (`input`/`output`)를 사용하라
 
 ## 크로스 시스템 워크플로우 예시 (참고)
 
@@ -1749,7 +1806,8 @@ nodes 순서:
         intent: String,
         domain: String?,
         ragContext: String?,
-        credentialsTable: String? = null
+        credentialsTable: String? = null,
+        targetPath: String? = null
     ): String = buildString {
         appendLine(HLX_API_GENERATION)
         appendLine()
@@ -1768,6 +1826,13 @@ nodes 순서:
         appendLine(intent)
         domain?.let { appendLine("도메인: $it") }
         appendLine()
+        // 파일 저장 경로가 지정된 경우
+        if (!targetPath.isNullOrBlank()) {
+            appendLine("## ⚡ 파일 저장 경로 (사용자 지정 — 반드시 이 경로 그대로 사용)")
+            appendLine("파일 경로: $targetPath")
+            appendLine("⚠ 이 경로를 절대 변경하지 마라. 워크플로우 마지막에 FILE_WRITE act 노드를 반드시 포함하라.")
+            appendLine()
+        }
 
         // RAG API 스펙 컨텍스트
         if (!ragContext.isNullOrBlank()) {

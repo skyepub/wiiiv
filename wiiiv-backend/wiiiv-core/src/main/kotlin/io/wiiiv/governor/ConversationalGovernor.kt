@@ -1315,7 +1315,8 @@ class ConversationalGovernor(
             intent = draftSpec.intent ?: "",
             domain = draftSpec.domain,
             ragContext = mergedRagContext,
-            credentialsTable = credentialsTable.ifBlank { null }
+            credentialsTable = credentialsTable.ifBlank { null },
+            targetPath = draftSpec.targetPath
         )
         println("[PROMPT] Total length: ${prompt.length} chars, ragContext: ${mergedRagContext?.length ?: 0} chars")
 

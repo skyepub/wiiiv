@@ -34,6 +34,16 @@ dependencies {
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+
+    // MockK (PolicyChecker 단위 테스트용)
+    testImplementation("io.mockk:mockk:1.13.8")
+
+    // Plugin 단위 테스트용 (PluginUnitTest.kt)
+    testImplementation(project(":wiiiv-plugin-cron"))
+    testImplementation(project(":wiiiv-plugin-pdf"))
+    testImplementation(project(":wiiiv-plugin-spreadsheet"))
+    testImplementation(project(":wiiiv-plugin-webfetch"))
+    testImplementation(project(":wiiiv-plugin-webhook"))
 }
 
 application {

@@ -168,9 +168,14 @@ class ConversationalGovernor(
 
         // specUpdates 적용 (자동 작업 보존 포함)
         // EXECUTE 액션이면 taskType 변경 금지 — EXECUTE는 "현재 작업 진행"이므로 작업 전환 불가
+        // 단, CONVERSATION/INFORMATION은 "진행 중인 작업"이 아니므로 taskType 변경을 허용한다
         governorAction.specUpdates?.let { updates ->
+            val currentTaskType = session.draftSpec.taskType
+            val isActiveWork = currentTaskType != null
+                && currentTaskType != TaskType.CONVERSATION
+                && currentTaskType != TaskType.INFORMATION
             val filteredUpdates = if (
-                session.draftSpec.taskType != null &&
+                isActiveWork &&
                 (governorAction.action == ActionType.EXECUTE || session.draftSpec.workOrderContent != null)
             ) {
                 updates.filterKeys { it != "taskType" }
@@ -178,12 +183,15 @@ class ConversationalGovernor(
                 updates
             }
             // taskSwitch가 이미 처리한 경우가 아니면, taskType 변경 감지 시 현재 작업을 자동 보존
+            // CONVERSATION/INFORMATION은 보존 대상이 아님
             if (governorAction.taskSwitch == null) {
                 val newTaskType = filteredUpdates["taskType"]?.jsonPrimitive?.contentOrNull?.let { str ->
                     try { TaskType.valueOf(str) } catch (_: Exception) { null }
                 }
                 val currentSpec = session.draftSpec
                 if (newTaskType != null && currentSpec.taskType != null
+                    && currentSpec.taskType != TaskType.CONVERSATION
+                    && currentSpec.taskType != TaskType.INFORMATION
                     && newTaskType != currentSpec.taskType && currentSpec.intent != null) {
                     session.suspendCurrentWork()
                 }

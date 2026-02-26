@@ -313,6 +313,36 @@ SCENARIOS: dict[str, Scenario] = {
             "skymall에 있는 상품 목록을 좀 조회해주실 수 있나요?"
         ),
     ),
+    "GX-C09": Scenario(
+        case_id="GX-C09",
+        name="강사원의 파일 읽기와 후속 작업",
+        persona=(
+            "총무팀 강사원. 20대 중반 남성. 입사 2년차. "
+            "엑셀 대신 JSON 파일을 다루라는 팀장 지시를 받았다. "
+            "파일 경로를 정확히 알고 있고, 단계적으로 요청한다. "
+            "말투가 깔끔하고 존댓말을 쓴다. 중간에 한 번 확인 질문을 한다."
+        ),
+        goal=(
+            "/tmp/skymall_products.json 파일을 읽어서 내용을 확인한 뒤, "
+            "해당 데이터에서 가격이 가장 높은 상품 정보를 /tmp/top_product.json에 저장한다"
+        ),
+        constraints=[
+            "1단계: '/tmp/skymall_products.json 파일 내용 좀 읽어주세요' 식으로 파일 읽기 요청",
+            "2단계: 결과를 확인한 뒤 '가장 비싼 상품이 뭔지' 질문",
+            "3단계: '그 상품 정보를 /tmp/top_product.json에 저장해주세요' 요청",
+            "wiiiv가 확인을 요청하면 바로 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "파일 읽기(FILE_READ)가 실행되어 내용이 표시되고, "
+            "최종적으로 /tmp/top_product.json에 파일 저장이 수행되면 성공. "
+            "파일을 읽지 않거나, 저장이 수행되지 않으면 실패."
+        ),
+        first_message_hint=(
+            "안녕하세요, 총무팀 강사원입니다. "
+            "/tmp/skymall_products.json 파일 내용을 좀 확인해주실 수 있나요?"
+        ),
+    ),
 }
 
 

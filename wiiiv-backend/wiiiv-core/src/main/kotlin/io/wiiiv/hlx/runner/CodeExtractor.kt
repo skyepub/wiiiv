@@ -303,7 +303,7 @@ object CodeExtractor {
 
     /** Filter 패턴: "Filter where {field} = {value}" / "Filter where {field} > {value}" 등 */
     private val FILTER_PATTERN =
-        Regex("""filter\s+where\s+(\w+)\s*(=|!=|>|<|>=|<=)\s*(.+)""", RegexOption.IGNORE_CASE)
+        Regex("""filter\s+where\s+(\w+)\s*(>=|<=|!=|=|>|<)\s*(.+)""", RegexOption.IGNORE_CASE)
 
     /** Map 패턴: "Select {field1}, {field2}, ..." — 쉼표로 구분된 식별자만 매칭 */
     private val MAP_PATTERN =

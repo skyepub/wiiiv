@@ -2227,6 +2227,8 @@ repeat body에는 **어떤 노드든** 중첩할 수 있다 — act, transform, 
 ⚠ 워크플로우가 완전해야 한다. 모든 인증, 데이터 조회, 데이터 변환, 최종 작업을 빠짐없이 포함하라.
 ⚠ **파일 저장 요청이 있으면 반드시 FILE_WRITE act 노드를 워크플로우 마지막에 포함하라.** "~로 저장해줘", "~.json으로 저장", "~파일로 만들어줘" 패턴은 FILE_WRITE 필수. 조회만 하고 저장 노드를 빠뜨리면 불완전한 워크플로우다.
 ⚠ 추측하지 마라. API 스펙에 없는 엔드포인트는 사용하지 마라.
+⚠ **워크플로우는 자기 완결적이어야 한다.** 이전 대화에서 조회한 데이터에 직접 접근할 수 없다. 필요한 데이터는 워크플로우 안에서 처음부터 다시 조회하라.
+⚠ 예: "아까 조회한 상품의 공급사를 찾아줘" → 워크플로우에 상품 조회 노드부터 포함해야 한다. 이전 턴의 결과를 가정하지 마라.
 ⚠ 각 시스템의 Base URL(host:port)을 정확히 구분하라. 스펙에 Base URL이 다르면 절대 섞지 마라.
 ⚠ 사용자가 특정 시스템만 언급했으면, **해당 시스템의 API만 사용하라.** 다른 시스템의 API를 추가로 호출하지 마라.
 ⚠ 예: 사용자가 "skymall 상품 조회"라고 했으면 → skymall(9090)의 API만 사용. skystock(9091)에 접근하지 마라.
@@ -2295,7 +2297,8 @@ nodes 순서:
         ragContext: String?,
         credentialsTable: String? = null,
         targetPath: String? = null,
-        cachedTokens: Map<String, String> = emptyMap()
+        cachedTokens: Map<String, String> = emptyMap(),
+        previousResults: String? = null
     ): String = buildString {
         appendLine(HLX_API_GENERATION)
         appendLine()
@@ -2311,20 +2314,27 @@ nodes 순서:
 
         // 이미 획득한 인증 토큰 (로그인 생략)
         if (cachedTokens.isNotEmpty()) {
-            appendLine("## ⚡ 이미 획득한 인증 토큰 (로그인 생략 가능)")
-            appendLine("아래 시스템은 이미 인증이 완료되었다. login 노드를 생성하지 말고, 이 토큰을 직접 사용하라.")
-            cachedTokens.forEach { (hostPort, token) ->
-                appendLine("- $hostPort → Bearer $token")
+            appendLine("## ⚡ 이미 획득한 인증 토큰 (캐시된 시스템만 로그인 생략)")
+            appendLine("아래 **특정 시스템만** 인증이 완료되었다. 이 목록에 있는 시스템만 login을 생략할 수 있다.")
+            val cachedPorts = mutableListOf<String>()
+            cachedTokens.forEach { (hostPort, _) ->
+                val port = hostPort.substringAfterLast(":").filter { it.isDigit() }
+                cachedPorts.add(port)
+                appendLine("- ✅ $hostPort (포트 $port) — 캐시 토큰 있음")
             }
             appendLine()
-            appendLine("사용법: 워크플로우 첫 노드로 아래 transform을 배치하라:")
+            appendLine("사용법: 워크플로우 첫 노드로 아래 transform을 **그대로 복사**하여 배치하라 (변수명, 값 수정 금지!):")
             cachedTokens.entries.forEachIndexed { idx, (hostPort, token) ->
                 val varName = "cached_token_${hostPort.substringAfterLast(":").filter { it.isDigit() }}"
-                appendLine("""{"id":"inject-token-$idx","type":"transform","description":"Set cached token","hint":"set","output":"$varName","value":"$token"}""")
+                appendLine("""{"id":"inject-token-$idx","type":"transform","description":"Set cached ${hostPort} token","hint":"set","output":"$varName","value":"$token"}""")
             }
             appendLine()
-            appendLine("⚠ 이 토큰들이 있으면 해당 시스템의 login act 노드를 생성하지 마라. 토큰을 바로 사용하라.")
-            appendLine("⚠ **위 목록에 없는 시스템(host:port)에 접근하려면 반드시 login act 노드를 먼저 배치하라.** 다른 시스템의 토큰으로 대체할 수 없다!")
+            appendLine("⚠ **포트 ${cachedPorts.joinToString("/")} 전용 토큰**이다. 다른 포트의 API에 이 토큰을 사용하면 **403 에러** 발생!")
+            appendLine("⚠ **이 목록에 없는 시스템에 접근해야 하면** (예: 위 목록에 없는 포트):")
+            appendLine("  1단계: 해당 시스템에 login ACT 노드 추가 (POST .../api/auth/login with body)")
+            appendLine("  2단계: transform으로 accessToken 추출")
+            appendLine("  3단계: 추출한 토큰으로 해당 시스템 API 호출")
+            appendLine("  **다른 시스템의 토큰을 변수명만 바꿔 재사용하면 안 된다!**")
             appendLine()
         }
 
@@ -2355,6 +2365,18 @@ nodes 순서:
             appendLine("RAG에 등록된 API 스펙이 없습니다. 사용자의 지시에서 엔드포인트 정보를 추론하세요.")
             appendLine()
         }
+
+        // 이전 턴 실행 결과 (크로스턴 컨텍스트)
+        if (!previousResults.isNullOrBlank()) {
+            appendLine("## 📋 이전 턴에서 획득한 데이터")
+            appendLine("아래는 이전 대화 턴에서 실행된 워크플로우가 반환한 실제 데이터다.")
+            appendLine("사용자가 '아까 그 데이터에서' 또는 '이전 결과의' 라고 말하면, 아래 데이터를 참조하라.")
+            appendLine("⚠ **중요**: 아래 데이터에 포함된 상품/엔티티의 원래 시스템(host:port)을 확인하라.")
+            appendLine("다른 시스템에서 해당 데이터의 엔드포인트가 없으면, 이름/키워드로 검색하는 대안 API를 사용하라.")
+            appendLine()
+            appendLine(previousResults)
+            appendLine()
+        }
     }
 
     /**
@@ -2368,7 +2390,8 @@ nodes 순서:
         ragContext: String?,
         credentialsTable: String? = null,
         targetPath: String? = null,
-        cachedTokens: Map<String, String> = emptyMap()
+        cachedTokens: Map<String, String> = emptyMap(),
+        previousResults: String? = null
     ): String = buildString {
         appendLine(HLX_API_GENERATION)
         appendLine()
@@ -2384,20 +2407,27 @@ nodes 순서:
 
         // 이미 획득한 인증 토큰 (로그인 생략)
         if (cachedTokens.isNotEmpty()) {
-            appendLine("## ⚡ 이미 획득한 인증 토큰 (로그인 생략 가능)")
-            appendLine("아래 시스템은 이미 인증이 완료되었다. login 노드를 생성하지 말고, 이 토큰을 직접 사용하라.")
-            cachedTokens.forEach { (hostPort, token) ->
-                appendLine("- $hostPort → Bearer $token")
+            appendLine("## ⚡ 이미 획득한 인증 토큰 (캐시된 시스템만 로그인 생략)")
+            appendLine("아래 **특정 시스템만** 인증이 완료되었다. 이 목록에 있는 시스템만 login을 생략할 수 있다.")
+            val cachedPorts = mutableListOf<String>()
+            cachedTokens.forEach { (hostPort, _) ->
+                val port = hostPort.substringAfterLast(":").filter { it.isDigit() }
+                cachedPorts.add(port)
+                appendLine("- ✅ $hostPort (포트 $port) — 캐시 토큰 있음")
             }
             appendLine()
-            appendLine("사용법: 워크플로우 첫 노드로 아래 transform을 배치하라:")
+            appendLine("사용법: 워크플로우 첫 노드로 아래 transform을 **그대로 복사**하여 배치하라 (변수명, 값 수정 금지!):")
             cachedTokens.entries.forEachIndexed { idx, (hostPort, token) ->
                 val varName = "cached_token_${hostPort.substringAfterLast(":").filter { it.isDigit() }}"
-                appendLine("""{"id":"inject-token-$idx","type":"transform","description":"Set cached token","hint":"set","output":"$varName","value":"$token"}""")
+                appendLine("""{"id":"inject-token-$idx","type":"transform","description":"Set cached ${hostPort} token","hint":"set","output":"$varName","value":"$token"}""")
             }
             appendLine()
-            appendLine("⚠ 이 토큰들이 있으면 해당 시스템의 login act 노드를 생성하지 마라. 토큰을 바로 사용하라.")
-            appendLine("⚠ **위 목록에 없는 시스템(host:port)에 접근하려면 반드시 login act 노드를 먼저 배치하라.** 다른 시스템의 토큰으로 대체할 수 없다!")
+            appendLine("⚠ **포트 ${cachedPorts.joinToString("/")} 전용 토큰**이다. 다른 포트의 API에 이 토큰을 사용하면 **403 에러** 발생!")
+            appendLine("⚠ **이 목록에 없는 시스템에 접근해야 하면** (예: 위 목록에 없는 포트):")
+            appendLine("  1단계: 해당 시스템에 login ACT 노드 추가 (POST .../api/auth/login with body)")
+            appendLine("  2단계: transform으로 accessToken 추출")
+            appendLine("  3단계: 추출한 토큰으로 해당 시스템 API 호출")
+            appendLine("  **다른 시스템의 토큰을 변수명만 바꿔 재사용하면 안 된다!**")
             appendLine()
         }
 
@@ -2459,6 +2489,8 @@ nodes 순서:
         appendLine("- [ ] ACT 노드의 output이 바로 'token' 이름이 아닌 'login_result' 형태인가?")
         appendLine("- [ ] 모든 POST act 노드의 description에 \"with body {...}\" 가 포함되어 있는가?")
         appendLine("- [ ] 각 시스템의 login host:port와 해당 시스템 API 호출의 host:port가 일치하는가? (9091 로그인 → 9091 API, 9090 로그인 → 9090 API)")
+        appendLine("- [ ] 모든 ACT 노드의 URL이 API 스펙에 실제 존재하는 엔드포인트인가? 추측한 URL이 없는가?")
+        appendLine("- [ ] 이전 대화 결과를 가정하지 않고, 필요한 데이터를 워크플로우 내에서 직접 조회하는가?")
         appendLine()
 
         // 파일 저장 경로
@@ -2476,6 +2508,18 @@ nodes 순서:
             appendLine("⚠ 작업지시서의 URL이 아래 스펙과 다르면, **아래 스펙의 URL을 사용하라.**")
             appendLine()
             appendLine(ragContext)
+            appendLine()
+        }
+
+        // 이전 턴 실행 결과 (크로스턴 컨텍스트)
+        if (!previousResults.isNullOrBlank()) {
+            appendLine("## 📋 이전 턴에서 획득한 데이터")
+            appendLine("아래는 이전 대화 턴에서 실행된 워크플로우가 반환한 실제 데이터다.")
+            appendLine("사용자가 '아까 그 데이터에서' 또는 '이전 결과의' 라고 말하면, 아래 데이터를 참조하라.")
+            appendLine("⚠ **중요**: 아래 데이터에 포함된 상품/엔티티의 원래 시스템(host:port)을 확인하라.")
+            appendLine("다른 시스템에서 해당 데이터의 엔드포인트가 없으면, 이름/키워드로 검색하는 대안 API를 사용하라.")
+            appendLine()
+            appendLine(previousResults)
             appendLine()
         }
     }

@@ -1695,7 +1695,7 @@ class ConversationalGovernor(
             technicalSummary
         }
 
-        session.integrateResult(null, null, "DB-QUERY-HLX: ${hlxResult.status}")
+        session.integrateResult(null, null, buildHlxResultSummaryForContext(hlxResult, workflow))
 
         // Audit hook: DB_QUERY_HLX 실행 기록
         try {
@@ -1753,6 +1753,9 @@ class ConversationalGovernor(
             println("[CRED] Extracted credentials table:\n$credentialsTable")
         }
 
+        // 1-c. 이전 턴 실행 결과 (크로스턴 컨텍스트)
+        val previousResults = buildPreviousResultsContext(session)
+
         // 2. LLM에게 HLX 워크플로우 JSON 생성 요청
         val prompt = GovernorPrompt.hlxApiGenerationPrompt(
             intent = draftSpec.intent ?: "",
@@ -1760,7 +1763,8 @@ class ConversationalGovernor(
             ragContext = mergedRagContext,
             credentialsTable = credentialsTable.ifBlank { null },
             targetPath = draftSpec.targetPath,
-            cachedTokens = session.context.tokenStore
+            cachedTokens = session.context.tokenStore,
+            previousResults = previousResults
         )
         println("[PROMPT] Total length: ${prompt.length} chars, ragContext: ${mergedRagContext?.length ?: 0} chars")
 
@@ -1863,8 +1867,8 @@ class ConversationalGovernor(
             technicalSummary
         }
 
-        // 8. 세션에 결과 적재
-        session.integrateResult(null, null, "HLX: ${hlxResult.status} - ${workflow.name}")
+        // 8. 세션에 결과 적재 (크로스턴 컨텍스트를 위해 ACT 노드 출력 포함)
+        session.integrateResult(null, null, buildHlxResultSummaryForContext(hlxResult, workflow))
 
         // Audit hook: API_WORKFLOW_HLX 실행 기록
         try {
@@ -1939,12 +1943,14 @@ class ConversationalGovernor(
         val credentialsTable = extractCredentialsFromRag(mergedRagContext)
 
         // 2. LLM에게 HLX 워크플로우 JSON 생성 요청
+        val previousResults = buildPreviousResultsContext(session)
         val prompt = GovernorPrompt.hlxFromWorkOrderPrompt(
             workOrderContent = workOrder,
             ragContext = mergedRagContext,
             credentialsTable = credentialsTable.ifBlank { null },
             targetPath = draftSpec.targetPath,
-            cachedTokens = session.context.tokenStore
+            cachedTokens = session.context.tokenStore,
+            previousResults = previousResults
         )
         println("[WORKFLOW_CREATE] Prompt length: ${prompt.length} chars")
 
@@ -2052,7 +2058,7 @@ class ConversationalGovernor(
         }
 
         // 7. 세션 결과 적재
-        session.integrateResult(null, null, "WORKFLOW_CREATE: ${hlxResult.status} - ${workflow.name}")
+        session.integrateResult(null, null, buildHlxResultSummaryForContext(hlxResult, workflow))
 
         // 8. Audit
         try {
@@ -2086,6 +2092,55 @@ class ConversationalGovernor(
             message = fullMessage,
             sessionId = session.sessionId
         )
+    }
+
+    /**
+     * HLX 실행 결과를 크로스턴 컨텍스트용 요약으로 변환
+     *
+     * 다음 턴의 HLX 생성 시 이전 데이터를 참조할 수 있도록 ACT 노드 출력을 포함한다.
+     */
+    private fun buildHlxResultSummaryForContext(
+        result: HlxExecutionResult,
+        workflow: io.wiiiv.hlx.model.HlxWorkflow
+    ): String = buildString {
+        appendLine("HLX: ${result.status} - ${workflow.name}")
+        for (record in result.nodeRecords) {
+            if (record.nodeType != HlxNodeType.ACT) continue
+            val output = record.output ?: continue
+            val outputStr = output.toString()
+            // 각 ACT 노드의 출력 (최대 800자로 트리밍)
+            if (outputStr.length <= 800) {
+                appendLine("[${record.nodeId}] $outputStr")
+            } else {
+                appendLine("[${record.nodeId}] ${outputStr.take(800)}...")
+            }
+        }
+    }
+
+    /**
+     * 세션의 최근 실행 이력에서 크로스턴 컨텍스트를 빌드
+     *
+     * 이전 턴의 HLX 실행 결과를 요약하여 다음 HLX 생성에 제공한다.
+     * 사용자가 "아까 그 데이터에서..." 라고 참조할 때 LLM이 올바른 데이터를 참조할 수 있다.
+     *
+     * 주의: session.context.executionHistory는 activeTask 프록시이므로,
+     * 완료된 태스크의 이력을 포함하려면 allExecutionHistory()를 사용해야 한다.
+     */
+    private fun buildPreviousResultsContext(session: ConversationSession): String? {
+        val allHistory = session.context.allExecutionHistory()
+        if (allHistory.isEmpty()) return null
+
+        val recentHlxResults = allHistory
+            .filter { it.summary.startsWith("HLX:") && "COMPLETED" in it.summary }
+            .takeLast(3) // 최근 3개의 성공한 HLX 실행
+
+        if (recentHlxResults.isEmpty()) return null
+
+        val result = recentHlxResults.joinToString("\n---\n") { turn ->
+            "턴 ${turn.turnIndex}: ${turn.summary}"
+        }
+        println("[CROSS-TURN] previousResults injected: ${result.length} chars, ${recentHlxResults.size} turns")
+        return result
     }
 
     /**

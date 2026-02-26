@@ -503,6 +503,20 @@ class SessionContext(
             || tasks.values.any { it.context.executionHistory.isNotEmpty() }
 
     /**
+     * 세션의 모든 태스크 + fallback 이력을 시간순으로 수집
+     *
+     * 크로스턴 컨텍스트용: 이전 완료된 태스크의 실행 결과도 포함
+     */
+    fun allExecutionHistory(): List<TurnExecution> {
+        val all = mutableListOf<TurnExecution>()
+        all.addAll(_fallbackHistory)
+        for (task in tasks.values) {
+            all.addAll(task.context.executionHistory)
+        }
+        return all.sortedBy { it.timestamp }
+    }
+
+    /**
      * fallback history를 새 TaskSlot으로 마이그레이션하고 등록
      */
     fun promoteToTask(task: TaskSlot) {

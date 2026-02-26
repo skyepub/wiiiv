@@ -343,6 +343,37 @@ SCENARIOS: dict[str, Scenario] = {
             "/tmp/skymall_products.json 파일 내용을 좀 확인해주실 수 있나요?"
         ),
     ),
+    "GX-C10": Scenario(
+        case_id="GX-C10",
+        name="나대리의 장황한 멀티 요청",
+        persona=(
+            "마케팅팀 나대리. 20대 후반 남성. 말이 많고 한 번에 여러 가지를 요청한다. "
+            "배경 설명이 길고, 요청 사항이 문장 중간에 묻혀 있다. "
+            "IT 용어를 잘 모르고 비유를 많이 쓴다. "
+            "'그니까요' '있잖아요' 를 자주 쓴다. 존댓말 사용."
+        ),
+        goal=(
+            "skymall에서 상품 목록을 조회하고, "
+            "Electronics 카테고리의 상품만 정리해서 /tmp/electronics_report.json에 저장한다"
+        ),
+        constraints=[
+            "첫 메시지에 배경 설명(팀 상황, 왜 필요한지)을 장황하게 포함한다",
+            "요청을 한 문장에 깔끔하게 하지 않고, 여러 문장에 걸쳐 흩어놓는다",
+            "중간에 '아 그리고 Electronics 카테고리만요' 식으로 조건을 뒤늦게 추가한다",
+            "파일 저장 경로를 /tmp/electronics_report.json으로 명시적으로 요청한다",
+            "wiiiv가 확인을 요청하면 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "skymall API 호출이 실행되고, Electronics 관련 데이터가 조회되며, "
+            "/tmp/electronics_report.json에 파일 저장이 수행되면 성공."
+        ),
+        first_message_hint=(
+            "안녕하세요, 마케팅팀 나대리입니다. 있잖아요, 요즘 팀에서 프로모션 기획을 하고 있는데요, "
+            "그래서 말인데 skymall에 있는 상품들을 좀 봐야 하거든요. "
+            "전체 목록을 뽑아주시면 좋겠는데, 아 맞다 특히 전자제품 쪽이 급해요."
+        ),
+    ),
 }
 
 

@@ -1,0 +1,43 @@
+{
+  "case_id": "GX-C10",
+  "name": "나대리의 장황한 멀티 요청",
+  "timestamp": "2026-02-27T04:44:29.570426",
+  "turns": 2,
+  "elapsed_sec": 42.5,
+  "verdict": "PASS",
+  "reason": "skymall API 호출이 성공적으로 실행되었고, Electronics 카테고리의 상품 목록이 조회되었으며, 해당 데이터가 /tmp/electronics_report.json 파일로 저장되었다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "안녕하세요, 마케팅팀 나대리입니다. 있잖아요, 요즘 팀에서 프로모션 기획을 하고 있는데요, 그래서 말인데 skymall에 있는 상품들을 좀 봐야 하거든요. 전체 목록을 뽑아주시면 좋겠는데, 아 맞다 특히 전자제품 쪽이 급해요. 그러니까, Electronics 카테고리의 상품 목록만 정리해서 필요하거든요. 파일로 저장해주실 수 있나요? 저장 경로는 /tmp/electronics_report.json으로 해주세요. 부탁드려요.",
+      "turn": 1,
+      "timestamp": "2026-02-27T04:43:47.196716"
+    },
+    {
+      "role": "wiiiv",
+      "content": "Electronics 카테고리의 상품 목록을 조회하여 /tmp/electronics_report.json 파일로 저장하겠습니다.",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-27T04:43:49.997855"
+    },
+    {
+      "role": "ghost",
+      "content": "아, 그러면 그렇게 해주세요. 감사합니다. 진행하실 때 문제가 생기면 바로 말씀해주시고요. 확인 요청하시면 승인할게요. 완료되면 알려주시면 좋겠어요!",
+      "turn": 2,
+      "timestamp": "2026-02-27T04:43:53.519587"
+    },
+    {
+      "role": "wiiiv",
+      "content": "Skymall의 전자제품 카테고리에는 다음과 같은 상품들이 있습니다. 65인치 4K 스마트 TV는 359.99달러에 판매되며, 52개가 재고로 남아 있습니다. 또한, 무선 노이즈 캔슬링 헤드폰은 157.49달러로, 현재 119개가 있습니다. 마지막으로, 15인치 노트북 프로도 있습니다.\n\n=== HLX Workflow: Skymall Electronics Product List Retrieval ===\nStatus: OK | Duration: 13.7s | Nodes: 5\n\n[OK] login (ACT) 1.8s\n[OK] extract-token (TRANSFORM) 0.0s\n[OK] fetch-electronics (ACT) 2.1s\n[OK] extract-products (TRANSFORM) 0.0s\n[OK] save-to-file (ACT) 9.8s\n\nResult: {\"path\":\"/tmp/electronics_report.json\",\"size\":1527,\"action\":\"WRITE\"}\n\n=== HLX Node Details ===\n[OK] login (ACT) 1769ms\n  → {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9090/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM1MDQ4LCJleHAiOjE3NzIyMjE0NDh9.b6XmMYA3rBN8UtXdj6kngAnRxdU6qaVRSuGnoO7Ltw1Nt3dTXfOxRq8WrCMtGJAF\\\",\\\"userId\\\":2,\\\"username\\\":\\\"jane_smith\\\",\\\"role\\\":\\\"ADMIN\\\"}\",\"truncated\":false,\"contentLength\":266}\n[OK] extract-token (TRANSFORM)\n  → \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM1MDQ4LCJleHAiOjE3NzIyMjE0NDh9.b6XmMYA3rBN8UtXdj6kngAnRxdU6qaVRSuGnoO7Ltw1Nt3dTXfOxRq8WrCMtGJAF\"\n[OK] fetch-electronics (ACT) 2050ms\n  → {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/categories/1/products?page=0&size=20\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"4K Smart TV 65 inch\\\",\\\"description\\\":\\\"Stunning 4K display with smart features.\\\",\\\"price\\\":359.9955,\\\"stock\\\":52,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\":\\\"Electronics\\\"},\\\"createdAt\\\":\\\"2025-09-05T13:01:09\\\"},{\\\"id\\\":2,\\\"name\\\":\\\"Wireless Noise-Cancelling Headphones\\\",\\\"description\\\":\\\"Immersive sound experience with industry-leading noise cancellati...\n[OK] extract-products (TRANSFORM) 1ms\n  → [{\"id\":1,\"name\":\"4K Smart TV 65 inch\",\"description\":\"Stunning 4K display with smart features.\",\"price\":359.9955,\"stock\":52,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":2,\"name\":\"Wireless Noise-Cancelling Headphones\",\"description\":\"Immersive sound experience with industry-leading noise cancellation.\",\"price\":157.4955,\"stock\":119,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerf...\n[OK] save-to-file (ACT) 9838ms\n  → {\"path\":\"/tmp/electronics_report.json\",\"size\":1527,\"action\":\"WRITE\"}\n\n=== Final Variables ===\nlogin_result: {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9090/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM1MDQ4LCJleHAiOjE3NzIyMjE0NDh9.b6XmMYA3rBN8UtXdj6kngAnRxdU6qaVRSuGnoO7Ltw1Nt3dTXfOxR...\nauth_token: \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM1MDQ4LCJleHAiOjE3NzIyMjE0NDh9.b6XmMYA3rBN8UtXdj6kngAnRxdU6qaVRSuGnoO7Ltw1Nt3dTXfOxRq8WrCMtGJAF\"\nproducts_raw: {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/categories/1/products?page=0&size=20\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"4K Smart TV 65 inch\\\",\\\"description\\\":\\\"Stunning 4K display with smart features.\\\",\\\"price\\\":359.9955,\\\"stock\\\":52,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\"...\nproducts: [{\"id\":1,\"name\":\"4K Smart TV 65 inch\",\"description\":\"Stunning 4K display with smart features.\",\"price\":359.9955,\"stock\":52,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":2,\"name\":\"Wireless Noise-Cancelling Headphones\",\"description\":\"Immersive sound experience with ...\nfile_result: {\"path\":\"/tmp/electronics_report.json\",\"size\":1527,\"action\":\"WRITE\"}\n",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-27T04:44:23.402390"
+    },
+    {
+      "role": "ghost",
+      "content": "오, 잘 처리해주셨네요. 정말 감사합니다! 덕분에 프로모션 준비가 조금 더 수월해질 것 같아요. 덕분에 큰 도움이 됐습니다. 수고하셨어요!",
+      "turn": 3,
+      "timestamp": "2026-02-27T04:44:27.383505"
+    }
+  ]
+}

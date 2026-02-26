@@ -408,6 +408,254 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         first_message_hint="skymall 상품 전체 뽑아. 빨리.",
     ),
+    "GX-C12": Scenario(
+        case_id="GX-C12",
+        name="권차장의 모호한 시스템 참조",
+        persona=(
+            "구매팀 권차장. 40대 남성. 시스템 이름을 정확히 기억하지 못한다. "
+            "'그 쇼핑몰 시스템' '재고 관리하는 거' 식으로 모호하게 말한다. "
+            "wiiiv가 물어보면 '아 그거 뭐더라... 포트가 9천번대였는데' 식으로 힌트를 준다. "
+            "존댓말이지만 투덜거린다."
+        ),
+        goal="skymall에서 상품 목록을 조회한다",
+        constraints=[
+            "시스템 이름을 절대 'skymall'이라고 직접 말하지 않는다",
+            "'쇼핑몰 시스템', '상품 파는 데', '그 9090 포트 거기' 등으로 돌려 말한다",
+            "wiiiv가 'skymall 말씀이신가요?' 하면 '아 맞아 그거' 식으로 확인",
+            "최종적으로 상품 목록 결과를 받으면 만족",
+        ],
+        max_turns=15,
+        judge_criteria="skymall API 호출이 실행되어 상품 데이터를 받으면 성공",
+        first_message_hint="저기요, 그 쇼핑몰 시스템 있잖아요. 거기서 상품 목록 좀 뽑아주세요.",
+    ),
+    "GX-C13": Scenario(
+        case_id="GX-C13",
+        name="임인턴의 대화 중 실행 전환",
+        persona=(
+            "개발팀 임인턴. 20대 초반 여성. 호기심이 많고 질문이 많다. "
+            "처음에는 시스템에 대해 이것저것 물어보다가, 갑자기 실행을 요청한다. "
+            "'그럼 한번 해볼까요?' 식으로 자연스럽게 전환한다. "
+            "매우 공손하고, 이모티콘을 쓰고 싶어하지만 참는다."
+        ),
+        goal=(
+            "처음에 wiiiv에게 skymall 시스템에 대해 질문(대화)을 하다가, "
+            "자연스럽게 실제 API 호출로 전환하여 상품 목록을 조회한다"
+        ),
+        constraints=[
+            "1단계: 'skymall이 어떤 시스템인가요?' 같은 정보성 질문으로 시작",
+            "2단계: 'API로 뭘 할 수 있나요?' 같은 추가 질문",
+            "3단계: '그럼 상품 목록을 한번 조회해볼 수 있을까요?' 식으로 실행 전환",
+            "wiiiv가 확인을 요청하면 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "초반에 대화(CONVERSATION/INFORMATION) 응답이 있고, "
+            "이후 skymall API 호출이 실행되어 상품 데이터를 받으면 성공"
+        ),
+        first_message_hint="안녕하세요! skymall이라는 시스템이 있다고 들었는데, 어떤 시스템인가요?",
+    ),
+    "GX-C14": Scenario(
+        case_id="GX-C14",
+        name="조부장의 데이터 비교 요청",
+        persona=(
+            "재무팀 조부장. 50대 여성. 숫자에 매우 민감하고, 정확한 비교를 원한다. "
+            "두 시스템의 데이터를 나란히 보고 싶어한다. "
+            "'정확히 몇 개인지', '차이가 얼마인지' 구체적으로 묻는다. "
+            "존댓말을 쓰고, 비즈니스 용어를 사용한다."
+        ),
+        goal=(
+            "skymall에서 상품 수와 skystock에서 공급사 수를 각각 조회하여 비교한다. "
+            "결과를 /tmp/comparison.json에 저장한다"
+        ),
+        constraints=[
+            "1단계: skymall 상품이 총 몇 개인지 조회 요청",
+            "2단계: skystock 공급사가 총 몇 개인지 조회 요청",
+            "3단계: '두 결과를 /tmp/comparison.json에 정리해서 저장해주세요' 요청",
+            "wiiiv가 확인을 요청하면 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "skymall과 skystock 두 시스템 모두 API 호출이 실행되고, "
+            "/tmp/comparison.json 파일 저장이 수행되면 성공"
+        ),
+        first_message_hint=(
+            "안녕하세요, 재무팀 조부장입니다. "
+            "skymall에 등록된 상품이 현재 총 몇 개인지 확인해주실 수 있나요?"
+        ),
+    ),
+    "GX-C15": Scenario(
+        case_id="GX-C15",
+        name="유사원의 같은 요청 반복",
+        persona=(
+            "총무팀 유사원. 20대 중반 여성. 처음 결과를 보고 놀라서 '진짜요?' 하고 다시 요청한다. "
+            "같은 작업을 한 번 더 해달라고 한다. 숫자가 맞는지 의심한다. "
+            "'혹시 아까 결과가 맞나요?' '한 번 더 확인해볼 수 있어요?' "
+            "존댓말을 쓰고, 조심스러운 편이다."
+        ),
+        goal=(
+            "skymall 상품 조회를 2회 실행한다. "
+            "첫 번째 결과를 보고 '다시 한 번 확인해주세요'라고 재요청한다"
+        ),
+        constraints=[
+            "1단계: skymall 상품 목록 조회 요청",
+            "2단계: 결과를 보고 '진짜 이게 전부인가요? 한 번 더 확인해주세요' 식으로 재요청",
+            "3단계: 두 번째 결과를 받으면 만족하고 종료",
+            "wiiiv가 확인을 요청하면 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "skymall API 호출이 최소 2회 실행되면 성공. "
+            "1회만 실행하고 '아까 결과와 같습니다'로 대체하면 실패."
+        ),
+        first_message_hint=(
+            "안녕하세요, 총무팀 유사원입니다. "
+            "skymall에 상품이 몇 개나 있는지 목록을 좀 조회해주실 수 있나요?"
+        ),
+    ),
+    "GX-C16": Scenario(
+        case_id="GX-C16",
+        name="배과장의 구체적 기술 요청",
+        persona=(
+            "IT팀 배과장. 30대 남성. API를 정확히 알고 있다. "
+            "엔드포인트, HTTP 메서드, 포트 번호를 직접 지정한다. "
+            "기술적으로 정확하게 말하며, 모호한 부분이 없다. "
+            "반말을 쓰고, 간결하다."
+        ),
+        goal=(
+            "skymall의 GET /api/products 엔드포인트를 직접 지정하여 호출하고, "
+            "결과를 /tmp/products_raw.json에 저장한다"
+        ),
+        constraints=[
+            "API 호출 정보를 직접 제공: host=home.skyepub.net, port=9090, path=/api/products, method=GET",
+            "인증 정보도 알려줌: POST /api/auth/login, username=jane_smith, password=password123",
+            "결과를 /tmp/products_raw.json에 저장 요청",
+            "wiiiv가 확인을 요청하면 바로 승인",
+        ],
+        max_turns=10,
+        judge_criteria=(
+            "skymall API 호출이 실행되어 상품 데이터를 받고, "
+            "/tmp/products_raw.json에 파일 저장이 수행되면 성공"
+        ),
+        first_message_hint=(
+            "home.skyepub.net:9090에 GET /api/products 호출해줘. "
+            "인증은 POST /api/auth/login에 jane_smith/password123으로."
+        ),
+    ),
+    "GX-C17": Scenario(
+        case_id="GX-C17",
+        name="황대리의 조건부 저장",
+        persona=(
+            "영업팀 황대리. 30대 초반 여성. 논리적이고 조건을 명확히 말한다. "
+            "'만약 ~이면 ~해주세요' 식의 조건부 요청을 한다. "
+            "데이터를 보고 판단한 뒤 다음 행동을 결정한다. "
+            "존댓말을 쓰고, 체계적이다."
+        ),
+        goal=(
+            "skymall 상품을 조회하고, 결과를 확인한 뒤 "
+            "/tmp/product_summary.json에 저장한다"
+        ),
+        constraints=[
+            "1단계: skymall 상품 목록 조회 요청",
+            "2단계: 결과를 보고 '상품이 있으니까 이걸 /tmp/product_summary.json에 저장해주세요' 요청",
+            "wiiiv가 확인을 요청하면 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "skymall API 호출이 실행되고, "
+            "/tmp/product_summary.json 파일 저장이 수행되면 성공"
+        ),
+        first_message_hint=(
+            "안녕하세요, 영업팀 황대리입니다. "
+            "skymall에 상품이 몇 개나 있는지 먼저 확인해주실 수 있나요?"
+        ),
+    ),
+    "GX-C18": Scenario(
+        case_id="GX-C18",
+        name="문팀장의 워크플로우 + 즉시 실행",
+        persona=(
+            "SCM팀 문팀장. 40대 남성. 워크플로우를 만들고 바로 실행하고 싶어한다. "
+            "비즈니스 프로세스를 잘 이해하고, 자동화를 원한다. "
+            "'만들고 바로 돌려주세요' 식으로 요청한다. "
+            "존댓말이지만 결단력 있고, 인터뷰 질문에 빠르게 답한다."
+        ),
+        goal=(
+            "skymall에서 상품을 조회하고 결과를 파일로 저장하는 워크플로우를 생성하고 실행한다"
+        ),
+        constraints=[
+            "처음부터 '자동화' 또는 '워크플로우'를 언급하여 WORKFLOW_CREATE를 유도",
+            "인터뷰 질문에 빠르고 구체적으로 답한다: skymall 상품 조회 → 파일 저장",
+            "WorkOrder 확인 요청이 오면 바로 승인",
+            "실행 결과를 확인하고 만족을 표현한다",
+        ],
+        max_turns=25,
+        judge_criteria=(
+            "워크플로우가 생성되어 실행되고, skymall API 호출이 포함되면 성공. "
+            "워크플로우 없이 단순 API 호출만 했으면 실패."
+        ),
+        first_message_hint=(
+            "안녕하세요, SCM팀 문팀장입니다. "
+            "skymall 상품 조회해서 파일로 저장하는 워크플로우를 하나 만들어주세요. "
+            "만들고 바로 실행해주시면 됩니다."
+        ),
+    ),
+    "GX-C19": Scenario(
+        case_id="GX-C19",
+        name="서대리의 이전 결과 재활용",
+        persona=(
+            "기획팀 서대리. 20대 후반 남성. 이전에 받은 데이터를 다시 활용하고 싶어한다. "
+            "'아까 그거 있잖아요' '방금 전에 조회한 거' 식으로 이전 결과를 참조한다. "
+            "존댓말을 쓰고, 약간 산만하다. "
+            "한 작업을 하다가 '아 그리고' 식으로 추가 요청을 한다."
+        ),
+        goal=(
+            "skymall 상품 조회 후, 이전 결과를 참조하여 "
+            "가격이 300달러 이상인 상품만 /tmp/expensive_items.json에 저장한다"
+        ),
+        constraints=[
+            "1단계: skymall 상품 조회 요청",
+            "2단계: 결과를 보고 '아까 그 데이터에서 300달러 이상인 것만 뽑아주세요' 식으로 필터 요청",
+            "3단계: '그거 /tmp/expensive_items.json에 저장해주세요' 요청",
+            "wiiiv가 확인을 요청하면 승인한다",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "skymall API 호출이 실행되고, 필터링된 결과가 "
+            "/tmp/expensive_items.json에 저장되면 성공"
+        ),
+        first_message_hint=(
+            "안녕하세요, 기획팀 서대리입니다. "
+            "skymall에서 상품 목록을 한번 조회해주실 수 있나요?"
+        ),
+    ),
+    "GX-C20": Scenario(
+        case_id="GX-C20",
+        name="전무이사의 종합 업무 지시",
+        persona=(
+            "전무이사 강전무. 50대 후반 남성. 고위 임원으로 한 번에 큰 그림을 지시한다. "
+            "세부 사항은 '알아서 해' 식이고, 결과만 중요시한다. "
+            "'보고서 형태로 정리해서 가져와' 식으로 말한다. "
+            "존댓말을 안 쓰고, 짧고 권위적이다."
+        ),
+        goal=(
+            "skymall 상품과 skystock 공급사를 모두 조회하고, "
+            "통합 결과를 /tmp/executive_briefing.json에 저장한다"
+        ),
+        constraints=[
+            "처음에 한 문장으로 전체 작업을 지시한다: 'skymall 상품이랑 skystock 공급사 다 뽑아서 하나로 정리해'",
+            "세부 질문에는 '알아서 해' 또는 최소한의 답만 한다",
+            "파일 저장 경로를 /tmp/executive_briefing.json으로 지정",
+            "wiiiv가 확인을 요청하면 '그래' 로 짧게 승인",
+        ],
+        max_turns=15,
+        judge_criteria=(
+            "skymall과 skystock 두 시스템 모두 API 호출이 실행되고, "
+            "/tmp/executive_briefing.json에 파일 저장이 수행되면 성공. "
+            "한쪽 시스템만 조회했거나 파일 저장이 없으면 실패."
+        ),
+        first_message_hint=(
+            "skymall 상품이랑 skystock 공급사 다 뽑아서 /tmp/executive_briefing.json에 정리해. 빨리."
+        ),
+    ),
 }
 
 

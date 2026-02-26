@@ -924,6 +924,28 @@ class ConversationalGovernor(
             }
         }
 
+        // 1.9. FILE_WRITE Previous Results Content Gate (isComplete 체크 전에 실행!)
+        // FILE_WRITE 시 content가 비어있거나 플레이스홀더이고,
+        // 이전 HLX 실행 결과가 있으면, 실제 실행 데이터를 content로 교체한다.
+        // LLM 슬롯 필링은 이전 턴의 실행 결과에 접근할 수 없으므로 content를 채우지 못한다.
+        if (draftSpec.taskType == TaskType.FILE_WRITE && draftSpec.targetPath != null) {
+            val content = draftSpec.content ?: ""
+            val trimmed = content.trim()
+            // content가 비어있거나, 구조화된 데이터가 아닌 짧은 텍스트면 플레이스홀더로 판단
+            val isVagueContent = trimmed.length < 300
+                    && !trimmed.startsWith("{") && !trimmed.startsWith("[")
+
+            if (isVagueContent) {
+                val actualContent = buildFileContentFromHistory(session, draftSpec.targetPath)
+                if (actualContent != null) {
+                    println("[CONTENT-GATE] FILE_WRITE content auto-filled from execution history")
+                    println("[CONTENT-GATE] Original: \"${trimmed.take(60).ifEmpty { "(empty)" }}\" → ${actualContent.length} chars")
+                    draftSpec = draftSpec.copy(content = actualContent)
+                    session.draftSpec = draftSpec
+                }
+            }
+        }
+
         // 2. Spec 완성 확인 (WorkOrder가 있으면 스킵 — 이미 충분한 정보 보유)
         // 3턴 이상 인터뷰 + intent 존재 + 사용자 확인이면 바이패스
         val interviewBypass = draftSpec.intent != null
@@ -2108,11 +2130,11 @@ class ConversationalGovernor(
             if (record.nodeType != HlxNodeType.ACT) continue
             val output = record.output ?: continue
             val outputStr = output.toString()
-            // 각 ACT 노드의 출력 (최대 800자로 트리밍)
-            if (outputStr.length <= 800) {
+            // 각 ACT 노드의 출력 (최대 4000자로 트리밍 — 크로스턴 컨텍스트 + FILE_WRITE 게이트에 사용)
+            if (outputStr.length <= 4000) {
                 appendLine("[${record.nodeId}] $outputStr")
             } else {
-                appendLine("[${record.nodeId}] ${outputStr.take(800)}...")
+                appendLine("[${record.nodeId}] ${outputStr.take(4000)}...")
             }
         }
     }
@@ -2141,6 +2163,56 @@ class ConversationalGovernor(
         }
         println("[CROSS-TURN] previousResults injected: ${result.length} chars, ${recentHlxResults.size} turns")
         return result
+    }
+
+    /**
+     * FILE_WRITE용: 이전 HLX 실행 결과에서 실제 데이터를 추출하여 파일 콘텐츠를 빌드
+     *
+     * LLM 슬롯 필링은 이전 턴의 실행 결과에 접근할 수 없으므로,
+     * "결과를 저장해주세요" 같은 요청에서 content가 플레이스홀더가 된다.
+     * 이 함수는 executionHistory에서 ACT 노드의 실제 출력 데이터를 추출한다.
+     */
+    private fun buildFileContentFromHistory(session: ConversationSession, targetPath: String?): String? {
+        val allHistory = session.context.allExecutionHistory()
+        if (allHistory.isEmpty()) return null
+
+        val recentHlxResults = allHistory
+            .filter { it.summary.startsWith("HLX:") && "COMPLETED" in it.summary }
+            .takeLast(5)
+
+        if (recentHlxResults.isEmpty()) return null
+
+        // ACT 노드 출력에서 JSON 데이터 추출
+        // summary 형식: "HLX: COMPLETED - workflow-name\n[node-id] {json data}\n..."
+        val dataEntries = mutableListOf<String>()
+        for (turn in recentHlxResults) {
+            for (line in turn.summary.lines()) {
+                if (!line.startsWith("[")) continue
+                val closeBracket = line.indexOf(']')
+                if (closeBracket < 0) continue
+                val data = line.substring(closeBracket + 1).trim()
+                // JSON 응답만 수집 (API 결과는 보통 {/[ 로 시작)
+                if (data.isNotBlank() && (data.startsWith("{") || data.startsWith("["))) {
+                    dataEntries.add(data)
+                }
+            }
+        }
+
+        if (dataEntries.isEmpty()) return null
+
+        val isJson = targetPath?.endsWith(".json", ignoreCase = true) == true
+
+        return if (isJson) {
+            // JSON 파일: 유효한 JSON 구조로 래핑
+            if (dataEntries.size == 1) {
+                dataEntries[0]
+            } else {
+                "[\n${dataEntries.joinToString(",\n")}\n]"
+            }
+        } else {
+            // 텍스트 파일: 실행 결과를 그대로 연결
+            dataEntries.joinToString("\n\n---\n\n")
+        }
     }
 
     /**
@@ -3070,6 +3142,16 @@ class ConversationalGovernor(
                     val body = output.json["body"]?.jsonPrimitive?.contentOrNull
                     appendLine()
                     appendLine("[HTTP $code] ${body?.take(1000) ?: ""}")
+                }
+
+                // FILE_WRITE: path + action
+                output.json["action"]?.let { action ->
+                    val actionStr = action.jsonPrimitive.contentOrNull ?: return@let
+                    if (actionStr == "WRITE") {
+                        val path = output.json["path"]?.jsonPrimitive?.contentOrNull ?: ""
+                        appendLine()
+                        appendLine("파일 저장 완료: $path")
+                    }
                 }
             }
         }

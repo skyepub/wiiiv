@@ -114,9 +114,10 @@ object HlxValidator {
                 errors.add(HlxValidationError("$nodePath.description", "Node description must not be blank"))
             }
 
-            // 7. onError 형식 검증
+            // 7. onError 형식 검증 (LLM 변형 허용: 쉼표, 여분의 공백 정규화)
             node.onError?.let { onError ->
-                if (!ON_ERROR_PATTERN.matches(onError)) {
+                val normalized = onError.trim().replace(Regex(",\\s*then"), " then").replace(Regex("\\s+"), " ")
+                if (!ON_ERROR_PATTERN.matches(normalized)) {
                     errors.add(
                         HlxValidationError(
                             "$nodePath.onError",

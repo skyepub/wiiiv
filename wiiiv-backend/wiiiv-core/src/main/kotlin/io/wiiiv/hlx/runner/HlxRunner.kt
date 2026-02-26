@@ -732,7 +732,8 @@ class HlxRunner(
         fun parseOnError(onError: String?): OnErrorPolicy {
             if (onError == null) return OnErrorPolicy()
 
-            val trimmed = onError.trim()
+            // LLM 변형 정규화: "retry:2, then skip" → "retry:2 then skip"
+            val trimmed = onError.trim().replace(Regex(",\\s*then"), " then").replace(Regex("\\s+"), " ")
 
             return when {
                 trimmed == "skip" -> OnErrorPolicy(retryCount = 0, fallback = OnErrorFallback.SKIP)

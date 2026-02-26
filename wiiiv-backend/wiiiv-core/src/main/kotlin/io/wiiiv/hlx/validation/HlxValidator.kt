@@ -116,7 +116,10 @@ object HlxValidator {
 
             // 7. onError 형식 검증 (LLM 변형 허용: 쉼표, 여분의 공백 정규화)
             node.onError?.let { onError ->
-                val normalized = onError.trim().replace(Regex(",\\s*then"), " then").replace(Regex("\\s+"), " ")
+                val normalized = onError.trim()
+                    .replace(Regex("retry:\\s+"), "retry:")   // "retry: 2" → "retry:2"
+                    .replace(Regex(",\\s*then"), " then")     // "retry:2, then" → "retry:2 then"
+                    .replace(Regex("\\s+"), " ")              // 여분의 공백 정리
                 if (!ON_ERROR_PATTERN.matches(normalized)) {
                     errors.add(
                         HlxValidationError(

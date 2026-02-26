@@ -34,6 +34,23 @@ object HlxValidator {
         """^(retry:\d+(\s+then\s+(skip|decide))?|skip|abort)$"""
     )
 
+    /**
+     * LLM이 생성하는 onError 변형을 정규화
+     *
+     * 허용되는 변형 예시:
+     * - "retry: 2" → "retry:2"           (콜론 뒤 공백)
+     * - "retry:2, then skip" → "retry:2 then skip"  (쉼표+then)
+     * - "retry:2, skip" → "retry:2 then skip"       (쉼표, then 생략)
+     * - "retry:2,skip" → "retry:2 then skip"        (쉼표만)
+     */
+    fun normalizeOnError(raw: String): String {
+        return raw.trim()
+            .replace(Regex("retry:\\s+"), "retry:")           // "retry: 2" → "retry:2"
+            .replace(Regex(",\\s*then\\s+"), " then ")        // ", then " → " then "
+            .replace(Regex(",\\s*(skip|decide|abort)"), " then $1") // ",skip" / ", skip" → " then skip"
+            .replace(Regex("\\s+"), " ")                      // 여분의 공백 정리
+    }
+
     /** 허용된 query param 이름 (소문자) */
     private val ALLOWED_QUERY_PARAMS = setOf(
         "page", "size", "sort", "threshold", "keyword", "categoryid", "status", "level",
@@ -116,10 +133,7 @@ object HlxValidator {
 
             // 7. onError 형식 검증 (LLM 변형 허용: 쉼표, 여분의 공백 정규화)
             node.onError?.let { onError ->
-                val normalized = onError.trim()
-                    .replace(Regex("retry:\\s+"), "retry:")   // "retry: 2" → "retry:2"
-                    .replace(Regex(",\\s*then"), " then")     // "retry:2, then" → "retry:2 then"
-                    .replace(Regex("\\s+"), " ")              // 여분의 공백 정리
+                val normalized = normalizeOnError(onError)
                 if (!ON_ERROR_PATTERN.matches(normalized)) {
                     errors.add(
                         HlxValidationError(

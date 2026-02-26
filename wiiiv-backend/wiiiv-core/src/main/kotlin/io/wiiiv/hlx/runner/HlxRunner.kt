@@ -5,6 +5,7 @@ import io.wiiiv.execution.ExecutorMetaRegistry
 import io.wiiiv.execution.impl.LlmProvider
 import io.wiiiv.gate.Gate
 import io.wiiiv.hlx.model.*
+import io.wiiiv.hlx.validation.HlxValidator
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.*
 
@@ -732,11 +733,8 @@ class HlxRunner(
         fun parseOnError(onError: String?): OnErrorPolicy {
             if (onError == null) return OnErrorPolicy()
 
-            // LLM 변형 정규화: "retry: 2, then skip" → "retry:2 then skip"
-            val trimmed = onError.trim()
-                .replace(Regex("retry:\\s+"), "retry:")   // "retry: 2" → "retry:2"
-                .replace(Regex(",\\s*then"), " then")     // "retry:2, then" → "retry:2 then"
-                .replace(Regex("\\s+"), " ")              // 여분의 공백 정리
+            // LLM 변형 정규화 (HlxValidator.normalizeOnError와 동일 로직)
+            val trimmed = HlxValidator.normalizeOnError(onError)
 
             return when {
                 trimmed == "skip" -> OnErrorPolicy(retryCount = 0, fallback = OnErrorFallback.SKIP)

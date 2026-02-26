@@ -5,7 +5,7 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * DACS - Dynamic Agent Consensus System
+ * DACS - Divergent Adversarial Consensus System
  *
  * Canonical: DACS v2 인터페이스 정의서 v2.1
  *

@@ -79,9 +79,11 @@ data class DraftSpec(
         TaskType.FILE_WRITE -> setOf("targetPath", "content")
         TaskType.FILE_DELETE -> setOf("targetPath")
         TaskType.COMMAND -> setOf("content") // command string
-        TaskType.PROJECT_CREATE -> setOf("domain", "techStack")
+        TaskType.PROJECT_CREATE -> setOf("domain", "techStack", "scale")
         TaskType.INFORMATION -> emptySet() // 정보 질문은 필수 없음
         TaskType.CONVERSATION -> emptySet() // 일반 대화는 필수 없음
+        TaskType.WORKFLOW_MANAGE -> emptySet() // 워크플로우 관리는 Pre-LLM 인터셉터가 처리
+        TaskType.WORKFLOW_CREATE -> setOf("domain", "scale") // 복합 워크플로우: 목적 + 상세 흐름
         TaskType.API_WORKFLOW -> setOf("intent", "domain") // API 워크플로우
         TaskType.DB_QUERY -> setOf("intent", "domain") // DB 조회 (domain = DB명)
         null -> setOf("intent", "taskType") // 아직 유형 미정
@@ -134,6 +136,7 @@ data class DraftSpec(
             // workspace 하위, /tmp, 상대 경로 등은 안전
             targetPath?.let { isSystemPath(it) } ?: false
         }
+        TaskType.WORKFLOW_CREATE -> false  // 워크플로우 생성은 작업지시서 기반 — DACS 불필요
         TaskType.API_WORKFLOW -> false  // API 호출은 외부 서비스 읽기 — DACS 불필요
         TaskType.DB_QUERY -> false  // DB 조회는 GateChain이 통제 — DACS 불필요
         else -> {
@@ -198,7 +201,11 @@ data class DraftSpec(
      * 완성된 Spec으로 변환
      */
     fun toSpec(): Spec {
-        require(isComplete()) { "DraftSpec is not complete. Missing: ${getMissingSlots()}" }
+        // WorkOrder가 있으면 isComplete 체크 우회 — 작업지시서가 이미 사용자에게 확인되었으므로
+        // LLM이 specUpdates에서 domain/techStack을 누락해도 WorkOrder에 모든 정보가 포함되어 있음
+        if (workOrderContent == null) {
+            require(isComplete()) { "DraftSpec is not complete. Missing: ${getMissingSlots()}" }
+        }
 
         val operations = when (taskType) {
             TaskType.FILE_READ -> listOf(RequestType.FILE_READ)
@@ -311,7 +318,13 @@ enum class TaskType(val displayName: String) {
     API_WORKFLOW("API 워크플로우"),
 
     /** 데이터베이스 조회/실행 (Phase E: Governed HLX) */
-    DB_QUERY("데이터베이스 조회")
+    DB_QUERY("데이터베이스 조회"),
+
+    /** 워크플로우 관리 (저장/로드/목록/삭제) — Pre-LLM 인터셉터로 처리 */
+    WORKFLOW_MANAGE("워크플로우 관리"),
+
+    /** 복합 워크플로우 생성 (인터뷰 → 작업지시서 → HLX 생성 → 실행) */
+    WORKFLOW_CREATE("워크플로우 생성")
 }
 
 /**
@@ -466,7 +479,9 @@ class SessionContext(
     var declaredWriteIntent: Boolean? = null,
     var workspace: String? = null,
     /** 시스템별 Bearer 토큰 저장소 — key: "host:port", value: token */
-    val tokenStore: MutableMap<String, String> = mutableMapOf()
+    val tokenStore: MutableMap<String, String> = mutableMapOf(),
+    /** 마지막으로 실행/저장된 워크플로우 ID — "방금 워크플로우 저장해줘" 등에 활용 */
+    var lastExecutedWorkflowId: String? = null
 ) {
     /**
      * 현재 활성 작업
@@ -478,6 +493,14 @@ class SessionContext(
      */
     val executionHistory: MutableList<TurnExecution>
         get() = activeTask?.context?.executionHistory ?: _fallbackHistory
+
+    /**
+     * 세션 전체에서 실행이 있었는지 (완료된 task 포함)
+     * activeTask가 null이어도 이전 완료 task의 실행 이력을 포함
+     */
+    fun hasAnyExecution(): Boolean =
+        _fallbackHistory.isNotEmpty()
+            || tasks.values.any { it.context.executionHistory.isNotEmpty() }
 
     /**
      * fallback history를 새 TaskSlot으로 마이그레이션하고 등록
@@ -500,6 +523,7 @@ class SessionContext(
         pendingAction = null
         declaredWriteIntent = null
         tokenStore.clear()
+        lastExecutedWorkflowId = null
         // workspace is intentionally preserved — it's an environment setting, not task state
     }
 }
@@ -541,7 +565,7 @@ enum class NextAction {
 class ConversationSession(
     val sessionId: String = UUID.randomUUID().toString(),
     val history: MutableList<ConversationMessage> = mutableListOf(),
-    private var _fallbackDraftSpec: DraftSpec = DraftSpec.empty(),
+    @Volatile private var _fallbackDraftSpec: DraftSpec = DraftSpec.empty(),
     var confirmed: Boolean = false,
     val context: SessionContext = SessionContext(),
     val createdAt: Long = System.currentTimeMillis(),
@@ -560,6 +584,14 @@ class ConversationSession(
                 _fallbackDraftSpec = value
             }
         }
+
+    /**
+     * PROJECT_CREATE DraftSpec 스냅샷.
+     * updateSpec에서 PROJECT_CREATE 타입의 의미있는 spec이 만들어질 때마다 자동 저장.
+     * DraftSpec이 원인 불명으로 비워졌을 때 복원에 사용.
+     */
+    @Volatile
+    private var _projectSpecSnapshot: DraftSpec? = null
 
     /** 마지막 사용자 입력 — Audit 기록용 */
     var lastUserInput: String? = null
@@ -580,6 +612,24 @@ class ConversationSession(
 
     fun updateSpec(updates: Map<String, JsonElement>) {
         draftSpec = applyUpdates(draftSpec, updates)
+        // PROJECT_CREATE spec 스냅샷 자동 저장
+        val current = draftSpec
+        if (current.taskType == TaskType.PROJECT_CREATE && current.intent != null) {
+            _projectSpecSnapshot = current
+        }
+    }
+
+    /**
+     * DraftSpec이 비어있을 때 스냅샷에서 복원 시도.
+     * @return 복원 성공 시 true
+     */
+    fun restoreSpecIfLost(): Boolean {
+        val current = draftSpec
+        if (current.taskType != null || current.intent != null) return false // 비어있지 않음
+        val snapshot = _projectSpecSnapshot ?: return false
+        // 스냅샷이 있고 현재 spec이 비어있으면 복원
+        draftSpec = snapshot
+        return true
     }
 
     private fun applyUpdates(spec: DraftSpec, updates: Map<String, JsonElement>): DraftSpec {
@@ -645,6 +695,7 @@ class ConversationSession(
             label = label,
             draftSpec = _fallbackDraftSpec
         )
+        println("[SPEC-TRACE] ensureActiveTask: promoting fallback → task $taskId (intent=${_fallbackDraftSpec.intent?.take(20)}, taskType=${_fallbackDraftSpec.taskType})")
         context.promoteToTask(task)
         _fallbackDraftSpec = DraftSpec.empty()
         return task
@@ -662,6 +713,7 @@ class ConversationSession(
     fun suspendCurrentWork(): TaskSlot? {
         if (context.activeTask != null) {
             val task = context.activeTask!!
+            println("[SPEC-TRACE] suspendCurrentWork: suspending active task ${task.id} (intent=${task.draftSpec.intent?.take(20)}, taskType=${task.draftSpec.taskType})")
             task.status = TaskStatus.SUSPENDED
             context.activeTaskId = null
             return task
@@ -685,8 +737,10 @@ class ConversationSession(
     fun resetSpec() {
         val activeTask = context.activeTask
         if (activeTask != null) {
+            println("[SPEC-TRACE] resetSpec: clearing active task ${activeTask.id} spec (was: taskType=${activeTask.draftSpec.taskType})")
             activeTask.draftSpec = DraftSpec.empty()
         } else {
+            println("[SPEC-TRACE] resetSpec: clearing fallback spec (was: taskType=${_fallbackDraftSpec.taskType}, intent=${_fallbackDraftSpec.intent?.take(20)})")
             _fallbackDraftSpec = DraftSpec.empty()
         }
         confirmed = false
@@ -707,6 +761,11 @@ class ConversationSession(
         }
         _fallbackDraftSpec = DraftSpec.empty()
         confirmed = false
+        // 컨텍스트 경계 마커 — LLM이 이전 작업 맥락과 새 요청을 구분하도록
+        history.add(ConversationMessage(
+            MessageRole.SYSTEM,
+            "--- 이전 작업이 취소되었습니다. 새 요청을 독립적으로 처리하세요. ---"
+        ))
     }
 
     /**

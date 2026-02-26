@@ -815,7 +815,7 @@ class E2EFlowTest {
             allowedPaths = listOf(testDir.absolutePath + "/**")
         )
 
-        // === 2. DACS 합의 (Dynamic Agent Consensus System) ===
+        // === 2. DACS 합의 (Divergent Adversarial Consensus System) ===
         val dacs = SimpleDACS.DEFAULT
         val dacsResult = dacs.evaluate(DACSRequest(spec = spec))
 

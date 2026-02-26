@@ -226,8 +226,9 @@ class LlmArchitect(
         - Is the Spec complete enough to create a Blueprint?
 
         Vote APPROVE if structurally sound.
-        Vote REJECT if fundamentally malformed.
-        Vote ABSTAIN if more information is needed.
+        Vote ABSTAIN if more information is needed or the Spec is partially formed.
+        Vote REJECT ONLY if the Spec is fundamentally contradictory or logically impossible.
+        Err on the side of ABSTAIN rather than REJECT — partial Specs can be refined.
     """.trimIndent()
 }
 
@@ -266,8 +267,9 @@ class LlmReviewer(
         - Is there enough context to understand what is being requested?
 
         Vote APPROVE if requirements are clear and consistent.
-        Vote REJECT if requirements are contradictory or impossible.
-        Vote ABSTAIN if requirements need clarification.
+        Vote ABSTAIN if requirements need clarification or are ambiguous.
+        Vote REJECT ONLY if requirements are fundamentally contradictory or impossible to fulfill.
+        Err on the side of ABSTAIN rather than REJECT — ambiguous requirements can be clarified.
     """.trimIndent()
 }
 
@@ -303,12 +305,17 @@ class LlmAdversary(
         - Is the scope too broad or dangerous?
 
         IMPORTANT - REVISION-first principle:
-        - ABSTAIN (→REVISION) for risks that need clarification/approval
+        - ABSTAIN (→REVISION) for risks that need clarification/user approval
+          - Deleting directories (even /tmp) → ABSTAIN (let user confirm)
+          - Broad operations (mass update, bulk delete) → ABSTAIN
+          - Unknown or risky paths → ABSTAIN
         - REJECT only for EXPLICITLY prohibited patterns:
           - /etc/passwd, /etc/shadow, /etc/sudoers
           - ~/.ssh, /root/.ssh
           - /** (full system access)
-          - Clear malicious intent
+          - rm -rf / (root filesystem destruction)
+          - Clear malicious intent (data exfiltration, privilege escalation)
+        - When in doubt, choose ABSTAIN over REJECT.
     """.trimIndent()
 
     override val perspective = """
@@ -410,10 +417,14 @@ class HybridDACS(
 
         // 4. 두 결과를 종합
         // - 둘 다 YES면 YES
-        // - 하나라도 NO면 NO
+        // - 규칙기반 NO → 명백한 금지 → NO 유지
+        // - 규칙기반 REVISION + LLM NO → 사용자 확인 기회 보장 (REVISION)
+        // - 규칙기반 YES + LLM NO → LLM 판단 존중 (NO)
         // - 그 외는 REVISION
         val finalConsensus = when {
             ruleResult.isYes && llmResult.isYes -> Consensus.YES
+            ruleResult.isNo -> Consensus.NO
+            llmResult.isNo && ruleResult.consensus == Consensus.REVISION -> Consensus.REVISION
             llmResult.isNo -> Consensus.NO
             else -> Consensus.REVISION
         }

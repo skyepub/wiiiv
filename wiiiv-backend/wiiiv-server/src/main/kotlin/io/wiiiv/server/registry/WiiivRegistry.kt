@@ -231,8 +231,9 @@ object WiiivRegistry {
             println("[AUDIT] Using external DB: ${auditUrl.take(40)}...")
             SimpleConnectionProvider(auditUrl, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
         } else {
-            println("[AUDIT] Using H2 file mode: ./data/wiiiv-audit")
-            SimpleConnectionProvider("jdbc:h2:file:./data/wiiiv-audit;AUTO_SERVER=TRUE")
+            val h2Path = "${System.getProperty("user.home")}/.wiiiv/data/wiiiv-audit"
+            println("[AUDIT] Using H2 file mode: $h2Path")
+            SimpleConnectionProvider("jdbc:h2:file:$h2Path;AUTO_SERVER=TRUE")
         }
 
         try {
@@ -251,7 +252,7 @@ object WiiivRegistry {
         val provider = if (!wfUrl.isNullOrBlank()) {
             SimpleConnectionProvider(wfUrl, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
         } else {
-            SimpleConnectionProvider("jdbc:h2:file:./data/wiiiv-audit;AUTO_SERVER=TRUE")
+            SimpleConnectionProvider("jdbc:h2:file:${System.getProperty("user.home")}/.wiiiv/data/wiiiv-audit;AUTO_SERVER=TRUE")
         }
 
         try {
@@ -271,8 +272,9 @@ object WiiivRegistry {
             println("[PLATFORM] Using external DB: ${platformUrl.take(40)}...")
             SimpleConnectionProvider(platformUrl, System.getenv("WIIIV_DB_USER"), System.getenv("WIIIV_DB_PASSWORD"))
         } else {
-            println("[PLATFORM] Using H2 file mode: ./data/wiiiv-platform")
-            SimpleConnectionProvider("jdbc:h2:file:./data/wiiiv-platform;AUTO_SERVER=TRUE")
+            val h2Path = "${System.getProperty("user.home")}/.wiiiv/data/wiiiv-platform"
+            println("[PLATFORM] Using H2 file mode: $h2Path")
+            SimpleConnectionProvider("jdbc:h2:file:$h2Path;AUTO_SERVER=TRUE")
         }
 
         try {

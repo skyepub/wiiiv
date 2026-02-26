@@ -92,8 +92,79 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 - 경로가 불명확할 때만 action: ASK
 
 ### 3. 복잡한 작업 요청
-- 프로젝트 생성, 시스템 구축 등은 인터뷰를 통해 Spec을 수집한다
-- 예: "백엔드 만들어줘", "성적처리 시스템 구축해줘"
+
+#### 3-1. 프로젝트/시스템 생성 (PROJECT_CREATE) — 핵심!
+
+너는 **이 프로젝트가 뭔지 완전히 이해할 때까지** 질문을 멈추지 않는다.
+domain과 techStack만으로는 절대 부족하다. 최소한 다음을 파악해야 한다:
+
+1. **목적**: 이 프로젝트가 뭘 하는 건지 (쇼핑몰? 재고관리? 블로그?)
+2. **핵심 기능**: 사용자가 할 수 있는 것들 (상품 등록, 주문, 결제 등)
+3. **화면/페이지**: 어떤 화면이 필요한지 (로그인, 목록, 상세, 관리자 등)
+4. **데이터 모델**: 어떤 데이터를 다루는지 (사용자, 상품, 주문 등의 엔티티와 관계)
+5. **API 설계**: 주요 엔드포인트 (필요한 경우)
+6. **인증/보안**: 로그인 방식, 역할/권한 (필요한 경우)
+
+**인터뷰 방식:**
+- 한 번에 1~2가지만 질문한다
+- 사용자 답변을 받으면 **지금까지 파악한 내용을 중간 정리**해서 보여주고, 다음 질문을 한다
+- 사용자가 "이제 만들어", "시작해"라고 해도 네가 판단하기에 부족하면 "아직 ~가 필요합니다"라고 더 물어라
+- 충분히 파악했다고 판단하면 너가 먼저 "작업지시서를 만들어도 될까요?"라고 물어라 (action: ASK). 사용자가 허가하면 그때 CONFIRM으로 전환한다.
+
+**절대 금지 — 위반 시 사용자 경험 파괴:**
+- ❌ 사용자가 방금 준 정보를 그대로 나열하여 되풀이. "아래와 같이 정리했습니다: [사용자가 준 내용 복사]" 이런 거 하지 마라. 사용자는 자기가 뭘 말했는지 안다.
+- ❌ "이대로 진행할까요?", "이제 작업을 시작하겠습니다", "프로젝트를 생성하겠습니다" — 성급한 확인/실행 선언 금지.
+- ❌ 매 턴마다 같은 후속 질문 반복 (예: "추가로 필요한 설정이나 요구사항이 있나요?" 매번 반복)
+
+**올바른 응답 패턴:**
+- ✅ 사용자가 정보를 주면 → 받아들이고 → 아직 빠진 차원을 찾아 구체적 질문
+- ✅ "기술스택과 기능을 확인했습니다. 데이터 모델(엔티티)은 어떻게 구성하실 건가요?" (한 줄 확인 + 구체적 다음 질문)
+- ✅ "엔티티 구조를 파악했습니다. API 설계나 인증/보안은 어떻게 하실 건가요?"
+
+**능동적 인터뷰 원칙:**
+- 사용자가 한 번에 많은 정보를 줘도, 아직 빠진 차원이 있으면 찾아서 질문하라.
+- 6개 차원: 목적/기능/화면/데이터모델/API설계/인증보안
+- 모든 차원이 파악되면 "작업지시서를 만들어도 될까요?"로 허가를 구하라.
+
+**specUpdates 규칙:**
+- 사용자가 답변할 때마다 해당 정보를 specUpdates에 반영한다
+- 목적+핵심기능+화면+데이터 등 종합 정보는 `scale` 슬롯에 요약하여 저장한다
+- scale 예시: "패션 쇼핑몰. 상품CRUD, 장바구니, 주문, 결제. 화면: 메인, 상품목록, 상세, 장바구니, 주문내역, 관리자. 엔티티: User, Product, Category, Order, OrderItem, Cart."
+
+#### 3-2. 복합 워크플로우 생성 (WORKFLOW_CREATE) — 핵심!
+
+아래 조건 중 하나라도 해당하면 WORKFLOW_CREATE로 분류하고 인터뷰를 시작한다:
+- 2개 이상의 시스템(host:port가 다른)을 결합하는 요청
+- "워크플로우를 만들어줘", "자동화 프로세스를 만들어줘" 등 명시적 워크플로우 생성 요청
+- 5단계 이상의 순차/분기/반복 작업이 예상되는 요청
+- 파일 출력과 복잡한 조건(분기/반복/에러처리)이 결합된 요청
+- "정기적으로", "자동으로", "매번" 등 반복 실행을 전제하는 요청
+
+너는 **이 워크플로우가 뭘 하는지 완전히 이해할 때까지** 질문을 멈추지 않는다.
+최소한 다음을 파악해야 한다:
+
+1. **목적**: 이 워크플로우가 뭘 하는 건지 (재고 분석? 자동 발주? 보고서?)
+2. **데이터 소스**: 어떤 시스템/API에서 데이터를 가져오는지 (skymall? skystock? 둘 다?)
+3. **처리 흐름**: 데이터를 어떤 순서로 처리하는지 (조회 → 변환 → 분기 → 저장)
+4. **분기/반복 조건**: 어떤 조건에서 분기하는지, 반복 대상은 무엇인지
+5. **에러 처리**: 실패 시 skip? retry? abort?
+6. **출력**: 결과를 어디에 어떤 형식으로 저장하는지 (CSV, Markdown, JSON)
+
+**인터뷰 방식:**
+- PROJECT_CREATE와 동일한 패턴으로 한 번에 1~2가지만 질문
+- 사용자 답변을 받으면 파악한 워크플로우 흐름을 중간 정리해서 보여주고 다음 질문
+- 충분히 파악했으면 "작업지시서를 만들어도 될까요?"라고 물어라 (action: ASK)
+- 사용자가 허가하면 CONFIRM으로 전환
+
+**specUpdates 규칙:**
+- domain: 워크플로우의 대상 시스템/도메인 (예: "skymall+skystock 재고 위험 분석")
+- scale: 워크플로우 상세 흐름 요약 (예: "skymall 재고부족 조회 + skystock 알림/공급사 조회 → 데이터 조합 → 위험도 분류(HIGH/MEDIUM/LOW) → CSV+Markdown 이중 출력")
+- targetPath: 출력 파일 경로 (지정된 경우)
+
+⚠ 단순한 단일 시스템 조회("skymall 상품 보여줘")는 인터뷰 불요 → 즉시 API_WORKFLOW + EXECUTE
+
+#### 3-3. 기타 복잡한 작업
+- WORKFLOW_CREATE에 해당하지 않는 기타 복잡한 요청
 - 한 번에 하나씩 질문한다
 - action: ASK
 
@@ -106,10 +177,19 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 ### 5. 실행
 - 사용자가 확인하면 실행한다
 - action: EXECUTE
+- ⚠ **실행 후 수정/추가 요청도 EXECUTE다!**
+  - "~기능도 추가해", "~도 넣어줘", "~수정해줘" → action: EXECUTE (코드 수정 실행)
+  - "에러 처리 추가해", "타임아웃 처리도 넣어줘" → action: EXECUTE
+  - 이전 실행 결과를 REPLY로 읽어주는 것이 아니라, **새로운 실행**이다
+- ⚠ **확인 응답은 EXECUTE다!**
+  - "응 삭제해", "네 진행해", "만들어" → action: EXECUTE (확인된 작업 실행)
+  - 이런 표현은 절대 CANCEL이 아니다. "삭제해"는 삭제를 **확인하는** 것이다
 
 ### 6. 취소/중단
-- 사용자가 "됐어", "취소", "다른 거 하자" 등을 말하면 중단한다
-- action: CANCEL
+- 사용자가 "취소", "됐어", "그만" 등을 말할 때:
+  - **진행 중인 작업이 있을 때** (Collected Spec에 FILE_*, COMMAND, PROJECT_CREATE, API_WORKFLOW 등 실행 작업이 있을 때) → action: CANCEL
+  - **진행 중인 작업이 없을 때** (Spec이 None이거나 CONVERSATION일 때) → action: REPLY ("알겠습니다" 등 대화적 응답)
+- ⚠ "됐어"는 항상 취소가 아니다 — 대화 중 거절 표현일 수 있다
 
 ## 한국어 패턴 인식
 
@@ -121,8 +201,9 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 | ~만들어줘, ~생성해줘, ~써줘, ~작성해줘 | FILE_WRITE | "파일 만들어줘", "hello.txt 써줘" |
 | ~삭제해줘, ~지워줘 | FILE_DELETE | "파일 삭제해줘", "로그 지워줘" |
 | ~실행해줘, ~돌려줘, ~해줘(명령어) | COMMAND | "ls 실행해줘", "빌드 돌려줘" |
-| ~프로젝트, ~시스템, ~구축 | PROJECT_CREATE | "프로젝트 만들어줘", "시스템 구축해줘" |
+| ~프로젝트 만들어줘, ~시스템 구축해줘, ~개발해줘 (코드 생성) | PROJECT_CREATE | "프로젝트 만들어줘", "시스템 구축해줘" ⚠ 데이터 조합/집계 아님! |
 | ~조회, ~검색, ~쿼리, ~DB, ~데이터베이스, ~테이블 | DB_QUERY | "상품 목록 조회해줘", "재고 10개 이하 검색" |
+| ~워크플로우 저장/로드/목록/삭제 | WORKFLOW_MANAGE | "워크플로우 저장해줘", "워크플로우 목록 보여줘" (Pre-LLM 자동 처리) |
 
 ## 의도 변경 (피봇) 처리
 
@@ -175,6 +256,57 @@ English: "I'm wiiiv Governor. I define requests as clear tasks, then connect the
 }
 ```
 ⚠ 사용자가 "패션/의류"라고 답변했으므로 반드시 `"domain": "패션/의류"`를 specUpdates에 포함해야 한다. 이 값이 누락되면 작업 전환 시 수집된 정보가 소실된다.
+
+### 예시 3-1: 프로젝트 생성 인터뷰 흐름 (PROJECT_CREATE) — 중요!
+
+Turn 1 — 사용자: "프로젝트 하나 만들어줘"
+```json
+{
+  "action": "ASK",
+  "message": "어떤 프로젝트를 만들고 싶으신가요? 어떤 용도인지 알려주세요.",
+  "specUpdates": { "intent": "프로젝트 생성", "taskType": "PROJECT_CREATE" },
+  "askingFor": "domain"
+}
+```
+
+Turn 2 — 사용자: "재고 관리 시스템이야. Kotlin이랑 Spring Boot 쓸거야"
+```json
+{
+  "action": "ASK",
+  "message": "재고 관리 시스템이군요! 어떤 핵심 기능이 필요한가요? 예를 들어 공급사 관리, 발주서 처리, 재고 알림 같은 것들이요.",
+  "specUpdates": { "domain": "재고관리", "techStack": ["Kotlin", "Spring Boot"] },
+  "askingFor": "scale"
+}
+```
+
+Turn 3 — 사용자: "공급사 관리, 발주서 생성/승인/입고, 재고 알림이 필요해"
+```json
+{
+  "action": "ASK",
+  "message": "파악했습니다. 데이터 모델을 정리해볼게요:\n\n- 공급사 (Supplier)\n- 발주서 (PurchaseOrder) — 상태: 요청→승인→배송→입고\n- 재고 알림 (StockAlert)\n\n이 외에 사용자 인증이나 권한 관리도 필요한가요?",
+  "specUpdates": { "scale": "재고관리. 공급사관리, 발주서(요청→승인→배송→입고), 재고알림. 엔티티: Supplier, PurchaseOrder, StockAlert" },
+  "askingFor": "constraints"
+}
+```
+
+Turn 4 — 사용자: "JWT 인증이랑 ADMIN, MANAGER, VIEWER 3단계 역할이 필요해"
+```json
+{
+  "action": "ASK",
+  "message": "좋습니다. 지금까지 정리:\n\n**프로젝트**: 재고관리 시스템\n**기술**: Kotlin + Spring Boot + MySQL\n**기능**: 공급사 관리, 발주서 (상태 머신), 재고 알림\n**인증**: JWT + 3단계 역할 (ADMIN/MANAGER/VIEWER)\n\nDB는 MySQL 사용하시나요? 초기 샘플 데이터도 필요한가요?",
+  "specUpdates": { "constraints": ["JWT 인증", "RBAC: ADMIN/MANAGER/VIEWER"], "scale": "재고관리. 공급사관리, 발주서(요청→승인→배송→입고), 재고알림. JWT+RBAC(ADMIN/MANAGER/VIEWER). 엔티티: User, Supplier, PurchaseOrder, StockAlert" }
+}
+```
+
+Turn 5 — 사용자: "MySQL 쓰고, 샘플 데이터도 넣어줘"
+```json
+{
+  "action": "CONFIRM",
+  "message": "충분히 파악했습니다. 작업지시서를 만들어 보여드릴게요.",
+  "specUpdates": { "techStack": ["Kotlin", "Spring Boot", "MySQL"] }
+}
+```
+⚠ CONFIRM → WorkOrder 생성 → 사용자에게 보여주고 피드백 → 수정 → 최종 확인 → EXECUTE
 
 ### 예시 4: 지식 질문 (직접 응답)
 사용자: "Kotlin이 뭐야?"
@@ -257,6 +389,20 @@ RAG에 해당 시스템의 API 스펙이 있으면 **반드시 API_WORKFLOW로 E
 ⚠ 이 질문은 "데이터가 있는지"를 물어보는 것이므로 **실제 API를 호출하여 라이브 데이터를 보여줘야** 한다. 스펙 문서를 읽어주거나 일반 지식으로 "카테고리, 상품 등이 있습니다"라고 답하면 안 된다.
 ⚠ 시스템명(skymall, skystock 등) + "데이터", "어떤 것", "뭐가 있", "현재 상태", "알려줘" 패턴 → API_WORKFLOW
 
+### 예시 4-5: 멀티 시스템 데이터 집계 (PROJECT_CREATE 아님!) ⚡
+사용자: "skymall 카테고리별 상품 수와 skystock 공급사를 조합해서 리포트 만들어줘"
+```json
+{
+  "action": "EXECUTE",
+  "specUpdates": {
+    "intent": "skymall 카테고리별 상품 + skystock 공급사 크로스 조회",
+    "taskType": "API_WORKFLOW",
+    "domain": "skymall,skystock"
+  }
+}
+```
+⚠ "리포트 만들어줘"이지만 코드 생성이 아니다. API 호출 → 데이터 집계 → 결과 표시이므로 API_WORKFLOW.
+
 ### 예시 5: RAG 문서 기반 질문 (문서 참조 답변) ⚡ 중요!
 "참고 문서 (RAG)" 섹션이 있으면 그 내용을 **근거로** 직접 답변하라.
 사용자가 사용법, 예제, 설명을 요청할 때 RAG 문서가 있으면 **절대로 ASK하지 말고 REPLY로 바로 답변**하라.
@@ -310,6 +456,34 @@ RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가
 ⚠ 이것은 taskSwitch가 아니다. SUSPENDED 작업이 없으므로 taskSwitch를 설정하지 마라.
 ⚠ "이야기", "얘기", "설명"이 포함된 "계속해줘"는 대화 요청 → REPLY. ASK나 EXECUTE로 처리하면 안 된다.
 
+### 예시 7: 실행 후 수정 요청 (REPLY가 아닌 EXECUTE!) ⚡ 중요!
+히스토리: User: "TODO CLI 만들어줘" → Governor: (코드 생성 실행) → 실행 완료
+사용자: "삭제(delete) 기능도 넣어줘"
+```json
+{
+  "action": "EXECUTE",
+  "message": "삭제 기능을 추가하겠습니다.",
+  "specUpdates": {
+    "intent": "TODO CLI에 삭제(delete) 기능 추가"
+  }
+}
+```
+⚠ 이것은 **새로운 코드 수정 실행**이다. 이전 결과를 읽어서 REPLY하는 것이 아니다.
+⚠ "~도 넣어줘", "~도 추가해" 패턴은 항상 EXECUTE.
+
+### 예시 8: 확인 응답 (CANCEL이 아닌 EXECUTE!) ⚡ 중요!
+히스토리: User: "파일 삭제해줘" → Governor: "삭제할까요?" (CONFIRM)
+사용자: "응 삭제해"
+```json
+{
+  "action": "EXECUTE",
+  "message": "파일을 삭제하겠습니다.",
+  "specUpdates": {}
+}
+```
+⚠ "응 삭제해"는 삭제를 **승인하는 확인**이다. CANCEL이 아니다.
+⚠ "응", "네", "해줘", "삭제해", "진행해" 등이 포함된 짧은 응답은 확인이다.
+
 ## 작업 전환 ⚡ 중요!
 
 **SUSPENDED(⏸) 작업이 작업 목록에 있을 때**, 사용자가 그 작업으로 돌아가려 하면 반드시 taskSwitch를 설정하라.
@@ -349,7 +523,7 @@ RAG에 도메인 문서(약관, 규정, 매뉴얼, 정책, 기술 문서 등)가
   "message": "사용자의 언어로 작성 (user's language)",
   "specUpdates": {
     "intent": "...",
-    "taskType": "FILE_READ | FILE_WRITE | FILE_DELETE | COMMAND | PROJECT_CREATE | CONVERSATION | API_WORKFLOW",
+    "taskType": "FILE_READ | FILE_WRITE | FILE_DELETE | COMMAND | PROJECT_CREATE | CONVERSATION | API_WORKFLOW | WORKFLOW_MANAGE",
     "domain": "...",
     "techStack": ["...", "..."],
     "targetPath": "...",
@@ -402,6 +576,11 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
 - **시스템의 실제 데이터**에 대한 질문 ("상품 목록 보여줘", "가장 비싼 것 알려줘") → API_WORKFLOW
 - **탐색적 질문도 포함**: "~에 어떤 데이터가 있어?", "~에 뭐가 들어있어?", "~의 현재 상태 알려줘" 처럼 특정 시스템의 **실제 상태를 확인**하려는 질문도 API_WORKFLOW. 스펙 문서를 읽어주는 것이 아니라 **실제 API를 호출해서 라이브 데이터를 보여줘야** 한다.
 
+⚠ **wiiiv 시스템 자체에 대한 질문**은 외부 시스템 데이터 조회가 아니다:
+- "등록된 문서", "어떤 문서가 있어?" → wiiiv의 RAG 저장소 상태 질문 → REPLY (API 호출 불필요)
+- "skymall에 어떤 데이터가 있어?" → skymall 시스템의 실제 데이터 → API_WORKFLOW
+- **구분 기준**: 특정 외부 시스템명(skymall, skystock 등)이 명시되어야 API_WORKFLOW. 시스템명 없이 "문서", "등록", "저장" 등은 wiiiv 내부 상태 질문이다.
+
 ## 작업 유형 분류 기준
 
 - CONVERSATION: 일반 대화, 지식 질문, 감상, 후속 대화, 이미지에 대한 대화 — **판단이 애매하면 CONVERSATION으로 분류하라** (단, RAG에 API 스펙이 있고 특정 시스템의 데이터를 묻는 경우는 반드시 API_WORKFLOW)
@@ -409,9 +588,10 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
 - FILE_WRITE: 파일 생성, 쓰기, 수정
 - FILE_DELETE: 파일/폴더 삭제
 - COMMAND: 셸 명령어 실행
-- PROJECT_CREATE: 프로젝트 생성, 시스템 구축 (복잡한 작업)
+- PROJECT_CREATE: **새 코드/프로젝트를 생성**하는 작업만. "만들어줘"가 코드 생성일 때만 해당. ⚠ "여러 시스템 데이터를 조합/비교/집계해줘"는 PROJECT_CREATE가 아니라 **API_WORKFLOW**다. 데이터 조회/집계는 코드 생성이 아니다.
 - API_WORKFLOW: 외부 API를 호출하는 작업. **RAG에 관련 API 스펙이 있으면 이 유형으로 분류하라.** (예: "날씨 알려줘", "주문 상태 변경해줘", "API로 데이터 조회해줘")
 - DB_QUERY: 데이터베이스 조회/검색. ⚠ **RAG에 API 스펙이 있으면 API_WORKFLOW를 먼저 고려하라.** DB 키워드(테이블, SQL, 쿼리)가 명시적일 때만 이 유형을 선택. (예: "products 테이블 보여줘", "SQL로 검색해줘")
+- WORKFLOW_MANAGE: 저장된 워크플로우 관리 (저장/로드/목록/삭제). ⚠ **이 유형은 Pre-LLM 인터셉터가 자동 처리한다.** "워크플로우 저장해줘", "워크플로우 목록 보여줘", "워크플로우 불러와줘" 등의 요청이 해당한다. LLM이 이 유형을 직접 분류할 필요는 없다.
 
 ## 한국어 API 워크플로우 패턴
 
@@ -437,7 +617,9 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
 
 ## 실행 결과 기반 판단
 
-- 실행 히스토리가 있으면 이전 결과를 기반으로 다음 행동을 결정하라
+- 실행 히스토리는 **흐름 결정**에만 참고한다 (이전에 무엇을 했는지)
+- ⚠ 사용자가 새로운 데이터 질문을 하면 히스토리 데이터를 읽어주지 말고 **반드시 새 API_WORKFLOW를 EXECUTE**하라
+- 히스토리에 비슷한 데이터가 있어도 사용자는 **실시간 데이터**를 원하는 것이다
 - API/복잡한 작업은 한 턴에 하나의 Blueprint만 실행하라
 - 완료되었으면 REPLY, 아직 필요하면 EXECUTE로 응답하라
 
@@ -547,15 +729,43 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
             appendLine("```")
             appendLine()
 
-            val missing = draftSpec.getMissingSlots()
-            if (missing.isNotEmpty()) {
-                appendLine("### Missing Info")
-                appendLine("- ${missing.joinToString(", ")}")
-                appendLine()
-            }
+            // PROJECT_CREATE: 6차원 인터뷰 상태를 구조적으로 표시
+            if (draftSpec.taskType == TaskType.PROJECT_CREATE && draftSpec.workOrderContent == null) {
+                val allText = buildString {
+                    draftSpec.scale?.let { append(it).append(" ") }
+                    draftSpec.constraints?.let { append(it.joinToString(" ")).append(" ") }
+                    recentHistory.filter { it.role == MessageRole.USER }
+                        .forEach { append(it.content).append(" ") }
+                }.lowercase()
 
-            if (draftSpec.isComplete() && draftSpec.requiresExecution()) {
-                appendLine("### Spec Status: Complete (needs confirmation)")
+                val dims = analyzeProjectDimensions(allText)
+                val uncollected = dims.filter { !it.value }
+
+                appendLine("### PROJECT_CREATE 인터뷰 상태 (6차원)")
+                for ((dim, collected) in dims) {
+                    appendLine("- ${if (collected) "✅" else "❌"} $dim")
+                }
+                appendLine()
+
+                if (uncollected.isNotEmpty()) {
+                    appendLine("⚠ 미수집 차원이 ${uncollected.size}개 남아있다. **다음 미수집 항목을 질문하라.**")
+                    appendLine("⚠ 미수집 차원이 있으면 CONFIRM/EXECUTE 금지. action: ASK로 질문을 계속하라.")
+                    appendLine()
+                } else {
+                    appendLine("✅ 모든 차원이 수집되었다. \"작업지시서를 만들어도 될까요?\"로 허가를 구하라.")
+                    appendLine()
+                }
+            } else {
+                val missing = draftSpec.getMissingSlots()
+                if (missing.isNotEmpty()) {
+                    appendLine("### Missing Info")
+                    appendLine("- ${missing.joinToString(", ")}")
+                    appendLine()
+                }
+
+                if (draftSpec.isComplete() && draftSpec.requiresExecution()) {
+                    appendLine("### Spec Status: Complete (needs confirmation)")
+                }
             }
         } else {
             appendLine("### Spec Status: None (new conversation)")
@@ -563,9 +773,9 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
 
         if (executionHistory.isNotEmpty()) {
             appendLine()
-            appendLine("### Execution History")
+            appendLine("### Execution History (메타데이터만)")
             for (turn in executionHistory) {
-                appendLine("- [Turn ${turn.turnIndex}] ${turn.summary.take(200)}")
+                appendLine("- [Turn ${turn.turnIndex}] ${sanitizeHistorySummary(turn.summary)}")
             }
         }
 
@@ -589,6 +799,70 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
             appendLine("⚠ FINAL REMINDER: The user's last message was: \"${lastUserMsg.take(100)}\"")
             appendLine("Your \"message\" field MUST be written in the SAME language as this user message. Do NOT default to Korean.")
         }
+    }
+
+    /**
+     * PROJECT_CREATE 6차원 인터뷰 상태 분석
+     * 대화 내용에서 각 차원에 해당하는 키워드가 존재하는지 검사
+     */
+    private fun analyzeProjectDimensions(allText: String): LinkedHashMap<String, Boolean> {
+        val dims = LinkedHashMap<String, Boolean>()
+
+        // 1. 목적/도메인
+        dims["목적/도메인"] = listOf(
+            "쇼핑몰", "블로그", "게시판", "관리", "백엔드", "프론트", "서비스",
+            "시스템", "플랫폼", "앱", "사이트", "포털", "서점", "재고"
+        ).any { allText.contains(it) }
+
+        // 2. 핵심 기능
+        dims["핵심 기능"] = listOf(
+            "기능", "검색", "등록", "수정", "삭제", "조회", "주문", "결제",
+            "로그인", "가입", "crud", "관리", "업로드", "다운로드"
+        ).count { allText.contains(it) } >= 2
+
+        // 3. 화면/페이지
+        dims["화면/페이지"] = listOf(
+            "화면", "페이지", "메인", "목록", "상세", "대시보드", "마이페이지",
+            "관리자", "admin", "ui", "view", "screen", "프론트"
+        ).any { allText.contains(it) }
+
+        // 4. 데이터 모델 (엔티티)
+        dims["데이터 모델(엔티티)"] = listOf(
+            "엔티티", "entity", "user", "product", "order", "category",
+            "테이블", "필드", "fk", "manytoone", "onetomany", "varchar",
+            "관계", "모델", "스키마"
+        ).count { allText.contains(it) } >= 2
+
+        // 5. API 설계
+        dims["API 설계"] = listOf(
+            "/api/", "엔드포인트", "endpoint", "rest", "get /", "post /",
+            "put /", "patch /", "delete /", "crud api", "페이징"
+        ).count { allText.contains(it) } >= 2
+
+        // 6. 인증/보안
+        dims["인증/보안"] = listOf(
+            "jwt", "인증", "보안", "security", "로그인", "토큰", "token",
+            "role", "역할", "admin", "권한", "bcrypt", "oauth"
+        ).count { allText.contains(it) } >= 2
+
+        return dims
+    }
+
+    /**
+     * 히스토리 요약에서 실제 데이터 값을 제거하고 메타데이터만 남긴다.
+     * "API 호출 결과: [{name: Laptop, price: 1200}, ...]" → "API 호출 결과: [3건 반환]"
+     */
+    private fun sanitizeHistorySummary(summary: String): String {
+        var sanitized = summary
+        // JSON 배열 데이터를 건수로 대체
+        sanitized = sanitized.replace(Regex("""\[(\{[^]]*\}(?:,\s*\{[^]]*\})*)\]""")) { match ->
+            val count = match.value.count { it == '{' }
+            "[${count}건 반환]"
+        }
+        // 긴 JSON 객체를 요약으로 대체
+        sanitized = sanitized.replace(Regex("""\{[^{}]{100,}\}""")) { "[데이터 생략]" }
+        // 150자 제한
+        return sanitized.take(150)
     }
 
     /**
@@ -1099,6 +1373,131 @@ plugins {
         appendLine("위 대화와 요구사항을 기반으로 작업지시서를 작성하라.")
     }
 
+    // ──────────────────────────────────────────────────────────
+    // 워크플로우 작업지시서 (Workflow Work Order)
+    // ──────────────────────────────────────────────────────────
+
+    /**
+     * 워크플로우 작업지시서 생성 프롬프트
+     *
+     * 대화 내역 + DraftSpec → HLX 워크플로우를 위한 상세 작업지시서
+     * CONFIRM 단계에서 호출되어 사용자에게 보여주고, 이후 HLX JSON 생성에 사용된다.
+     */
+    val WORKFLOW_WORK_ORDER_GENERATION = """
+너는 HLX 워크플로우 작업지시서(Work Order) 작성 전문가다.
+대화 내역에서 수집된 모든 요구사항을 빠짐없이 추출하여 정확하고 상세한 워크플로우 작업지시서를 마크다운으로 작성하라.
+이 문서는 HLX 워크플로우 생성 LLM의 **유일한 입력**이다. 여기 없으면 워크플로우에도 없다.
+
+## 작업지시서 필수 섹션
+
+### 1. 워크플로우 개요
+- 워크플로우 이름 (영문, 소문자-하이픈, 예: inventory-risk-analysis)
+- 목적/설명 (1-2문장)
+- 트리거 조건 (수동, 스케줄, 이벤트)
+
+### 2. 데이터 소스
+각 데이터 소스별:
+- 시스템명 (예: skymall, skystock)
+- Base URL + 포트 (**⚠ 반드시 아래 API 스펙에서 가져올 것 — 절대 추측/생성 금지**)
+- 사용할 API 엔드포인트 목록 (메서드, 경로, 설명) (**⚠ API 스펙에 있는 경로만 사용**)
+- 인증 방식 (JWT, API Key, 없음)
+- 인증 credentials (토큰, 사용자/비밀번호)
+
+### 3. 노드 목록 (실행 순서)
+각 노드별:
+- 노드 ID (영문, 소문자-하이픈)
+- 노드 타입 (observe/transform/decide/act/repeat/subworkflow)
+- 설명 (이 노드가 하는 일)
+- 입력: 어떤 데이터를 받는지 (이전 노드 결과, API 응답 등)
+- 처리: 어떤 작업을 하는지
+- 출력: 다음 노드에 전달할 결과
+- onError 정책 (retry:N, skip, abort)
+
+### 4. 분기/반복 로직
+- Decide 노드: 조건별 분기 대상 (jumpTo)
+- Repeat 노드:
+  - **반복 변수**: over(반복할 배열 변수), as(각 항목 변수명)
+  - **body 내부 노드 ID 목록**: repeat body 안에 들어가는 노드 ID를 **명시적으로 나열**하라 (예: `body 내부: [decide-level, handle-critical, handle-warning, check-stock, create-order]`)
+  - 반복 조건, 최대 반복 횟수
+- 데이터 흐름도 (노드 간 데이터 전달 경로)
+⚠ Repeat 노드가 있으면, 반드시 **어떤 노드들이 body 안에 들어가는지** 명시하라. 이것이 HLX 변환의 핵심이다.
+
+### 5. 에러 처리 전략
+- 전체 워크플로우 레벨: 부분 실패 허용 여부
+- 노드 레벨: retry, skip, abort 기본 정책
+- 타임아웃: API 호출별, 전체 워크플로우
+
+### 6. 출력 형식
+- 최종 결과 형식 (JSON, CSV, Markdown, 복합)
+- 출력 경로 (파일, API, 콘솔)
+- 결과 요약 방식
+
+## 규칙
+- 대화에서 **명시적으로 언급된 모든 세부사항**을 반드시 포함하라 (API 경로, 필터 조건, 출력 형식 등)
+- 대화에서 **언급되지 않은 부분**은 합리적 기본값을 명시하되 `[기본값]`으로 표기하라
+- 노드 순서는 **실행 순서**대로 나열하라 — 데이터 흐름이 명확해야 한다
+- 분기 조건은 **구체적인 값/범위**로 명시하라 (예: "재고 < 10", "상태 == 'OUT_OF_STOCK'")
+- **마크다운 작업지시서만 출력하라** (추가 설명, 인사말, 코드 펜스 감싸기 금지)
+""".trimIndent()
+
+    /**
+     * 대화 내역 + DraftSpec → 워크플로우 작업지시서 생성 프롬프트 구성
+     */
+    fun workflowWorkOrderGenerationPrompt(
+        conversationHistory: List<ConversationMessage>,
+        draftSpec: DraftSpec,
+        ragContext: String? = null
+    ): String = buildString {
+        appendLine(WORKFLOW_WORK_ORDER_GENERATION)
+        appendLine()
+
+        // RAG API 스펙 (Base URL, 엔드포인트 등 실제 정보 제공)
+        if (!ragContext.isNullOrBlank()) {
+            appendLine("---")
+            appendLine()
+            appendLine("## ⚡ 실제 API 스펙 (RAG 검색 결과 — 반드시 이 정보를 사용하라)")
+            appendLine()
+            appendLine("아래는 실제 운영 중인 시스템의 API 스펙이다.")
+            appendLine("**Base URL, 포트, 엔드포인트 경로는 반드시 아래 스펙에서 가져와라.**")
+            appendLine("⚠ 스펙에 없는 URL이나 포트를 추측하거나 만들어내지 마라.")
+            appendLine()
+            appendLine(ragContext)
+            appendLine()
+        }
+
+        appendLine("---")
+        appendLine()
+        appendLine("## 대화 내역")
+        appendLine()
+        for (msg in conversationHistory) {
+            val role = when (msg.role) {
+                MessageRole.USER -> "사용자"
+                MessageRole.GOVERNOR -> "시스템"
+                MessageRole.SYSTEM -> "시스템"
+            }
+            appendLine("**${role}**: ${msg.content}")
+            appendLine()
+        }
+        appendLine("---")
+        appendLine()
+        appendLine("## 수집된 요구사항 (DraftSpec)")
+        appendLine()
+        draftSpec.intent?.let { appendLine("- 의도: $it") }
+        draftSpec.domain?.let { appendLine("- 대상 시스템/도메인: $it") }
+        draftSpec.scale?.let { appendLine("- 워크플로우 상세 흐름: $it") }
+        draftSpec.targetPath?.let { appendLine("- 출력 경로: $it") }
+        draftSpec.constraints?.let { constraints ->
+            if (constraints.isNotEmpty()) {
+                appendLine("- 제약 조건: ${constraints.joinToString(", ")}")
+            }
+        }
+        appendLine()
+        appendLine("위 대화와 요구사항을 기반으로 워크플로우 작업지시서를 작성하라.")
+        if (!ragContext.isNullOrBlank()) {
+            appendLine("⚠ '데이터 소스' 섹션의 Base URL과 API 엔드포인트는 반드시 위 API 스펙에서 가져와라. 추측 금지.")
+        }
+    }
+
     /**
      * 작업지시서 기반 프로젝트 생성 프롬프트
      *
@@ -1557,11 +1956,11 @@ isAbort=true일 때는 summary에 실패 사유를 포함하라.
 
 | 타입 | 역할 | 용도 |
 |------|------|------|
-| act | 외부에 영향을 줌 | API 호출 (GET/POST/PUT/DELETE), 파일 쓰기/읽기. 모든 HTTP 요청과 파일 작업은 act로 한다 |
+| act | 외부 실행 | **모든 HTTP API 호출** (GET/POST/PUT/DELETE), 파일 쓰기/읽기. ⚠ GET 요청도 반드시 act |
 | transform | 데이터 가공 | 응답에서 토큰 추출, 데이터 필터링/정렬/분석, 매핑, "가장 ~한 것 찾기" 등 |
 | decide | 조건 분기 | **미리 정의된 2~4개 경로** 중 하나를 선택할 때만 사용. 데이터 분석/필터링에는 쓰지 마라 |
 | repeat | 반복 | 배열의 각 항목에 대해 동일 작업 반복 |
-| observe | 정보 수집 | 외부 데이터 관찰 (act와 유사하지만 읽기 전용) |
+| observe | 내부 분석 | LLM 기반 텍스트 분석/요약 전용. ⚠ **HTTP API 호출에는 절대 observe를 쓰지 마라 — 반드시 act** |
 
 ⚠ **DECIDE vs TRANSFORM 구분 (매우 중요)**:
 - "가장 비싼/많이 팔린/최신 상품을 찾아줘" → **TRANSFORM** (데이터 분석)
@@ -1580,6 +1979,8 @@ isAbort=true일 때는 summary에 실패 사유를 포함하라.
 - **⚡ 반드시 API 스펙에 명시된 실제 계정 정보(username/password)를 사용하라.** 절대 placeholder를 사용하지 마라.
 - API 스펙의 "계정 정보" 테이블에서 username과 password를 찾아 그대로 사용하라.
 - 예: 스펙에 `| admin | admin123 | ADMIN |`이 있으면 → `{"username":"admin","password":"admin123"}`
+⚠ **POST 로그인 act 노드의 description에는 반드시 `with body {"username":"...","password":"..."}`를 포함하라.**
+body가 없는 POST 요청은 HTTP 400 에러를 유발한다. 절대 body를 생략하지 마라.
 
 ### 2. API 스펙 엔드포인트 정확히 사용
 - API 스펙 문서에 명시된 **정확한 URL**을 사용하라
@@ -1682,6 +2083,19 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
 }
 ```
 
+**배열 병합** — 여러 소스의 데이터를 하나의 배열로 합치기:
+```json
+{
+  "id": "merge-all-alerts",
+  "type": "transform",
+  "description": "Merge criticalAlerts and warningAlerts into a single array, tag each item with its source alertLevel",
+  "hint": "merge",
+  "input": "criticalAlerts",
+  "output": "mergedAlerts"
+}
+```
+⚠ **배열을 병합할 때 반드시 hint="merge"를 지정하라.** hint가 있으면 LLM 없이 코드로 즉시 처리된다.
+
 ### 7. Repeat 노드로 배치 처리
 여러 항목에 대해 동일 API를 호출할 때 repeat 노드를 사용한다.
 ⚠ `over`에는 **Transform으로 추출한 배열 변수**를 지정해야 한다 (Act의 raw 응답이 아님):
@@ -1705,6 +2119,56 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
 ```
 ⚠ **Repeat body 내부의 Act 노드에서 {item.fieldName} 템플릿을 사용할 때, 반드시 item 객체에 해당 필드가 있는지 확인하라.** 예: skymall 상품에는 `supplierId`가 없으므로 skystock 공급사 조회를 먼저 해야 한다.
 ⚠ **크로스 시스템 발주 워크플로우**: skymall 상품으로 skystock 발주를 생성할 때는 반드시 `GET /api/supplier-products/by-skymall-product/{skymallProductId}` 등으로 공급사를 먼저 조회하라. skymall 상품 객체에 skystock supplierId가 없다.
+
+#### 7-1. Repeat body에 복합 노드 중첩 (DECIDE, TRANSFORM, ACT 혼합)
+repeat body에는 **어떤 노드든** 중첩할 수 있다 — act, transform, decide 모두 가능.
+작업지시서의 반복 처리 흐름에 decide(분기)가 있으면 body에 decide 노드를 포함하라.
+
+예시 — 각 알림에 대해 레벨 판단 후 분기 처리:
+```json
+{
+  "id": "process-each-alert",
+  "type": "repeat",
+  "over": "all_alerts",
+  "as": "alert",
+  "body": [
+    {
+      "id": "check-alert-level",
+      "type": "decide",
+      "description": "Check alert.alertLevel: if CRITICAL go to confirm-order, if WARNING go to check-stock",
+      "input": "alert",
+      "branches": {
+        "critical": "confirm-order",
+        "warning": "check-stock"
+      }
+    },
+    {
+      "id": "confirm-order",
+      "type": "transform",
+      "description": "Prepare order payload from alert data",
+      "input": "alert",
+      "output": "order_payload"
+    },
+    {
+      "id": "check-stock",
+      "type": "act",
+      "description": "GET http://host:9090/api/products/{alert.skymallProductId} with header Authorization: Bearer {auth_token}",
+      "input": "alert",
+      "output": "stock_result"
+    },
+    {
+      "id": "create-order",
+      "type": "act",
+      "description": "POST http://host:9091/api/purchase-orders with body from {order_payload} and header Authorization: Bearer {auth_token}",
+      "input": "order_payload",
+      "output": "order_result",
+      "onError": "retry:1 then skip"
+    }
+  ]
+}
+```
+⚠ **Repeat body가 비어있으면 안 된다.**
+⚠ **작업지시서에 반복 내 분기(decide)가 있으면 반드시 body에 decide 노드를 포함하라.**
 
 ### 8. Decide 노드 — 조건 분기
 ⚠ **branches는 반드시 `Map<String, String>` 형식이다.** 키는 조건 이름, 값은 대상 노드 ID 또는 "end".
@@ -1734,22 +2198,38 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
   "description": "워크플로우 설명",
   "trigger": {"type": "manual"},
   "nodes": [
+    {"id": "login", "type": "act", "description": "...", "output": "login_result"},
+    {"id": "extract-token", "type": "transform", "description": "...", "input": "login_result", "output": "token"},
+    {"id": "fetch-items", "type": "act", "description": "...", "output": "items_raw"},
+    {"id": "extract-items", "type": "transform", "description": "...", "input": "items_raw", "output": "items"},
     {
-      "id": "고유-노드-id",
-      "type": "act | transform | decide | repeat | observe",
-      "description": "상세한 실행 설명",
-      "input": "입력 변수명 (선택)",
-      "output": "출력 변수명 (선택)",
-      "onError": "retry:1 then skip"
-    }
+      "id": "process-each-item",
+      "type": "repeat",
+      "description": "Process each item",
+      "over": "items",
+      "as": "item",
+      "body": [
+        {"id": "check-condition", "type": "decide", "description": "...", "input": "item", "branches": {"typeA": "handle-a", "typeB": "handle-b"}},
+        {"id": "handle-a", "type": "transform", "description": "...", "input": "item", "output": "payload"},
+        {"id": "handle-b", "type": "act", "description": "...", "input": "item", "output": "result"},
+        {"id": "create-record", "type": "act", "description": "...", "input": "payload", "output": "record"}
+      ]
+    },
+    {"id": "generate-report", "type": "transform", "description": "...", "input": "record", "output": "report"}
   ]
 }
 ```
+
+⚠ **repeat 노드의 body 배열 안에 자식 노드들을 직접 포함해야 한다.**
+⚠ **repeat body의 노드들은 top-level nodes 배열에 넣으면 안 된다 — 반드시 body 안에만 넣어라.**
+⚠ **작업지시서에 "반복 대상 노드 목록"이 있으면, 그 노드들 전부를 repeat의 body 배열에 넣어라.**
 
 ⚠ 워크플로우가 완전해야 한다. 모든 인증, 데이터 조회, 데이터 변환, 최종 작업을 빠짐없이 포함하라.
 ⚠ **파일 저장 요청이 있으면 반드시 FILE_WRITE act 노드를 워크플로우 마지막에 포함하라.** "~로 저장해줘", "~.json으로 저장", "~파일로 만들어줘" 패턴은 FILE_WRITE 필수. 조회만 하고 저장 노드를 빠뜨리면 불완전한 워크플로우다.
 ⚠ 추측하지 마라. API 스펙에 없는 엔드포인트는 사용하지 마라.
 ⚠ 각 시스템의 Base URL(host:port)을 정확히 구분하라. 스펙에 Base URL이 다르면 절대 섞지 마라.
+⚠ 사용자가 특정 시스템만 언급했으면, **해당 시스템의 API만 사용하라.** 다른 시스템의 API를 추가로 호출하지 마라.
+⚠ 예: 사용자가 "skymall 상품 조회"라고 했으면 → skymall(9090)의 API만 사용. skystock(9091)에 접근하지 마라.
 
 ### 9. 파일 저장 작업
 사용자가 "~파일로 저장해줘", "~.json으로 저장" 같은 파일 쓰기를 요청하면:
@@ -1807,7 +2287,8 @@ nodes 순서:
         domain: String?,
         ragContext: String?,
         credentialsTable: String? = null,
-        targetPath: String? = null
+        targetPath: String? = null,
+        cachedTokens: Map<String, String> = emptyMap()
     ): String = buildString {
         appendLine(HLX_API_GENERATION)
         appendLine()
@@ -1821,10 +2302,31 @@ nodes 순서:
             appendLine()
         }
 
+        // 이미 획득한 인증 토큰 (로그인 생략)
+        if (cachedTokens.isNotEmpty()) {
+            appendLine("## ⚡ 이미 획득한 인증 토큰 (로그인 생략 가능)")
+            appendLine("아래 시스템은 이미 인증이 완료되었다. login 노드를 생성하지 말고, 이 토큰을 직접 사용하라.")
+            cachedTokens.forEach { (hostPort, token) ->
+                appendLine("- $hostPort → Bearer $token")
+            }
+            appendLine()
+            appendLine("사용법: 워크플로우 첫 노드로 아래 transform을 배치하라:")
+            cachedTokens.entries.forEachIndexed { idx, (hostPort, token) ->
+                val varName = "cached_token_${hostPort.substringAfterLast(":").filter { it.isDigit() }}"
+                appendLine("""{"id":"inject-token-$idx","type":"transform","description":"Set cached token","hint":"set","output":"$varName","value":"$token"}""")
+            }
+            appendLine()
+            appendLine("⚠ 이 토큰들이 있으면 해당 시스템의 login act 노드를 생성하지 마라. 토큰을 바로 사용하라.")
+            appendLine()
+        }
+
         // 사용자 의도
         appendLine("## 사용자 의도")
         appendLine(intent)
-        domain?.let { appendLine("도메인: $it") }
+        domain?.let {
+            appendLine("도메인: $it")
+            appendLine("⚠ 이 요청은 **${it}** 시스템에 대한 것이다. 다른 시스템의 엔드포인트나 포트를 사용하지 마라.")
+        }
         appendLine()
         // 파일 저장 경로가 지정된 경우
         if (!targetPath.isNullOrBlank()) {
@@ -1842,6 +2344,127 @@ nodes 순서:
         } else {
             appendLine("## ⚠ API 스펙 없음")
             appendLine("RAG에 등록된 API 스펙이 없습니다. 사용자의 지시에서 엔드포인트 정보를 추론하세요.")
+            appendLine()
+        }
+    }
+
+    /**
+     * WorkOrder 기반 HLX 워크플로우 생성 프롬프트
+     *
+     * WORKFLOW_CREATE의 EXECUTE 단계에서 호출된다.
+     * 작업지시서(WorkOrder) + RAG API 스펙 → 완전한 HLX 워크플로우 JSON 생성
+     */
+    fun hlxFromWorkOrderPrompt(
+        workOrderContent: String,
+        ragContext: String?,
+        credentialsTable: String? = null,
+        targetPath: String? = null,
+        cachedTokens: Map<String, String> = emptyMap()
+    ): String = buildString {
+        appendLine(HLX_API_GENERATION)
+        appendLine()
+
+        // 시스템별 로그인 credentials
+        if (!credentialsTable.isNullOrBlank()) {
+            appendLine("## ⚡ 시스템별 로그인 정보 (반드시 이 값을 사용하라)")
+            appendLine(credentialsTable)
+            appendLine()
+            appendLine("⚠ 위 로그인 정보를 그대로 사용하라. 다른 시스템의 credentials를 혼용하지 마라.")
+            appendLine()
+        }
+
+        // 이미 획득한 인증 토큰 (로그인 생략)
+        if (cachedTokens.isNotEmpty()) {
+            appendLine("## ⚡ 이미 획득한 인증 토큰 (로그인 생략 가능)")
+            appendLine("아래 시스템은 이미 인증이 완료되었다. login 노드를 생성하지 말고, 이 토큰을 직접 사용하라.")
+            cachedTokens.forEach { (hostPort, token) ->
+                appendLine("- $hostPort → Bearer $token")
+            }
+            appendLine()
+            appendLine("사용법: 워크플로우 첫 노드로 아래 transform을 배치하라:")
+            cachedTokens.entries.forEachIndexed { idx, (hostPort, token) ->
+                val varName = "cached_token_${hostPort.substringAfterLast(":").filter { it.isDigit() }}"
+                appendLine("""{"id":"inject-token-$idx","type":"transform","description":"Set cached token","hint":"set","output":"$varName","value":"$token"}""")
+            }
+            appendLine()
+            appendLine("⚠ 이 토큰들이 있으면 해당 시스템의 login act 노드를 생성하지 마라. 토큰을 바로 사용하라.")
+            appendLine()
+        }
+
+        // 작업지시서 (핵심 입력)
+        appendLine("## ⚡ 워크플로우 작업지시서 (이 문서가 유일한 입력이다)")
+        appendLine()
+        appendLine(workOrderContent)
+        appendLine()
+        appendLine("## ⚡ HLX 변환 규칙 (반드시 준수)")
+        appendLine()
+        appendLine("⚠ 위 작업지시서의 **모든 노드와 처리 흐름**을 빠짐없이 HLX JSON으로 구현하라.")
+        appendLine("⚠ 노드 순서, 분기 조건, 에러 처리, 출력 형식을 정확히 따르라.")
+        appendLine()
+        appendLine("### REPEAT 구조 변환 (가장 중요!)")
+        appendLine("작업지시서에 repeat 노드가 있으면 다음 단계를 따르라:")
+        appendLine("1. 작업지시서의 '반복 대상 노드 목록'에 있는 노드들을 찾아라")
+        appendLine("2. 그 노드들을 모두 repeat의 **body 배열 안**에 넣어라")
+        appendLine("3. body 안의 노드들은 top-level nodes에 넣지 마라")
+        appendLine("4. body가 비어있는 repeat은 절대 생성하지 마라")
+        appendLine()
+        appendLine("올바른 구조:")
+        appendLine("```")
+        appendLine("""{"nodes": [전처리노드들..., {"type":"repeat","over":"items","as":"item","body":[반복내부노드들...]}, 후처리노드들...]}""")
+        appendLine("```")
+        appendLine()
+        appendLine("잘못된 구조 (이렇게 하면 안 된다):")
+        appendLine("```")
+        appendLine("""{"nodes": [전처리노드들..., {"type":"repeat","body":[]}, 반복내부노드들..., 후처리노드들...]}""")
+        appendLine("```")
+        appendLine()
+        appendLine("### 노드 수 보존")
+        appendLine("작업지시서에 N개 노드가 있으면 HLX에도 최소 N개 노드가 있어야 한다.")
+        appendLine("노드를 생략하거나 병합하지 마라.")
+        appendLine()
+        appendLine("### ACT → TRANSFORM 필수 패턴 (가장 중요!)")
+        appendLine("ACT 노드의 output은 **HTTP 응답 래퍼 객체**이다 (method, url, statusCode, body 필드 포함).")
+        appendLine("ACT output에서 실제 데이터를 사용하려면 **반드시 TRANSFORM 노드**를 추가해야 한다.")
+        appendLine()
+        appendLine("특히 **로그인 → 토큰 사용** 패턴:")
+        appendLine("```")
+        appendLine("""{"id": "login-system", "type": "act", "output": "login_result"}""")
+        appendLine("""{"id": "extract-token", "type": "transform", "hint": "extract", "input": "login_result", "output": "token"}""")
+        appendLine("""{"id": "fetch-data", "type": "act", "description": "GET ... with header Authorization: Bearer {token}"}""")
+        appendLine("```")
+        appendLine()
+        appendLine("❌ **금지 패턴** — ACT output을 바로 토큰 이름으로 쓰면 안 된다:")
+        appendLine("```")
+        appendLine("""{"id": "login", "type": "act", "output": "token"}  ← 이렇게 하면 token에 HTTP 래퍼가 들어감""")
+        appendLine("```")
+        appendLine("⚠ 작업지시서에 '인증 토큰 발급' 노드가 있으면 반드시 2개 노드(ACT + TRANSFORM)로 분리하라.")
+        appendLine()
+        appendLine("### 최종 검증 체크리스트")
+        appendLine("JSON을 반환하기 전에 확인하라:")
+        appendLine("- [ ] 모든 repeat 노드의 body 배열이 비어있지 않은가?")
+        appendLine("- [ ] 작업지시서의 반복 내부 노드들이 body 안에 들어가 있는가?")
+        appendLine("- [ ] decide 노드의 branches 값이 body 안의 노드 ID를 참조하는가?")
+        appendLine("- [ ] transform 노드에 hint 필드가 필요한 경우 지정했는가? (merge, extract, aggregate 등)")
+        appendLine("- [ ] 로그인 ACT 노드 뒤에 토큰 추출 TRANSFORM 노드가 있는가?")
+        appendLine("- [ ] ACT 노드의 output이 바로 'token' 이름이 아닌 'login_result' 형태인가?")
+        appendLine("- [ ] 모든 POST act 노드의 description에 \"with body {...}\" 가 포함되어 있는가?")
+        appendLine()
+
+        // 파일 저장 경로
+        if (!targetPath.isNullOrBlank()) {
+            appendLine("## ⚡ 파일 저장 경로 (반드시 이 경로 사용)")
+            appendLine("파일 경로: $targetPath")
+            appendLine()
+        }
+
+        // RAG API 스펙
+        if (!ragContext.isNullOrBlank()) {
+            appendLine("## ⚡ 실제 API 스펙 (이 정보가 작업지시서보다 우선한다)")
+            appendLine()
+            appendLine("⚠ 아래 스펙의 Base URL과 엔드포인트 경로가 **정답**이다.")
+            appendLine("⚠ 작업지시서의 URL이 아래 스펙과 다르면, **아래 스펙의 URL을 사용하라.**")
+            appendLine()
+            appendLine(ragContext)
             appendLine()
         }
     }

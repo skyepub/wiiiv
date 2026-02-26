@@ -1119,7 +1119,8 @@ class HlxRunnerPhase4Test {
 
         assertEquals(HlxExecutionStatus.COMPLETED, result.status)
         assertEquals(1, mockGate.checkedContexts.size)
-        assertEquals("COMMAND", mockGate.checkedContexts[0].action)
+        // Phase D2: action은 ExecutorMeta capability 기반 (meta 없으면 기본 "READ")
+        assertEquals("READ", mockGate.checkedContexts[0].action)
         assertEquals(1, mockExecutor.executedSteps.size)
     }
 

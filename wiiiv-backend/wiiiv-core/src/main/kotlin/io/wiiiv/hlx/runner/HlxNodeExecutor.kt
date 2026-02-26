@@ -77,6 +77,14 @@ class HlxNodeExecutor(
             }
         }
 
+        // Phase 0: SET hint — 즉시 값 세팅 (cachedTokens 주입 등)
+        if (node.hint == TransformHint.SET && node.value != null) {
+            val setResult = CodeExtractor.trySet(node, context)
+            if (setResult != null) {
+                return NodeExecutionResult.Success(setResult)
+            }
+        }
+
         // Phase 1: 코드 추출 가능 여부 판단
         val descLower = node.description.lowercase()
         val canTryCode = node.hint in setOf(
@@ -84,7 +92,9 @@ class HlxNodeExecutor(
                 TransformHint.AGGREGATE,
                 TransformHint.SORT,
                 TransformHint.FILTER,
-                TransformHint.MAP
+                TransformHint.MAP,
+                TransformHint.MERGE,
+                TransformHint.SET
             )
             || descLower.contains("extract")
             || descLower.contains("parse")
@@ -92,9 +102,12 @@ class HlxNodeExecutor(
             || descLower.contains("sort")
             || descLower.contains("filter where")
             || descLower.contains("select ")
+            || descLower.contains("merge")
 
         if (canTryCode) {
-            val codeResult = CodeExtractor.tryExtract(node, context)
+            val codeResult = CodeExtractor.trySet(node, context)
+                ?: CodeExtractor.tryMerge(node, context)
+                ?: CodeExtractor.tryExtract(node, context)
                 ?: CodeExtractor.tryCompute(node, context)
             if (codeResult != null) {
                 println("[HLX-CODE] Code transform succeeded for '${node.id}': ${codeResult.toString().take(200)}")
@@ -372,8 +385,8 @@ class HlxNodeExecutor(
         step: ExecutionStep,
         context: HlxContext
     ): GovernanceResult? {
-        // GateChain이 없으면 거버넌스 스킵 (기존 동작 호환)
-        if (gateChain == null) return null
+        // GateChain과 gate 모두 없으면 거버넌스 스킵 (기존 동작 호환)
+        if (gateChain == null && gate == null) return null
 
         // 1. ExecutorMeta에서 RiskLevel 조회
         //    PluginStep → scheme 기반 조회 + 액션별 riskLevel
@@ -417,7 +430,7 @@ class HlxNodeExecutor(
             )
         }
 
-        // 5. GateChain 검사
+        // 5. Gate 검사
         val gateContext = GateContext(
             requestId = "hlx-${context.meta.workflowId}-${step.stepId}",
             blueprintId = context.meta.workflowId,
@@ -426,32 +439,64 @@ class HlxNodeExecutor(
             executorId = "${scheme ?: "unknown"}-executor",
             action = action
         )
-        val chainResult = gateChain.check(gateContext)
-        if (chainResult.isDeny) {
-            val deny = chainResult.finalResult as GateResult.Deny
+
+        if (gateChain != null) {
+            // Phase D2: GateChain 검사
+            val chainResult = gateChain.check(gateContext)
+            if (chainResult.isDeny) {
+                val deny = chainResult.finalResult as GateResult.Deny
+                return GovernanceResult(
+                    approved = false,
+                    riskLevel = riskLevel.name,
+                    maxRiskLevel = maxRisk.name,
+                    role = role,
+                    scheme = scheme,
+                    action = action,
+                    reason = "Gate denied: ${deny.code} at ${chainResult.stoppedAt}",
+                    deniedBy = "GateChain:${chainResult.stoppedAt}",
+                    gatesPassed = chainResult.passedCount
+                )
+            }
             return GovernanceResult(
-                approved = false,
+                approved = true,
                 riskLevel = riskLevel.name,
                 maxRiskLevel = maxRisk.name,
                 role = role,
                 scheme = scheme,
                 action = action,
-                reason = "Gate denied: ${deny.code} at ${chainResult.stoppedAt}",
-                deniedBy = "GateChain:${chainResult.stoppedAt}",
+                reason = null,
                 gatesPassed = chainResult.passedCount
+            )
+        } else if (gate != null) {
+            // Phase 4 레거시: 단일 Gate 검사
+            val gateResult = gate.check(gateContext)
+            if (gateResult is GateResult.Deny) {
+                return GovernanceResult(
+                    approved = false,
+                    riskLevel = riskLevel.name,
+                    maxRiskLevel = maxRisk.name,
+                    role = role,
+                    scheme = scheme,
+                    action = action,
+                    reason = "Gate denied: ${gateResult.code}",
+                    deniedBy = "Gate",
+                    gatesPassed = 0
+                )
+            }
+            return GovernanceResult(
+                approved = true,
+                riskLevel = riskLevel.name,
+                maxRiskLevel = maxRisk.name,
+                role = role,
+                scheme = scheme,
+                action = action,
+                reason = null,
+                gatesPassed = 1
             )
         }
 
-        return GovernanceResult(
-            approved = true,
-            riskLevel = riskLevel.name,
-            maxRiskLevel = maxRisk.name,
-            role = role,
-            scheme = scheme,
-            action = action,
-            reason = null,
-            gatesPassed = chainResult.passedCount
-        )
+        // gate/gateChain 모두 null (위에서 이미 리턴되어야 하지만 안전장치)
+        return null
     }
 
     private fun roleToMaxRisk(role: String?): RiskLevel = when (role?.uppercase()) {

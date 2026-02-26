@@ -420,7 +420,9 @@ class HlxRunner(
         return when (result) {
             is DecideResult.BranchSelected -> {
                 val branchKey = result.branchKey
+                // Normal: key → target. Fallback: LLM returned target node ID directly
                 val target = node.branches[branchKey]
+                    ?: if (branchKey in node.branches.values) branchKey else null
 
                 if (target == null) {
                     records.add(
@@ -519,11 +521,19 @@ class HlxRunner(
             // 대신 context.variables에 iteration 정보를 저장
             context.variables[asVar] = item
 
-            // body 노드들 순차 실행
-            for (bodyNode in node.body) {
+            // body 노드 인덱스 맵 (JumpTo 지원)
+            val bodyIndexMap = node.body.withIndex().associate { (i, n) -> n.id to i }
+
+            // body 노드들 순차 실행 (index-based for JumpTo support)
+            var bodyIndex = 0
+            while (bodyIndex < node.body.size) {
+                val bodyNode = node.body[bodyIndex]
                 val flowControl = executeNodeWithPolicy(bodyNode, context.copy(iteration = iteration), records, depth, visited)
                 when (flowControl) {
-                    is FlowControl.Continue, is FlowControl.Skip -> continue
+                    is FlowControl.Continue, is FlowControl.Skip -> {
+                        bodyIndex++
+                        continue
+                    }
                     is FlowControl.Failed -> {
                         records.add(
                             HlxNodeExecutionRecord(
@@ -543,10 +553,18 @@ class HlxRunner(
                     }
                     is FlowControl.EndWorkflow -> return FlowControl.EndWorkflow
                     is FlowControl.JumpTo -> {
-                        // Repeat body 내 JumpTo는 외부 노드로 점프
-                        return flowControl
+                        val bodyTargetIndex = bodyIndexMap[flowControl.nodeId]
+                        if (bodyTargetIndex != null) {
+                            // body 내 형제 노드로 점프
+                            bodyIndex = bodyTargetIndex
+                            continue
+                        } else {
+                            // body 밖 노드로 점프 — 부모에게 전파
+                            return flowControl
+                        }
                     }
                 }
+                bodyIndex++
             }
         }
 

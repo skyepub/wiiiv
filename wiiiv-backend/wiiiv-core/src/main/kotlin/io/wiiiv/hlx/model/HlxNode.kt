@@ -58,7 +58,10 @@ enum class TransformHint {
     AGGREGATE,
 
     @SerialName("sort")
-    SORT
+    SORT,
+
+    @SerialName("set")
+    SET
 }
 
 /**
@@ -131,6 +134,7 @@ sealed class HlxNode {
         override val id: String,
         override val description: String,
         val hint: TransformHint? = null,
+        val value: String? = null,
         override val input: String? = null,
         override val output: String? = null,
         override val onError: String? = null,

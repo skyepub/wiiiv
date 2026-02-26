@@ -41,6 +41,11 @@ suspend fun handleChatSse(
     maxContinue: Int
 ) {
     call.respondTextWriter(contentType = ContentType.Text.EventStream) {
+        // Immediately send initial heartbeat to start HTTP response
+        // This prevents Netty idle timeout from closing connection while waiting for mutex
+        write(": connected\n\n")
+        flush()
+
         val bridge = SseProgressBridge()
         val scope = CoroutineScope(Dispatchers.IO)
 
@@ -79,10 +84,10 @@ suspend fun handleChatSse(
             }
         }
 
-        // SSE heartbeat: 15초 간격으로 keep-alive 코멘트 전송 (ISSUE-001)
+        // SSE heartbeat: 5초 간격으로 keep-alive 코멘트 전송
         val heartbeatJob = scope.launch {
             while (isActive) {
-                delay(15_000)
+                delay(5_000)
                 try {
                     write(": heartbeat\n\n")
                     flush()

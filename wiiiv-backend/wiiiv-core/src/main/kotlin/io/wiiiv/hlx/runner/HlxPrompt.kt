@@ -47,10 +47,15 @@ object HlxPrompt {
             appendLine("- Description: ${node.description}")
             node.hint?.let { appendLine("- Hint: ${it.name.lowercase()}") }
             appendLine()
-            appendContextVariables(this, node.input, context)
+            appendContextVariables(this, node.input, context, node.description)
             appendLine("## Response Format")
             appendLine("Return ONLY valid JSON in this format:")
             appendLine("""{ "result": <transformed data> }""")
+            appendLine()
+            appendLine("⚠ CRITICAL: 'result' must contain the ACTUAL transformed data (JSON array, object, or value).")
+            appendLine("⚠ NEVER return a text description like 'Data has been merged' or 'Successfully processed'.")
+            appendLine("⚠ If the task is to merge arrays → result must be the merged JSON array.")
+            appendLine("⚠ If the task is to prepare data → result must be the actual data structure.")
         }
     }
 
@@ -68,13 +73,15 @@ object HlxPrompt {
             appendLine()
             appendLine("## Available Branches")
             node.branches.forEach { (key, target) ->
-                appendLine("- \"$key\" -> $target")
+                appendLine("- Key: \"$key\" (jumps to node: $target)")
             }
             appendLine()
             appendContextVariables(this, node.input, context)
             appendLine("## Response Format")
             appendLine("Return ONLY valid JSON in this format:")
-            appendLine("""{ "branch": "<one of the branch keys above>", "reasoning": "<brief explanation>" }""")
+            appendLine("""{ "branch": "<KEY value>", "reasoning": "<brief explanation>" }""")
+            appendLine()
+            appendLine("⚠ IMPORTANT: 'branch' must be one of the KEY values listed above (${node.branches.keys.joinToString(", ") { "\"$it\"" }}), NOT the node ID.")
         }
     }
 
@@ -163,13 +170,27 @@ object HlxPrompt {
 
     /**
      * 컨텍스트 변수를 프롬프트에 추가
+     *
+     * description이 주어지면, description에서 참조하는 변수명들을 감지하여 추가 포함한다.
+     * 이를 통해 MERGE 같은 다중 입력 노드에서 LLM이 실제 데이터를 볼 수 있다.
      */
-    private fun appendContextVariables(sb: StringBuilder, inputVar: String?, context: HlxContext) {
+    private fun appendContextVariables(sb: StringBuilder, inputVar: String?, context: HlxContext, description: String? = null) {
         val vars = mutableMapOf<String, JsonElement>()
 
         // input 변수가 지정된 경우 해당 변수 값 포함
         if (inputVar != null) {
             context.variables[inputVar]?.let { vars[inputVar] = it }
+        }
+
+        // description에서 참조하는 변수명 감지 (camelCase, snake_case)
+        if (description != null) {
+            val varRefPattern = Regex("""\b([a-zA-Z]\w*(?:[A-Z_]\w*)+)\b""")
+            for (match in varRefPattern.findAll(description)) {
+                val varName = match.groupValues[1]
+                if (varName !in vars && context.variables.containsKey(varName)) {
+                    vars[varName] = context.variables[varName]!!
+                }
+            }
         }
 
         // iteration 컨텍스트가 있으면 포함

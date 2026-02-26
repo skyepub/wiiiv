@@ -134,6 +134,31 @@ class ConversationalGovernor(
         // 사용자 메시지 기록
         session.addUserMessage(userMessage)
 
+        // ── DraftSpec 소실 방어 ──
+        // 원인 불명으로 DraftSpec이 비워지는 현상에 대한 방어.
+        // 스냅샷이 있으면 자동 복원한다.
+        println("[GOVERNOR] ── Turn start ── activeTaskId=${session.context.activeTaskId}, " +
+            "intent=${session.draftSpec.intent?.take(20)}, taskType=${session.draftSpec.taskType}, " +
+            "filled=${session.draftSpec.getFilledSlots()}, tasks=${session.context.tasks.size}")
+        if (session.restoreSpecIfLost()) {
+            println("[GOVERNOR] ⚠ DraftSpec was empty — RESTORED from snapshot: " +
+                "intent=${session.draftSpec.intent?.take(20)}, taskType=${session.draftSpec.taskType}, " +
+                "filled=${session.draftSpec.getFilledSlots()}")
+        }
+
+        // Pre-LLM 워크플로우 관리 명령 감지 — LLM 판단 전에 결정론적으로 처리
+        // ⚠ WORKFLOW_CREATE/PROJECT_CREATE 진행 중에는 스킵 — 대화 중 "워크플로우 목록"
+        //    같은 표현이 관리 명령으로 오인되어 인터뷰/실행 흐름을 가로채는 것 방지
+        val inProtectedFlow = session.draftSpec.taskType in listOf(TaskType.WORKFLOW_CREATE, TaskType.PROJECT_CREATE)
+        if (!inProtectedFlow) {
+            val workflowCmd = detectWorkflowCommand(userMessage)
+            if (workflowCmd != null) {
+                val response = handleWorkflowCommand(workflowCmd, session, effectiveUserId)
+                session.addGovernorMessage(response.message)
+                return response
+            }
+        }
+
         // pendingAction이 ContinueExecution이면 LLM 판단 없이 바로 실행 계속
         val pending = session.context.pendingAction
         if (pending is PendingAction.ContinueExecution) {
@@ -163,63 +188,332 @@ class ConversationalGovernor(
         }
 
         // 작업 전환 처리
+        // ⚠ PROJECT_CREATE 인터뷰/실행 중에는 taskSwitch 무시 — LLM이 확인 메시지를 전환 신호로 오인하는 것 방지
         governorAction.taskSwitch?.let { switchSignal ->
-            handleTaskSwitch(session, switchSignal)
+            val inProtectedTask = session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
+            if (inProtectedTask) {
+                println("[GOVERNOR] taskSwitch='$switchSignal' IGNORED — ${session.draftSpec.taskType} in progress")
+            } else {
+                handleTaskSwitch(session, switchSignal)
+            }
         }
 
         // specUpdates 적용 (자동 작업 보존 포함)
         // EXECUTE 액션이면 taskType 변경 금지 — EXECUTE는 "현재 작업 진행"이므로 작업 전환 불가
         // 단, CONVERSATION/INFORMATION은 "진행 중인 작업"이 아니므로 taskType 변경을 허용한다
+        // 단, executionHistory가 비어있으면(첫 실행) taskType 변경을 허용한다 — 새 요청이므로
         governorAction.specUpdates?.let { updates ->
+            println("[GOVERNOR] specUpdates received: ${updates.keys} (action=${governorAction.action})")
             val currentTaskType = session.draftSpec.taskType
             val isActiveWork = currentTaskType != null
                 && currentTaskType != TaskType.CONVERSATION
                 && currentTaskType != TaskType.INFORMATION
+            val isProtectedTask = currentTaskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
+            // taskType 변경 차단 조건:
+            // 1. 실행 이력이 있으면 어떤 액션이든 taskType 변경 차단 (REPLY/ASK 시에도 보호)
+            // 2. WORKFLOW_CREATE/PROJECT_CREATE 진행 중에는 executionHistory 없어도 taskType 동결
+            //    → LLM이 인터뷰 중 taskType을 CONVERSATION으로 바꾸는 것 방지
             val filteredUpdates = if (
                 isActiveWork &&
-                (governorAction.action == ActionType.EXECUTE || session.draftSpec.workOrderContent != null)
+                (session.context.executionHistory.isNotEmpty() || isProtectedTask)
             ) {
+                if (isProtectedTask) {
+                    val attempted = updates["taskType"]?.jsonPrimitive?.contentOrNull
+                    if (attempted != null && attempted != currentTaskType?.name) {
+                        println("[GOVERNOR] taskType change BLOCKED: $currentTaskType → $attempted (protected task in progress)")
+                    }
+                }
                 updates.filterKeys { it != "taskType" }
             } else {
                 updates
             }
             // taskSwitch가 이미 처리한 경우가 아니면, taskType 변경 감지 시 현재 작업을 자동 보존
             // CONVERSATION/INFORMATION은 보존 대상이 아님
+            // ⚠ PROJECT_CREATE 진행 중에는 suspension 금지 — 인터뷰/작업지시서 흐름 보호
             if (governorAction.taskSwitch == null) {
                 val newTaskType = filteredUpdates["taskType"]?.jsonPrimitive?.contentOrNull?.let { str ->
                     try { TaskType.valueOf(str) } catch (_: Exception) { null }
                 }
                 val currentSpec = session.draftSpec
+                val isProtectedTaskInProgress = currentSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
                 if (newTaskType != null && currentSpec.taskType != null
                     && currentSpec.taskType != TaskType.CONVERSATION
                     && currentSpec.taskType != TaskType.INFORMATION
-                    && newTaskType != currentSpec.taskType && currentSpec.intent != null) {
+                    && newTaskType != currentSpec.taskType && currentSpec.intent != null
+                    && !isProtectedTaskInProgress) {
+                    println("[GOVERNOR] ⚠ Task suspension triggered: ${currentSpec.taskType} → $newTaskType")
                     session.suspendCurrentWork()
+                } else if (newTaskType != null && isProtectedTaskInProgress && newTaskType != currentSpec.taskType) {
+                    println("[GOVERNOR] Task suspension BLOCKED — ${currentSpec.taskType} in progress (LLM wanted: $newTaskType)")
                 }
             }
             session.updateSpec(filteredUpdates)
+            // intent가 null인데 taskType이 있으면 기본 intent 자동 설정
+            if (session.draftSpec.intent == null && session.draftSpec.taskType != null) {
+                val defaultIntent = when (session.draftSpec.taskType) {
+                    TaskType.PROJECT_CREATE -> "프로젝트 생성"
+                    TaskType.WORKFLOW_CREATE -> "워크플로우 생성"
+                    TaskType.FILE_READ -> "파일 읽기"
+                    TaskType.FILE_WRITE -> "파일 쓰기"
+                    TaskType.COMMAND -> "명령어 실행"
+                    else -> null
+                }
+                if (defaultIntent != null) {
+                    session.updateSpec(mapOf("intent" to kotlinx.serialization.json.JsonPrimitive(defaultIntent)))
+                    println("[GOVERNOR] intent was null — auto-filled: '$defaultIntent'")
+                }
+            }
+            println("[GOVERNOR] DraftSpec after update: intent=${session.draftSpec.intent?.take(30)}, taskType=${session.draftSpec.taskType}, filled=${session.draftSpec.getFilledSlots()}")
         }
 
         // ── State Determinism Gate ──
         // LLM의 ASK/CONFIRM/EXECUTE 선택은 확률적이다.
         // Governor가 DraftSpec 상태를 기준으로 최종 상태 전환을 결정한다.
         val finalAction = when {
-            // (A) PROJECT_CREATE이고 DraftSpec이 충분하면 ASK → CONFIRM으로 강제 전환
-            // LLM이 specUpdates를 불완전하게 채울 수 있으므로, 사용자 메시지가 충분히 길면 (200자+) 정보 충분으로 판단
-            governorAction.action == ActionType.ASK
+            // ── 범용 안전장치: DraftSpec이 비어있으면 CONFIRM/EXECUTE 금지 ──
+            // LLM이 specUpdates를 보내지 않아 intent/taskType이 null인 상태에서
+            // CONFIRM이나 EXECUTE를 시도하면 → 스냅샷 복원 시도, 실패하면 ASK로 강제 전환
+            governorAction.action in listOf(ActionType.CONFIRM, ActionType.EXECUTE)
+                && session.draftSpec.intent == null
+                && session.draftSpec.taskType == null
+                && session.context.executionHistory.isEmpty() -> {
+                // 2차 복원 시도 (chat 시작 시 1차 복원이 실패했거나, specUpdates 처리 중 소실된 경우)
+                if (session.restoreSpecIfLost()) {
+                    println("[GOVERNOR] State Determinism Gate: DraftSpec was empty but RESTORED from snapshot → keeping ${governorAction.action}")
+                    governorAction  // 복원 성공 — 원래 action 유지, 다음 gate에서 정상 처리
+                } else {
+                    println("[GOVERNOR] State Determinism Gate: ${governorAction.action} suppressed → ASK (DraftSpec empty — intent/taskType both null, no snapshot)")
+                    governorAction.copy(action = ActionType.ASK)
+                }
+            }
+
+            // ── 범용 안전장치 2: 대화에서 프로젝트 생성이 감지되면 taskType 강제 설정 ──
+            // LLM이 specUpdates를 누락했지만, 대화 내용에 프로젝트 생성 의도가 명확한 경우
+            // taskType을 PROJECT_CREATE로 추론 설정한 뒤 ASK 유지
+            governorAction.action in listOf(ActionType.CONFIRM, ActionType.EXECUTE)
+                && session.draftSpec.taskType == null
+                && session.context.executionHistory.isEmpty()
+                && isProjectCreationContext(session, userMessage) -> {
+                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} suppressed → ASK (project creation detected but taskType not set)")
+                // 추론으로 taskType 설정
+                session.updateSpec(mapOf(
+                    "intent" to kotlinx.serialization.json.JsonPrimitive("프로젝트 생성"),
+                    "taskType" to kotlinx.serialization.json.JsonPrimitive("PROJECT_CREATE")
+                ))
+                governorAction.copy(action = ActionType.ASK)
+            }
+
+            // ── EXECUTE 억제: 복잡한 멀티 시스템/파일 출력 요청에서 ASK 강제 ──
+            // LLM이 복잡한 요청을 EXECUTE로 직행하는 것을 방지
+            governorAction.action == ActionType.EXECUTE
+                && session.draftSpec.taskType in listOf(TaskType.API_WORKFLOW, TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
+                && session.context.executionHistory.isEmpty()     // 첫 턴
+                && isComplexRequest(userMessage) -> {
+                println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → ASK (complex first-turn request)")
+                governorAction.copy(action = ActionType.ASK)
+            }
+
+            // ── EXECUTE 억제: PROJECT_CREATE에서 작업지시서 미표시 → 무조건 CONFIRM ──
+            // WorkOrder가 없으면 사용자가 뭐라고 했든 EXECUTE 금지 — 작업지시서를 먼저 보여줘야 한다
+            // WorkOrder가 있어도 사용자가 수정 요청이면 CONFIRM으로 되돌림
+            governorAction.action == ActionType.EXECUTE
                 && session.draftSpec.taskType == TaskType.PROJECT_CREATE
-                && (session.draftSpec.isComplete()
-                    || userMessage.length >= 200) -> {
-                println("[GOVERNOR] State Determinism Gate: ASK suppressed → CONFIRM (DraftSpec sufficient or message length=${userMessage.length})")
+                && session.context.executionHistory.isEmpty()
+                && !(isConfirmationMessage(userMessage) && !isModificationRequest(userMessage)
+                    && session.draftSpec.workOrderContent != null) -> {
+                val reason = if (session.draftSpec.workOrderContent == null)
+                    "WorkOrder not shown yet — must show before execution"
+                else
+                    "PROJECT_CREATE modification in progress"
+                println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → CONFIRM ($reason)")
                 governorAction.copy(action = ActionType.CONFIRM)
             }
-            // (B) WorkOrder가 이미 존재하고 CONFIRM/ASK가 반복되면 → EXECUTE로 강제 전환
-            governorAction.action in listOf(ActionType.CONFIRM, ActionType.ASK)
+
+            // ── EXECUTE 억제: WORKFLOW_CREATE에서 작업지시서 미표시 → 무조건 CONFIRM ──
+            governorAction.action == ActionType.EXECUTE
+                && session.draftSpec.taskType == TaskType.WORKFLOW_CREATE
+                && session.context.executionHistory.isEmpty()
+                && !(isConfirmationMessage(userMessage) && !isModificationRequest(userMessage)
+                    && session.draftSpec.workOrderContent != null) -> {
+                val reason = if (session.draftSpec.workOrderContent == null)
+                    "WorkOrder not shown yet — must show before execution"
+                else
+                    "WORKFLOW_CREATE modification in progress"
+                println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → CONFIRM ($reason)")
+                governorAction.copy(action = ActionType.CONFIRM)
+            }
+
+            // ── CONFIRM 억제: WORKFLOW_CREATE에서 사용자 허가 없이 작업지시서 생성 금지 ──
+            governorAction.action == ActionType.CONFIRM
+                && session.draftSpec.taskType == TaskType.WORKFLOW_CREATE
+                && session.draftSpec.workOrderContent == null
+                && !isConfirmationMessage(userMessage)
+                && !isWorkOrderRequest(userMessage) -> {
+                val turns = countInterviewTurns(session)
+                if (turns < 3) {
+                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (WORKFLOW_CREATE only $turns interview turns, need 3+)")
+                    val missingSlots = session.draftSpec.getMissingSlots()
+                    val nextQuestion = when {
+                        "domain" in missingSlots ->
+                            "이 워크플로우가 어떤 시스템/서비스를 대상으로 하나요?"
+                        "scale" in missingSlots ->
+                            "워크플로우의 처리 흐름을 알려주세요. 어떤 데이터를 어떤 순서로 처리하나요?"
+                        else -> {
+                            governorAction.message
+                                .replace(Regex("이대로 진행할까요\\??|진행할까요\\??|작업지시서를 만들어도 될까요\\??"), "")
+                                .trimEnd()
+                                .ifBlank { "분기/반복 조건이나 에러 처리 방식이 있으면 알려주세요." }
+                        }
+                    }
+                    governorAction.copy(action = ActionType.ASK, message = nextQuestion)
+                } else {
+                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (requesting work order permission, $turns interview turns)")
+                    governorAction.copy(
+                        action = ActionType.ASK,
+                        message = "워크플로우 정보가 충분히 수집되었습니다. 작업지시서를 만들어도 될까요?"
+                    )
+                }
+            }
+
+            // ── ASK 억제: WORKFLOW_CREATE 완성 스펙 + 사용자 확인 → CONFIRM ──
+            governorAction.action == ActionType.ASK
+                && session.draftSpec.taskType == TaskType.WORKFLOW_CREATE
+                && session.draftSpec.workOrderContent == null
+                && (session.draftSpec.isComplete() || countInterviewTurns(session) >= 3)
+                && (isConfirmationMessage(userMessage) || isWorkOrderRequest(userMessage)) -> {
+                println("[GOVERNOR] State Determinism Gate: ASK → CONFIRM (WORKFLOW_CREATE user confirmed, ${countInterviewTurns(session)} interview turns)")
+                governorAction.copy(
+                    action = ActionType.CONFIRM,
+                    message = "워크플로우 작업지시서를 정리해 보겠습니다."
+                )
+            }
+
+            // ── CONFIRM 억제: PROJECT_CREATE에서 사용자 허가 없이 작업지시서 생성 금지 ──
+            // LLM이 CONFIRM을 반환해도, 사용자가 명시적으로 확인하지 않았으면 ASK로 되돌림
+            // 단, "작업지시서 만들어/완성해" 등 명시적 요청은 확인으로 인정
+            // 인터뷰가 부족하면 인터뷰 질문, 충분하면 "작업지시서를 만들어도 될까요?" 질문
+            governorAction.action == ActionType.CONFIRM
                 && session.draftSpec.taskType == TaskType.PROJECT_CREATE
-                && session.draftSpec.workOrderContent != null -> {
-                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → EXECUTE (WorkOrder already exists)")
+                && session.draftSpec.workOrderContent == null
+                && !isConfirmationMessage(userMessage)
+                && !isWorkOrderRequest(userMessage) -> {
+                val turns = countInterviewTurns(session)
+                if (turns < 4) {
+                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (only $turns interview turns, need 4+)")
+                    val missingSlots = session.draftSpec.getMissingSlots()
+                    val nextQuestion = when {
+                        "domain" in missingSlots ->
+                            "어떤 목적의 프로젝트인가요? 용도를 알려주세요."
+                        "techStack" in missingSlots ->
+                            "어떤 기술 스택을 사용할 건가요?"
+                        else -> {
+                            // 필수 슬롯은 채워졌지만 인터뷰 부족 — LLM 메시지에서 확인 질문만 제거
+                            governorAction.message
+                                .replace(Regex("이대로 진행할까요\\??|이제 프로젝트를 진행할까요\\??|진행할까요\\??|작업지시서를 만들어도 될까요\\??"), "")
+                                .trimEnd()
+                                .ifBlank { "추가로 알려주실 내용이 있으면 말씀해주세요. 없으면 작업지시서를 만들겠습니다." }
+                        }
+                    }
+                    governorAction.copy(action = ActionType.ASK, message = nextQuestion)
+                } else {
+                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (requesting work order permission, $turns interview turns)")
+                    governorAction.copy(
+                        action = ActionType.ASK,
+                        message = "정보가 충분히 수집되었습니다. 작업지시서를 만들어도 될까요?"
+                    )
+                }
+            }
+
+            // ── ASK 억제: 완성된 스펙 + 사용자 확인 → CONFIRM 전환 ──
+            // (A) PROJECT_CREATE이고 DraftSpec이 충분하고 사용자가 확인했으면 ASK → CONFIRM
+            // ⚠ 인터뷰 턴이 충분해야(4턴+) CONFIRM 전환 — 너무 빨리 넘어가면 LLM이 추측으로 생성
+            governorAction.action == ActionType.ASK
+                && session.draftSpec.taskType == TaskType.PROJECT_CREATE
+                && session.draftSpec.workOrderContent == null
+                && (session.draftSpec.isComplete() || countInterviewTurns(session) >= 4)
+                && (isConfirmationMessage(userMessage) || isWorkOrderRequest(userMessage)) -> {
+                println("[GOVERNOR] State Determinism Gate: ASK suppressed → CONFIRM (user confirmed work order creation, ${countInterviewTurns(session)} interview turns)")
+                governorAction.copy(
+                    action = ActionType.CONFIRM,
+                    message = "작업지시서를 정리해 보겠습니다."
+                )
+            }
+            // (A-2) 실행 작업 + 사용자 확인 표현 → EXECUTE
+            // 단순 작업(FILE_*, COMMAND)은 isComplete() 불요 — 확인만으로 충분
+            // 3턴 이상 인터뷰 + 확인이면 isComplete() 불완전해도 EXECUTE 진행
+            // ⚠ PROJECT_CREATE는 WorkOrder가 생성되기 전까지 ASK를 EXECUTE로 덮어쓸 수 없음
+            governorAction.action == ActionType.ASK
+                && session.draftSpec.requiresExecution()
+                && isConfirmationMessage(userMessage)
+                && (session.draftSpec.isComplete()
+                    || session.draftSpec.taskType in listOf(
+                        TaskType.FILE_READ, TaskType.FILE_WRITE, TaskType.FILE_DELETE, TaskType.COMMAND
+                    )
+                    || (session.draftSpec.intent != null && countInterviewTurns(session) >= 3
+                        && userMessage.trim().length <= 10))  // 순수 확인만 (새 요청 오인 방지)
+                && !(session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
+                    && session.draftSpec.workOrderContent == null) -> {
+                println("[GOVERNOR] State Determinism Gate: ASK suppressed → EXECUTE (confirmation + ${session.draftSpec.taskType})")
                 governorAction.copy(action = ActionType.EXECUTE)
             }
+
+            // (A-3) 실행 후 수정/추가 요청인데 ASK가 나오면 → EXECUTE
+            // 이미 실행 히스토리가 있으면 인터뷰 불필요 — 바로 수정 실행
+            governorAction.action == ActionType.ASK
+                && session.context.executionHistory.isNotEmpty()
+                && session.draftSpec.requiresExecution()
+                && (isModificationRequest(userMessage) || isFollowUpDataRequest(userMessage)) -> {
+                println("[GOVERNOR] State Determinism Gate: ASK suppressed → EXECUTE (post-execution action request)")
+                governorAction.copy(action = ActionType.EXECUTE)
+            }
+
+            // (B) WorkOrder가 이미 존재하고 사용자가 확인 메시지를 보냈을 때 → EXECUTE
+            // ⚠ 수정 키워드가 포함되면 EXECUTE 금지 — WorkOrder 수정 반복 허용
+            governorAction.action in listOf(ActionType.CONFIRM, ActionType.ASK)
+                && session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
+                && session.draftSpec.workOrderContent != null
+                && isConfirmationMessage(userMessage)
+                && !isModificationRequest(userMessage) -> {
+                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → EXECUTE (WorkOrder confirmed)")
+                governorAction.copy(action = ActionType.EXECUTE)
+            }
+
+            // (B-2) PROJECT_CREATE/WORKFLOW_CREATE WorkOrder 수정 — REPLY/ASK → CONFIRM (WorkOrder 재생성)
+            // WorkOrder가 있는데 사용자가 명시적으로 수정을 요청하면 CONFIRM으로 전환하여 WorkOrder를 갱신
+            // ⚠ 단순 대화(질문/감사 등)는 REPLY 그대로 통과 — 장황한 사용자가 무한 CONFIRM 루프에 빠지는 것 방지
+            governorAction.action in listOf(ActionType.REPLY, ActionType.ASK)
+                && session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
+                && session.draftSpec.workOrderContent != null
+                && session.context.executionHistory.isEmpty()
+                && isModificationRequest(userMessage) -> {
+                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → CONFIRM (WorkOrder modification requested)")
+                governorAction.copy(action = ActionType.CONFIRM)
+            }
+
+            // ── REPLY 억제: 수정/추가/후속 데이터 요청 → EXECUTE ──
+            // 실행 히스토리가 있고, 사용자가 수정/추가/후속 데이터를 요청했는데 REPLY가 나오면 EXECUTE로 교정
+            governorAction.action == ActionType.REPLY
+                && session.context.executionHistory.isNotEmpty()
+                && session.draftSpec.requiresExecution()
+                && (isModificationRequest(userMessage) || isFollowUpDataRequest(userMessage)) -> {
+                println("[GOVERNOR] State Determinism Gate: REPLY suppressed → EXECUTE (action request after execution)")
+                governorAction.copy(action = ActionType.EXECUTE)
+            }
+
+            // ── CANCEL 억제: 확인 응답을 CANCEL로 잘못 분류하는 것 방지 ──
+            governorAction.action == ActionType.CANCEL
+                && isConfirmationMessage(userMessage) -> {
+                println("[GOVERNOR] State Determinism Gate: CANCEL suppressed → EXECUTE (user confirming, not canceling)")
+                governorAction.copy(action = ActionType.EXECUTE)
+            }
+
+            // ── CANCEL → REPLY: LLM이 직접 CANCEL을 출력해도 세션 파괴 대신 정중한 거절 ──
+            // CANCEL은 사용자가 명시적으로 취소할 때만 허용. 위험 요청 거부는 REPLY로 충분
+            governorAction.action == ActionType.CANCEL -> {
+                println("[GOVERNOR] State Determinism Gate: CANCEL suppressed → REPLY (session preservation)")
+                governorAction.copy(action = ActionType.REPLY)
+            }
+
             else -> governorAction
         }
 
@@ -381,13 +675,45 @@ class ConversationalGovernor(
     }
 
     /**
+     * JSON 문자열 값 내의 이스케이프되지 않은 제어 문자(0x00~0x1F)를 이스케이프 시퀀스로 변환.
+     * LLM이 실제 개행/탭 등을 JSON 문자열 안에 출력하면 JSON 파서가 실패하므로,
+     * 파싱 전에 정리한다.
+     */
+    private fun sanitizeControlChars(jsonStr: String): String {
+        val sb = StringBuilder(jsonStr.length)
+        var inString = false
+        var escaped = false
+        for (c in jsonStr) {
+            if (escaped) {
+                sb.append(c)
+                escaped = false
+                continue
+            }
+            when {
+                c == '\\' && inString -> { sb.append(c); escaped = true }
+                c == '"' -> { sb.append(c); inString = !inString }
+                inString && c.code in 0x00..0x1F -> {
+                    when (c) {
+                        '\n' -> sb.append("\\n")
+                        '\r' -> sb.append("\\r")
+                        '\t' -> sb.append("\\t")
+                        else -> sb.append("\\u${String.format("%04x", c.code)}")
+                    }
+                }
+                else -> sb.append(c)
+            }
+        }
+        return sb.toString()
+    }
+
+    /**
      * LLM 응답을 GovernorAction으로 파싱
      */
     private fun parseGovernorAction(response: String): GovernorAction {
         val (jsonStr, tail) = extractJsonWithTail(response)
 
         return try {
-            val sanitized = sanitizeJsonEscapes(jsonStr)
+            val sanitized = sanitizeControlChars(sanitizeJsonEscapes(jsonStr))
             val jsonElement = json.parseToJsonElement(sanitized).jsonObject
 
             val actionStr = jsonElement["action"]?.jsonPrimitive?.contentOrNull ?: "REPLY"
@@ -420,11 +746,47 @@ class ConversationalGovernor(
                 taskSwitch = taskSwitch
             )
         } catch (e: Exception) {
-            // 파싱 실패 시 원본 텍스트를 REPLY로 반환
-            GovernorAction(
-                action = ActionType.REPLY,
-                message = response
-            )
+            println("[GOVERNOR] JSON parse error: ${e::class.simpleName}: ${e.message}")
+            println("[GOVERNOR] JSON (first 300): ${jsonStr.take(300)}")
+
+            // Fallback: regex로 action/message 추출 시도
+            try {
+                val actionMatch = Regex(""""action"\s*:\s*"(\w+)"""").find(jsonStr)
+                val action = actionMatch?.groupValues?.get(1)?.let {
+                    try { ActionType.valueOf(it) } catch (_: Exception) { null }
+                } ?: ActionType.REPLY
+
+                // specUpdates도 추출 시도
+                val specMatch = Regex(""""specUpdates"\s*:\s*(\{[^}]*\})""").find(jsonStr)
+                val specUpdates = specMatch?.groupValues?.get(1)?.let { specStr ->
+                    try {
+                        val cleaned = sanitizeControlChars(sanitizeJsonEscapes(specStr))
+                        json.parseToJsonElement(cleaned).jsonObject.entries.associate { (k, v) -> k to v }
+                    } catch (_: Exception) { null }
+                }
+
+                // message 필드는 길고 복잡하므로, 원본에서 action/specUpdates/JSON래핑 제거
+                val cleanMessage = jsonStr
+                    .replace(Regex("""^\s*\{"""), "")
+                    .replace(Regex("""\}\s*$"""), "")
+                    .replace(Regex(""""action"\s*:\s*"[^"]*"\s*,?"""), "")
+                    .replace(Regex(""""askingFor"\s*:\s*"[^"]*"\s*,?"""), "")
+                    .replace(Regex(""""specUpdates"\s*:\s*\{[^}]*\}\s*,?"""), "")
+                    .replace(Regex(""""message"\s*:\s*""""), "")
+                    .trimEnd('"', ',', ' ', '\n')
+                    .replace("\\n", "\n")
+                    .replace("\\\"", "\"")
+                    .trim()
+
+                println("[GOVERNOR] Fallback parse: action=$action, messageLen=${cleanMessage.length}")
+                GovernorAction(
+                    action = action,
+                    message = cleanMessage.ifBlank { response },
+                    specUpdates = specUpdates
+                )
+            } catch (_: Exception) {
+                GovernorAction(action = ActionType.REPLY, message = response)
+            }
         }
     }
 
@@ -457,11 +819,16 @@ class ConversationalGovernor(
             }
 
             ActionType.CONFIRM -> {
-                // PROJECT_CREATE이면 작업지시서(Work Order) 생성
-                val summary = if (session.draftSpec.taskType == TaskType.PROJECT_CREATE && llmProvider != null) {
+                // PROJECT_CREATE/WORKFLOW_CREATE이면 작업지시서(Work Order) 생성
+                val summary = if (session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE) && llmProvider != null) {
                     try {
-                        emitProgress(ProgressPhase.LLM_THINKING, "작업지시서 생성 중...")
-                        val workOrder = generateWorkOrder(session)
+                        val label = if (session.draftSpec.taskType == TaskType.WORKFLOW_CREATE) "워크플로우 작업지시서" else "작업지시서"
+                        emitProgress(ProgressPhase.LLM_THINKING, "$label 생성 중...")
+                        val workOrder = if (session.draftSpec.taskType == TaskType.WORKFLOW_CREATE) {
+                            generateWorkflowWorkOrder(session)
+                        } else {
+                            generateWorkOrder(session)
+                        }
                         session.draftSpec = session.draftSpec.copy(workOrderContent = workOrder)
                         workOrder
                     } catch (e: Exception) {
@@ -472,9 +839,25 @@ class ConversationalGovernor(
                     session.draftSpec.summarize()
                 }
 
+                // WorkOrder가 생성되었으면 메시지에 내용 포함 + 명시적 확인 요청
+                val confirmMessage = if (session.draftSpec.workOrderContent != null && summary is String) {
+                    val label = if (session.draftSpec.taskType == TaskType.WORKFLOW_CREATE) "워크플로우 작업지시서" else "작업지시서"
+                    buildString {
+                        appendLine("$label 를 정리했습니다.")
+                        appendLine()
+                        appendLine("---")
+                        appendLine(summary)
+                        appendLine("---")
+                        appendLine()
+                        appendLine("이대로 진행할까요?")
+                    }
+                } else {
+                    action.message
+                }
+
                 ConversationResponse(
                     action = ActionType.CONFIRM,
-                    message = action.message,
+                    message = confirmMessage,
                     sessionId = session.sessionId,
                     draftSpec = session.draftSpec,
                     confirmationSummary = summary
@@ -511,7 +894,12 @@ class ConversationalGovernor(
         val workspace = session.context.workspace
 
         // 1. 실행이 필요하지 않은 타입 (CONVERSATION, INFORMATION)
-        if (!draftSpec.requiresExecution()) {
+        // 단, 세션에서 실행 이력이 있고 수정/후속 요청이면 바이패스
+        // — resetSpec 후 activeTask=null → executionHistory 비어보이지만, 완료된 task에 이력 존재
+        val lastUserMsg = session.history.lastOrNull { it.role == MessageRole.USER }?.content ?: ""
+        val hasPostExecContext = session.context.hasAnyExecution()
+            && (isModificationRequest(lastUserMsg) || isFollowUpDataRequest(lastUserMsg))
+        if (!draftSpec.requiresExecution() && !hasPostExecContext) {
             return ConversationResponse(
                 action = ActionType.REPLY,
                 message = "이 요청은 별도의 실행이 필요하지 않습니다.",
@@ -519,8 +907,31 @@ class ConversationalGovernor(
             )
         }
 
+        // 1.5. 수정 요청 복원: 이전 완료 task의 taskType/target 복원
+        if (hasPostExecContext && !draftSpec.requiresExecution()) {
+            val lastCompletedTask = session.context.tasks.values
+                .filter { it.context.executionHistory.isNotEmpty() }
+                .maxByOrNull { it.context.executionHistory.last().turnIndex }
+            val prevSpec = lastCompletedTask?.draftSpec
+            if (prevSpec != null && prevSpec.taskType != null) {
+                println("[GOVERNOR] Post-execution restore: taskType=${prevSpec.taskType}, targetPath=${prevSpec.targetPath}")
+                draftSpec = draftSpec.copy(
+                    taskType = prevSpec.taskType,
+                    targetPath = draftSpec.targetPath ?: prevSpec.targetPath,
+                    intent = draftSpec.intent ?: lastUserMsg
+                )
+                session.draftSpec = draftSpec
+            }
+        }
+
         // 2. Spec 완성 확인 (WorkOrder가 있으면 스킵 — 이미 충분한 정보 보유)
-        if (!draftSpec.isComplete() && draftSpec.workOrderContent == null) {
+        // 3턴 이상 인터뷰 + intent 존재 + 사용자 확인이면 바이패스
+        val interviewBypass = draftSpec.intent != null
+            && draftSpec.taskType !in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)  // PROJECT_CREATE/WORKFLOW_CREATE는 bypass 불가
+            && countInterviewTurns(session) >= 3
+            && isConfirmationMessage(lastUserMsg)
+            && lastUserMsg.trim().length <= 10  // 순수 확인만 (새 요청 오인 방지)
+        if (!draftSpec.isComplete() && draftSpec.workOrderContent == null && !interviewBypass) {
             val missing = draftSpec.getMissingSlots()
             return ConversationResponse(
                 action = ActionType.ASK,
@@ -530,17 +941,21 @@ class ConversationalGovernor(
             )
         }
 
-        // 2.5. PROJECT_CREATE: WorkOrder 강제 생성 게이트 (방어적 안전망)
+        // 2.5. PROJECT_CREATE/WORKFLOW_CREATE: WorkOrder 강제 생성 게이트 (방어적 안전망)
         // CONFIRM 단계를 건너뛴 경우에도 EXECUTE 전에 반드시 WorkOrder를 생성한다.
-        // WorkOrder 없이 코드 생성하면 DraftSpec 4줄 요약만으로 LLM이 추측 → 패키지/엔티티 오류 발생.
-        if (draftSpec.taskType == TaskType.PROJECT_CREATE
+        // WorkOrder 없이 코드/워크플로우 생성하면 DraftSpec 4줄 요약만으로 LLM이 추측 → 오류 발생.
+        if (draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
             && draftSpec.workOrderContent == null
             && llmProvider != null
         ) {
-            println("[GOVERNOR] WorkOrder Safety Gate: EXECUTE without WorkOrder detected → generating now")
+            println("[GOVERNOR] WorkOrder Safety Gate: EXECUTE without WorkOrder detected → generating now (${draftSpec.taskType})")
             try {
                 emitProgress(ProgressPhase.LLM_THINKING, "작업지시서 생성 중 (안전 게이트)...")
-                val workOrder = generateWorkOrder(session)
+                val workOrder = if (draftSpec.taskType == TaskType.WORKFLOW_CREATE) {
+                    generateWorkflowWorkOrder(session)
+                } else {
+                    generateWorkOrder(session)
+                }
                 draftSpec = draftSpec.copy(workOrderContent = workOrder)
                 session.draftSpec = draftSpec
                 println("[GOVERNOR] WorkOrder Safety Gate: generated ${workOrder.length} chars")
@@ -615,9 +1030,22 @@ class ConversationalGovernor(
 
         // 4. DACS (risky이고 첫 실행일 때만)
         if (draftSpec.isRisky() && session.context.executionHistory.isEmpty()) {
-            emitProgress(ProgressPhase.DACS_EVALUATING, "DACS consensus evaluation...")
-            val dacsResponse = evaluateDACS(session, spec, draftSpec)
-            if (dacsResponse != null) return dacsResponse
+            // DACS REVISION 후 사용자가 확인하면 재평가를 건너뛴다 (informed consent)
+            val dacsAlreadyReviewed = session.history.any {
+                it.role == MessageRole.SYSTEM && it.content.startsWith("DACS 추가 확인 필요")
+            }
+            val userConfirmed = session.history.lastOrNull { it.role == MessageRole.USER }
+                ?.let { isConfirmationMessage(it.content) } ?: false
+
+            if (dacsAlreadyReviewed && userConfirmed) {
+                println("[GOVERNOR] DACS bypass: user confirmed after DACS REVISION")
+            } else {
+                emitProgress(ProgressPhase.DACS_EVALUATING, "DACS consensus evaluation...")
+                val dacsResponse = evaluateDACS(session, spec, draftSpec)
+                if (dacsResponse != null) {
+                    return dacsResponse  // evaluateDACS 내부에서 이미 정리 완료
+                }
+            }
         }
 
         // 5. Route Mode 판단 (Phase B2: 거버넌스 판단 vs 실행 엔진 관찰)
@@ -639,6 +1067,7 @@ class ConversationalGovernor(
     private fun needsLlmDecision(draftSpec: DraftSpec): Boolean = when (draftSpec.taskType) {
         TaskType.API_WORKFLOW -> true
         TaskType.DB_QUERY -> true  // Phase E: Governed HLX 경로
+        TaskType.WORKFLOW_CREATE -> true  // WorkOrder 기반 HLX 생성
         else -> false
     }
 
@@ -735,8 +1164,9 @@ class ConversationalGovernor(
 
         return when (dacsResult.consensus) {
             Consensus.NO -> {
+                session.resetSpec()  // 거부된 위험 스펙 정리 (세션은 유지)
                 ConversationResponse(
-                    action = ActionType.CANCEL,
+                    action = ActionType.REPLY,  // CANCEL → REPLY: 세션 파괴 대신 정중한 거절
                     message = "보안상 이 요청을 실행할 수 없습니다: ${dacsResult.reason}",
                     sessionId = session.sessionId,
                     dacsResult = dacsResult
@@ -956,6 +1386,11 @@ class ConversationalGovernor(
         // Phase E: DB_QUERY → Governed HLX 경로 (GateChain이 통제)
         if (hlxRunner != null && draftSpec.taskType == TaskType.DB_QUERY) {
             return executeDbQueryHlx(session, draftSpec, userId, role)
+        }
+
+        // WORKFLOW_CREATE: WorkOrder 기반 대규모 HLX 생성 → 실행 → 저장
+        if (hlxRunner != null && draftSpec.taskType == TaskType.WORKFLOW_CREATE) {
+            return executeWorkflowCreate(session, draftSpec, userId, role)
         }
 
         // HLX 자동생성 경로: hlxRunner가 있으면 워크플로우를 한번에 생성하고 실행
@@ -1324,7 +1759,8 @@ class ConversationalGovernor(
             domain = draftSpec.domain,
             ragContext = mergedRagContext,
             credentialsTable = credentialsTable.ifBlank { null },
-            targetPath = draftSpec.targetPath
+            targetPath = draftSpec.targetPath,
+            cachedTokens = session.context.tokenStore
         )
         println("[PROMPT] Total length: ${prompt.length} chars, ragContext: ${mergedRagContext?.length ?: 0} chars")
 
@@ -1451,6 +1887,194 @@ class ConversationalGovernor(
         }
 
         // 워크플로우 영구 저장
+        persistWorkflow(workflow, hlxJson, session, userId)
+
+        session.resetSpec()
+        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+        session.context.activeTaskId = null
+
+        return ConversationResponse(
+            action = ActionType.EXECUTE,
+            message = fullMessage,
+            sessionId = session.sessionId
+        )
+    }
+
+    /**
+     * WORKFLOW_CREATE: 작업지시서(WorkOrder) 기반 대규모 HLX 워크플로우 생성 + 실행 + 저장
+     *
+     * 1. RAG에서 API 스펙 조회
+     * 2. WorkOrder + API 스펙 → LLM에게 HLX JSON 생성 요청
+     * 3. HlxParser로 파싱 + HlxValidator로 검증
+     * 4. HlxRunner로 실행
+     * 5. 워크플로우 영구 저장
+     * 6. 결과 포맷팅 및 반환
+     */
+    private suspend fun executeWorkflowCreate(
+        session: ConversationSession,
+        draftSpec: DraftSpec,
+        userId: String = "dev-user",
+        role: String = "OPERATOR"
+    ): ConversationResponse {
+        val workOrder = draftSpec.workOrderContent
+        if (workOrder == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우 생성에 필요한 작업지시서가 없습니다. 인터뷰를 다시 시작해주세요.",
+                sessionId = session.sessionId
+            )
+        }
+
+        emitProgress(ProgressPhase.LLM_THINKING, "WorkOrder 기반 HLX 워크플로우 생성 중...")
+
+        // 1. RAG에서 API 스펙 조회
+        val lastUserMessage = session.getRecentHistory(5)
+            .lastOrNull { it.role == MessageRole.USER }?.content
+        val ragContext = consultRagForApiKnowledge(draftSpec, lastUserMessage)
+        val authContext = consultRagForAuthCredentials()
+        val mergedRagContext = mergeRagContexts(ragContext, authContext)
+        println("[WORKFLOW_CREATE] RAG context: ${mergedRagContext?.length ?: 0} chars")
+
+        // 1-b. credentials 추출
+        val credentialsTable = extractCredentialsFromRag(mergedRagContext)
+
+        // 2. LLM에게 HLX 워크플로우 JSON 생성 요청
+        val prompt = GovernorPrompt.hlxFromWorkOrderPrompt(
+            workOrderContent = workOrder,
+            ragContext = mergedRagContext,
+            credentialsTable = credentialsTable.ifBlank { null },
+            targetPath = draftSpec.targetPath,
+            cachedTokens = session.context.tokenStore
+        )
+        println("[WORKFLOW_CREATE] Prompt length: ${prompt.length} chars")
+
+        val llmResponse = try {
+            llmProvider!!.call(
+                LlmRequest(
+                    action = LlmAction.COMPLETE,
+                    prompt = prompt,
+                    model = model ?: llmProvider.defaultModel,
+                    maxTokens = 8000,
+                    params = mapOf("temperature" to "0"),
+                    timeoutMs = 180_000L  // 대규모 워크플로우: 3분
+                )
+            )
+        } catch (e: Exception) {
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 생성 실패: ${e.message}",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 3. HLX JSON 파싱
+        val hlxJson = extractJson(llmResponse.content)
+        println("[WORKFLOW_CREATE] Generated HLX (${hlxJson.length} chars):\n${hlxJson.take(3000)}")
+
+        val workflow = try {
+            HlxParser.parse(hlxJson)
+        } catch (e: Exception) {
+            println("[WORKFLOW_CREATE] Parse failed: ${e.message}, trying sanitize...")
+            try {
+                val sanitized = sanitizeHlxJson(hlxJson)
+                HlxParser.parse(sanitized).also {
+                    println("[WORKFLOW_CREATE] Sanitized parse succeeded")
+                }
+            } catch (e2: Exception) {
+                println("[WORKFLOW_CREATE] Sanitized parse also failed: ${e2.message}")
+                return ConversationResponse(
+                    action = ActionType.EXECUTE,
+                    message = "HLX 워크플로우 파싱 실패: ${e.message}\n\n작업지시서는 정상적으로 생성되었으나, HLX JSON 변환에 실패했습니다.\n생성된 JSON (일부):\n${hlxJson.take(500)}...",
+                    sessionId = session.sessionId,
+                    error = e.message
+                )
+            }
+        }
+
+        println("[WORKFLOW_CREATE] Workflow parsed: ${workflow.name}, ${workflow.nodes.size} nodes")
+        workflow.nodes.forEach { node ->
+            println("[WORKFLOW_CREATE]   Node: ${node.id} (${node.type}) - ${node.description.take(80)}")
+        }
+
+        // 3.5. 검증
+        val validationErrors = HlxValidator.validate(workflow)
+        if (validationErrors.isNotEmpty()) {
+            val errorMsg = validationErrors.joinToString("\n") { "- ${it.path}: ${it.message}" }
+            println("[WORKFLOW_CREATE] Validation failed:\n$errorMsg")
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 검증 실패:\n$errorMsg\n\n워크플로우가 생성되었으나 구조적 오류가 있습니다.",
+                sessionId = session.sessionId,
+                error = "Validation failed"
+            )
+        }
+
+        // 4. HlxRunner로 실행
+        emitProgress(ProgressPhase.EXECUTING, "HLX 워크플로우 실행: ${workflow.name} (${workflow.nodes.size} nodes)...")
+
+        val hlxResult = try {
+            hlxRunner!!.run(workflow, userId = userId, role = role, ragContext = mergedRagContext)
+        } catch (e: Exception) {
+            // 실행 실패해도 워크플로우 자체는 저장 (재실행 가능)
+            persistWorkflow(workflow, hlxJson, session, userId)
+            return ConversationResponse(
+                action = ActionType.EXECUTE,
+                message = "HLX 워크플로우 실행 실패: ${e.message}\n\n워크플로우는 저장되었습니다. '/hlx run ${workflow.name}'으로 재실행 가능합니다.",
+                sessionId = session.sessionId,
+                error = e.message
+            )
+        }
+
+        // 5. 토큰 추출
+        extractTokensFromHlxResult(session, hlxResult)
+
+        // 6. 결과 포맷팅
+        val technicalSummary = formatHlxExecutionResult(hlxResult, workflow)
+        val naturalSummary = summarizeHlxResult(
+            intent = draftSpec.intent ?: "",
+            hlxResult = hlxResult,
+            workflow = workflow
+        )
+
+        emitProgress(ProgressPhase.DONE)
+
+        val fullMessage = buildString {
+            if (naturalSummary != null) {
+                appendLine(naturalSummary)
+                appendLine()
+            }
+            appendLine(technicalSummary)
+            appendLine()
+            appendLine("---")
+            appendLine("워크플로우 '${workflow.name}' (${workflow.nodes.size} nodes)이 저장되었습니다.")
+            appendLine("재실행: `/hlx run ${workflow.name}`")
+        }
+
+        // 7. 세션 결과 적재
+        session.integrateResult(null, null, "WORKFLOW_CREATE: ${hlxResult.status} - ${workflow.name}")
+
+        // 8. Audit
+        try {
+            auditStore?.insert(
+                AuditRecordFactory.fromHlxResult(
+                    hlxResult = hlxResult,
+                    workflow = workflow,
+                    executionPath = ExecutionPath.API_WORKFLOW_HLX,
+                    sessionId = session.sessionId,
+                    userId = userId,
+                    role = role,
+                    userInput = session.lastUserInput,
+                    intent = draftSpec.intent,
+                    taskType = "WORKFLOW_CREATE",
+                    projectId = session.projectId
+                )
+            )
+        } catch (e: Exception) {
+            println("[AUDIT] Failed to record WORKFLOW_CREATE: ${e.message}")
+        }
+
+        // 9. 워크플로우 영구 저장
         persistWorkflow(workflow, hlxJson, session, userId)
 
         session.resetSpec()
@@ -1773,8 +2397,19 @@ class ConversationalGovernor(
                 )
             }
 
-            TaskType.INFORMATION, TaskType.CONVERSATION, null -> {
-                // 실행이 필요하지 않은 타입
+            TaskType.WORKFLOW_CREATE -> {
+                // WORKFLOW_CREATE는 executeWorkflowCreate()에서 WorkOrder 기반 HLX 생성/실행
+                listOf(
+                    BlueprintStep(
+                        stepId = stepId,
+                        type = BlueprintStepType.NOOP,
+                        params = mapOf("reason" to "WORKFLOW_CREATE handled by executeWorkflowCreate via HLX")
+                    )
+                )
+            }
+
+            TaskType.INFORMATION, TaskType.CONVERSATION, TaskType.WORKFLOW_MANAGE, null -> {
+                // 실행이 필요하지 않은 타입 (WORKFLOW_MANAGE는 Pre-LLM 인터셉터가 처리)
                 listOf(
                     BlueprintStep(
                         stepId = stepId,
@@ -1803,6 +2438,36 @@ class ConversationalGovernor(
                 model = model ?: llmProvider.defaultModel,
                 maxTokens = 8192,
                 timeoutMs = 120_000L  // 작업지시서 생성: 2분
+            )
+        )
+
+        return stripMarkdownFence(response.content.trim())
+    }
+
+    /**
+     * WORKFLOW_CREATE용 워크플로우 작업지시서 생성
+     *
+     * 대화 내역 + DraftSpec → HLX 워크플로우를 위한 상세 작업지시서
+     */
+    private suspend fun generateWorkflowWorkOrder(session: ConversationSession): String {
+        // RAG에서 API 스펙 조회 (Base URL, 엔드포인트 등 실제 정보 제공)
+        val lastUserMessage = session.getRecentHistory(5)
+            .lastOrNull { it.role == MessageRole.USER }?.content
+        val ragContext = consultRagForApiKnowledge(session.draftSpec, lastUserMessage)
+        val authContext = consultRagForAuthCredentials()
+        val mergedRagContext = mergeRagContexts(ragContext, authContext)
+
+        val prompt = GovernorPrompt.workflowWorkOrderGenerationPrompt(
+            session.history, session.draftSpec, mergedRagContext
+        )
+
+        val response = llmProvider!!.call(
+            LlmRequest(
+                action = LlmAction.COMPLETE,
+                prompt = prompt,
+                model = model ?: llmProvider.defaultModel,
+                maxTokens = 8192,
+                timeoutMs = 120_000L  // 워크플로우 작업지시서 생성: 2분
             )
         )
 
@@ -2417,13 +3082,26 @@ class ConversationalGovernor(
             }
 
             lower.contains("취소") || lower.contains("됐어") || lower.contains("그만") -> {
-                session.cancelCurrentTask()
-                session.addGovernorMessage("알겠습니다. 언제든 새로 시작할 수 있어요.")
-                ConversationResponse(
-                    action = ActionType.CANCEL,
-                    message = "알겠습니다. 언제든 새로 시작할 수 있어요.",
-                    sessionId = session.sessionId
-                )
+                val hasActiveWork = session.draftSpec.taskType != null
+                    && session.draftSpec.taskType != TaskType.CONVERSATION
+                    && session.draftSpec.taskType != TaskType.INFORMATION
+                if (hasActiveWork) {
+                    session.cancelCurrentTask()
+                    session.addGovernorMessage("작업을 취소하겠습니다.")
+                    ConversationResponse(
+                        action = ActionType.CANCEL,
+                        message = "작업을 취소하겠습니다.",
+                        sessionId = session.sessionId
+                    )
+                } else {
+                    val msg = "알겠습니다. 다른 것이 필요하면 말씀해주세요."
+                    session.addGovernorMessage(msg)
+                    ConversationResponse(
+                        action = ActionType.REPLY,
+                        message = msg,
+                        sessionId = session.sessionId
+                    )
+                }
             }
 
             else -> {
@@ -2498,6 +3176,50 @@ class ConversationalGovernor(
      * - decide 노드의 branches가 배열이면 → 배열 내 아이템을 별도 노드로 추출 + branches를 Map으로 변환
      * - branches가 null이면 → transform으로 변환
      */
+    /**
+     * input 필드가 배열이면 comma-separated 문자열로 변환
+     * 예: "input": ["a", "b"] → "input": "a, b"
+     */
+    private fun fixInputArray(nodeObj: JsonObject): JsonObject {
+        val inputValue = nodeObj["input"]
+        if (inputValue is JsonArray) {
+            val joined = inputValue.mapNotNull { it.jsonPrimitive?.contentOrNull }.joinToString(", ")
+            println("[HLX-SANITIZE] Converted input array → string: $joined")
+            return buildJsonObject {
+                nodeObj.forEach { (k, v) ->
+                    if (k == "input") put(k, JsonPrimitive(joined)) else put(k, v)
+                }
+            }
+        }
+        return nodeObj
+    }
+
+    /**
+     * repeat body 내부 노드들도 재귀적으로 sanitize
+     */
+    private fun sanitizeNodeRecursive(nodeObj: JsonObject): JsonObject {
+        var fixed = fixInputArray(nodeObj)
+        // repeat body 재귀 처리
+        val body = fixed["body"]
+        if (body is JsonArray) {
+            val fixedBody = buildJsonArray {
+                for (child in body) {
+                    if (child is JsonObject) {
+                        add(sanitizeNodeRecursive(child))
+                    } else {
+                        add(child)
+                    }
+                }
+            }
+            fixed = buildJsonObject {
+                fixed.forEach { (k, v) ->
+                    if (k == "body") put(k, fixedBody) else put(k, v)
+                }
+            }
+        }
+        return fixed
+    }
+
     private fun sanitizeHlxJson(rawJson: String): String {
         val jsonParser = Json { ignoreUnknownKeys = true }
         val root = jsonParser.parseToJsonElement(rawJson).jsonObject
@@ -2505,7 +3227,7 @@ class ConversationalGovernor(
 
         val fixedNodes = buildJsonArray {
             for (node in nodes) {
-                val nodeObj = node.jsonObject
+                var nodeObj = sanitizeNodeRecursive(node.jsonObject)
                 val type = nodeObj["type"]?.jsonPrimitive?.contentOrNull
 
                 if (type == "decide") {
@@ -2571,16 +3293,64 @@ class ConversationalGovernor(
                     }
                 }
 
-                add(node)
+                add(nodeObj)
             }
         }
 
+        // ID 중복 제거 패스 (body 포함 전체 노드 대상)
+        val deduped = deduplicateNodeIds(fixedNodes)
+
         val fixedRoot = buildJsonObject {
             root.forEach { (k, v) ->
-                if (k == "nodes") put(k, fixedNodes) else put(k, v)
+                if (k == "nodes") put(k, deduped) else put(k, v)
             }
         }
         return jsonParser.encodeToString(JsonElement.serializer(), fixedRoot)
+    }
+
+    /**
+     * 노드 ID 중복 제거 (body 포함 재귀)
+     */
+    private fun deduplicateNodeIds(nodes: JsonArray): JsonArray {
+        val seenIds = mutableSetOf<String>()
+
+        fun dedup(node: JsonObject): JsonObject {
+            var result = node
+            val id = node["id"]?.jsonPrimitive?.contentOrNull
+            if (id != null && !seenIds.add(id)) {
+                // 중복 → 접미사 추가
+                var suffix = 2
+                while (!seenIds.add("$id-$suffix")) suffix++
+                val newId = "$id-$suffix"
+                println("[HLX-SANITIZE] Dedup: '$id' → '$newId'")
+                result = buildJsonObject {
+                    node.forEach { (k, v) ->
+                        if (k == "id") put(k, JsonPrimitive(newId)) else put(k, v)
+                    }
+                }
+            }
+            // body 재귀
+            val body = result["body"]
+            if (body is JsonArray) {
+                val dedupedBody = buildJsonArray {
+                    for (child in body) {
+                        if (child is JsonObject) add(dedup(child)) else add(child)
+                    }
+                }
+                result = buildJsonObject {
+                    result.forEach { (k, v) ->
+                        if (k == "body") put(k, dedupedBody) else put(k, v)
+                    }
+                }
+            }
+            return result
+        }
+
+        return buildJsonArray {
+            for (node in nodes) {
+                if (node is JsonObject) add(dedup(node)) else add(node)
+            }
+        }
     }
 
     /**
@@ -3351,11 +4121,11 @@ class ConversationalGovernor(
      * 워크스페이스와 DraftSpec으로부터 프로젝트 경로를 유도한다.
      *
      * domain 또는 intent에서 slug를 생성하여 workspace 하위에 프로젝트 디렉토리 경로를 반환.
-     * workspace가 null이면 /tmp 하위에 프로젝트 디렉토리를 생성한다.
+     * workspace가 null이면 ~/wiiiv_projects 하위에 프로젝트 디렉토리를 생성한다.
      */
     internal fun deriveProjectPath(workspace: String?, draftSpec: DraftSpec): String? {
         val slug = generateSlug(draftSpec.domain ?: draftSpec.intent ?: return null)
-        val base = workspace ?: "/tmp/wiiiv-projects"
+        val base = workspace ?: "${System.getProperty("user.home")}/.wiiiv/projects"
         return "$base/$slug"
     }
 
@@ -3455,6 +4225,7 @@ class ConversationalGovernor(
                     projectId = session.projectId
                 )
             )
+            session.context.lastExecutedWorkflowId = workflow.id
             println("[WORKFLOW-STORE] Saved: ${workflow.name} (id=${workflow.id})")
         } catch (e: Exception) {
             println("[WORKFLOW-STORE] Failed to save: ${e.message}")
@@ -3473,6 +4244,422 @@ class ConversationalGovernor(
      */
     fun listWorkflows(projectId: Long? = null): List<io.wiiiv.hlx.store.WorkflowRecord> {
         return workflowStore?.listByProject(projectId) ?: emptyList()
+    }
+
+    // === Pre-LLM 워크플로우 관리 명령 감지/처리 ===
+
+    /**
+     * 워크플로우 관리 명령 유형
+     */
+    enum class WorkflowCommand {
+        SAVE, LOAD, LIST, DELETE
+    }
+
+    /**
+     * 워크플로우 관리 명령 감지 결과
+     */
+    data class WorkflowCommandMatch(
+        val command: WorkflowCommand,
+        val name: String? = null
+    )
+
+    /**
+     * 자연어 메시지에서 워크플로우 관리 명령을 감지한다.
+     * LLM 판단 전에 정규식으로 결정론적으로 감지하여 오분류를 방지한다.
+     *
+     * @return 감지된 명령 또는 null (일반 메시지)
+     */
+    internal fun detectWorkflowCommand(message: String): WorkflowCommandMatch? {
+        val msg = message.trim()
+        val lower = msg.lowercase()
+
+        // 생성/구축 의도가 있으면 관리 명령으로 해석하지 않음
+        // "워크플로우 만들어줘", "워크플로우를 생성하고 싶어" 등은 WORKFLOW_CREATE이지 관리 명령이 아님
+        val creationKeywords = listOf("만들", "생성", "구축", "설정", "세팅", "자동화")
+        if (creationKeywords.any { lower.contains(it) }) {
+            return null
+        }
+
+        // 이름 추출: "이름" 또는 '이름' 패턴
+        val namePattern = Regex("""["'"](.+?)["'"]""")
+        val extractedName = namePattern.find(msg)?.groupValues?.get(1)
+
+        // 인용부호 안의 텍스트를 제거하여 패턴 매칭 시 이름과 명령어를 혼동하지 않도록 함
+        val msgWithoutQuotes = namePattern.replace(msg, " ").lowercase()
+
+        // SAVE 패턴: 워크플로우 저장
+        val savePatterns = listOf(
+            Regex("""워크플로우.*저장"""),
+            Regex("""방금.*(저장|세이브)"""),
+            Regex("""save\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+            Regex("""워크플로우.*이름.*(바꿔|변경|지정)"""),
+        )
+        if (savePatterns.any { it.containsMatchIn(msgWithoutQuotes) }) {
+            return WorkflowCommandMatch(WorkflowCommand.SAVE, extractedName)
+        }
+
+        // LIST 패턴 (LOAD보다 먼저 — "목록 보여줘"가 LOAD에 매칭되는 것 방지)
+        val listPatterns = listOf(
+            Regex("""워크플로우.*(목록|리스트|보여줘|조회)"""),
+            Regex("""저장.*(워크플로우|workflow).*(목록|리스트|보여줘|조회)"""),
+            Regex("""list\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+            Regex("""show\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+        )
+        if (listPatterns.any { it.containsMatchIn(msgWithoutQuotes) }) {
+            return WorkflowCommandMatch(WorkflowCommand.LIST)
+        }
+
+        // DELETE 패턴
+        val deletePatterns = listOf(
+            Regex("""워크플로우.*(?:삭제|제거|지워)"""),
+            Regex("""delete\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+            Regex("""remove\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+        )
+        if (deletePatterns.any { it.containsMatchIn(msgWithoutQuotes) }) {
+            return WorkflowCommandMatch(WorkflowCommand.DELETE, extractedName)
+        }
+
+        // LOAD 패턴
+        val loadPatterns = listOf(
+            Regex("""워크플로우.*(로드|불러|실행|열어|가져)"""),
+            Regex("""load\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+            Regex("""run\s+(?:the\s+)?workflow""", RegexOption.IGNORE_CASE),
+        )
+        if (loadPatterns.any { it.containsMatchIn(msgWithoutQuotes) }) {
+            return WorkflowCommandMatch(WorkflowCommand.LOAD, extractedName)
+        }
+
+        return null
+    }
+
+    /**
+     * 워크플로우 관리 명령을 처리하고 응답을 반환한다.
+     * LLM을 거치지 않고 직접 WorkflowStore를 호출한다.
+     */
+    private suspend fun handleWorkflowCommand(
+        cmd: WorkflowCommandMatch,
+        session: ConversationSession,
+        userId: String
+    ): ConversationResponse {
+        if (workflowStore == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우 저장소가 설정되지 않았습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        return when (cmd.command) {
+            WorkflowCommand.SAVE -> handleWorkflowSave(cmd, session, userId)
+            WorkflowCommand.LOAD -> handleWorkflowLoad(cmd, session, userId)
+            WorkflowCommand.LIST -> handleWorkflowList(session)
+            WorkflowCommand.DELETE -> handleWorkflowDelete(cmd, session)
+        }
+    }
+
+    private suspend fun handleWorkflowSave(
+        cmd: WorkflowCommandMatch,
+        session: ConversationSession,
+        userId: String
+    ): ConversationResponse {
+        val lastWfId = session.context.lastExecutedWorkflowId
+        if (lastWfId == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "저장할 워크플로우가 없습니다. 먼저 워크플로우를 실행해주세요.",
+                sessionId = session.sessionId
+            )
+        }
+
+        val record = workflowStore!!.findById(lastWfId)
+        if (record == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우(id=$lastWfId)를 찾을 수 없습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        // 이름 변경 요청이면 업데이트
+        if (cmd.name != null && cmd.name != record.name) {
+            val updated = record.copy(
+                name = cmd.name,
+                updatedAt = System.currentTimeMillis()
+            )
+            workflowStore!!.save(updated)
+            println("[WORKFLOW-CMD] Renamed: ${record.name} → ${cmd.name}")
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우가 \"${cmd.name}\" 이름으로 저장되었습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        // 이미 저장됨
+        return ConversationResponse(
+            action = ActionType.REPLY,
+            message = "워크플로우 \"${record.name}\"이(가) 이미 저장되어 있습니다. (id=${record.workflowId})",
+            sessionId = session.sessionId
+        )
+    }
+
+    private suspend fun handleWorkflowLoad(
+        cmd: WorkflowCommandMatch,
+        session: ConversationSession,
+        userId: String
+    ): ConversationResponse {
+        if (cmd.name == null) {
+            // 이름 없이 로드 요청 → 목록 보여주기
+            val workflows = workflowStore!!.listByProject(session.projectId, limit = 10)
+            if (workflows.isEmpty()) {
+                return ConversationResponse(
+                    action = ActionType.REPLY,
+                    message = "저장된 워크플로우가 없습니다.",
+                    sessionId = session.sessionId
+                )
+            }
+            val list = workflows.mapIndexed { i, w -> "${i + 1}. ${w.name}" }.joinToString("\n")
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "어떤 워크플로우를 로드할까요?\n\n$list",
+                sessionId = session.sessionId
+            )
+        }
+
+        val record = workflowStore!!.findByName(cmd.name, session.projectId)
+            ?: return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "\"${cmd.name}\" 워크플로우를 찾을 수 없습니다.",
+                sessionId = session.sessionId
+            )
+
+        // HLX Runner로 실행
+        if (hlxRunner == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "HLX Runner가 설정되지 않아 워크플로우를 실행할 수 없습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        return try {
+            emitProgress(ProgressPhase.EXECUTING, "Loading workflow: ${record.name}...")
+            val workflow = HlxParser.parse(record.workflowJson)
+            val result = hlxRunner!!.run(workflow)
+            session.context.lastExecutedWorkflowId = record.workflowId
+            emitProgress(ProgressPhase.DONE)
+
+            val statusText = if (result.status == HlxExecutionStatus.COMPLETED) "성공" else "실패"
+            ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우 \"${record.name}\" 실행 $statusText. (${result.nodeRecords.size}개 노드, ${result.totalDurationMs}ms)",
+                sessionId = session.sessionId
+            )
+        } catch (e: Exception) {
+            emitProgress(ProgressPhase.DONE)
+            ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우 \"${record.name}\" 실행 중 오류: ${e.message}",
+                sessionId = session.sessionId
+            )
+        }
+    }
+
+    private fun handleWorkflowList(session: ConversationSession): ConversationResponse {
+        val workflows = workflowStore!!.listByProject(session.projectId)
+        if (workflows.isEmpty()) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "저장된 워크플로우가 없습니다.",
+                sessionId = session.sessionId
+            )
+        }
+
+        val list = workflows.mapIndexed { i, w ->
+            val desc = w.description?.let { " — $it" } ?: ""
+            "${i + 1}. **${w.name}**$desc (id=${w.workflowId})"
+        }.joinToString("\n")
+
+        return ConversationResponse(
+            action = ActionType.REPLY,
+            message = "저장된 워크플로우 목록:\n\n$list",
+            sessionId = session.sessionId
+        )
+    }
+
+    private fun handleWorkflowDelete(
+        cmd: WorkflowCommandMatch,
+        session: ConversationSession
+    ): ConversationResponse {
+        if (cmd.name == null) {
+            return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "삭제할 워크플로우 이름을 지정해주세요. 예: 워크플로우 \"이름\" 삭제해줘",
+                sessionId = session.sessionId
+            )
+        }
+
+        val record = workflowStore!!.findByName(cmd.name, session.projectId)
+            ?: return ConversationResponse(
+                action = ActionType.REPLY,
+                message = "\"${cmd.name}\" 워크플로우를 찾을 수 없습니다.",
+                sessionId = session.sessionId
+            )
+
+        val deleted = workflowStore!!.delete(record.workflowId)
+        return if (deleted) {
+            println("[WORKFLOW-CMD] Deleted: ${record.name} (id=${record.workflowId})")
+            ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우 \"${record.name}\"이(가) 삭제되었습니다.",
+                sessionId = session.sessionId
+            )
+        } else {
+            ConversationResponse(
+                action = ActionType.REPLY,
+                message = "워크플로우 삭제에 실패했습니다.",
+                sessionId = session.sessionId
+            )
+        }
+    }
+
+    /**
+     * 복잡한 요청인지 판단 — 인터뷰(ASK)가 필요한 수준의 복잡도
+     * 범용 기준: 다중 시스템, 파일 출력 지정, 3개 이상 조건/단계
+     */
+    private fun isComplexRequest(message: String): Boolean {
+        val lower = message.lowercase()
+        var complexity = 0
+        // 다중 시스템 언급
+        val systems = listOf("skymall", "skystock", "skypay")
+        if (systems.count { lower.contains(it) } >= 2) complexity += 2
+        // 파일 출력 지정
+        if (lower.contains(".csv") || lower.contains(".txt") || lower.contains(".html") ||
+            lower.contains(".json") || lower.contains(".py") || lower.contains(".kt")) complexity++
+        // 다단계 지시 (접속사/순서) — 어간 사용
+        val conjunctions = listOf("그리고", "한 뒤", "후에", "다음에", "조합", "결합", "분석")
+        complexity += conjunctions.count { lower.contains(it) }
+        // 3단어 이상 동사 (복잡한 작업) — 어간 사용
+        val actionVerbs = listOf("찾", "확인", "정리", "저장", "만들", "조회", "분류", "출력", "보고서", "리포트")
+        complexity += (actionVerbs.count { lower.contains(it) } - 1).coerceAtLeast(0)
+        // 의도/바람 표현 (복잡한 요구)
+        val intentPatterns = listOf("싶", "필요", "원하", "해야", "하고 싶")
+        val hasIntent = intentPatterns.any { lower.contains(it) }
+        if (hasIntent) complexity++
+        // 분석/통계 + 의도 콤보 — 인터뷰가 필요한 복잡 요청
+        val analysisWords = listOf("분석", "현황", "통계", "보고서", "리포트", "추이", "비교", "요약")
+        val hasAnalysis = analysisWords.any { lower.contains(it) }
+        if (hasAnalysis && hasIntent) complexity++
+
+        return complexity >= 3
+    }
+
+    /**
+     * 대화 컨텍스트에서 프로젝트 생성 의도를 감지
+     * LLM이 specUpdates를 누락했을 때, 대화 내용으로 PROJECT_CREATE를 추론
+     */
+    private fun isProjectCreationContext(session: ConversationSession, currentMessage: String): Boolean {
+        // 현재 메시지 + 최근 대화 이력에서 프로젝트 생성 키워드 탐색
+        val allText = buildString {
+            // 최근 대화 이력 (최대 10개)
+            for (msg in session.history.takeLast(10)) {
+                append(msg.content)
+                append(" ")
+            }
+            append(currentMessage)
+        }.lowercase()
+
+        // 프로젝트 생성을 암시하는 키워드 조합
+        val projectKeywords = listOf("프로젝트", "시스템", "서버", "백엔드", "어플리케이션", "앱")
+        val createKeywords = listOf("만들", "생성", "구축", "개발")
+        val techKeywords = listOf("spring boot", "kotlin", "java", "react", "python", "ktor",
+            "jpa", "gradle", "maven", "포트", "패키지")
+        val entityKeywords = listOf("엔티티", "entity", "테이블", "모델", "스키마")
+        val apiKeywords = listOf("/api/", "controller", "엔드포인트", "endpoint", "rest api")
+
+        val hasProject = projectKeywords.any { allText.contains(it) }
+        val hasCreate = createKeywords.any { allText.contains(it) }
+        val hasTech = techKeywords.count { allText.contains(it) } >= 2
+        val hasEntity = entityKeywords.any { allText.contains(it) }
+        val hasApi = apiKeywords.any { allText.contains(it) }
+
+        // 프로젝트+생성 키워드가 있거나, 기술스택이 2개 이상 + (엔티티 or API 언급)
+        return (hasProject && hasCreate) || (hasTech && (hasEntity || hasApi))
+    }
+
+    /**
+     * 사용자 확인 메시지인지 판단
+     */
+    private fun isConfirmationMessage(message: String): Boolean {
+        val lower = message.trim().lowercase()
+        val confirmPatterns = listOf(
+            "응", "네", "예", "ㅇㅇ", "ㅇ", "ok", "yes", "진행", "실행",
+            "만들어", "해줘", "해", "삭제해", "진행해", "실행해", "시작해"
+        )
+        // 짧은 메시지: 키워드 포함이면 확인
+        // 긴 메시지: 시작/끝 매칭 + 강력 확인 패턴
+        val strongConfirmPatterns = listOf(
+            "이대로 진행", "이대로 하", "이대로 실행", "이대로 쭉",
+            "진행해 주", "진행해주", "실행해 주", "실행해주",
+            "그래 그래", "좋아요", "좋습니다",
+            "부탁드", "부탁합", "부탁할", "잘 부탁",
+        )
+        return confirmPatterns.any { lower == it || lower.startsWith("$it ") || lower.endsWith(" $it") }
+            || (lower.length <= 20 && confirmPatterns.any { lower.contains(it) })
+            || strongConfirmPatterns.any { lower.contains(it) }
+    }
+
+    /**
+     * 사용자가 명시적으로 작업지시서 생성을 요청하는지 판단
+     * "작업지시서 만들어", "작업지시서를 완성해줘", "작업지시서 작성해줘" 등
+     */
+    private fun isWorkOrderRequest(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("작업지시서") && listOf(
+            "만들", "작성", "완성", "생성", "정리", "시작", "보여"
+        ).any { lower.contains(it) }
+    }
+
+    /**
+     * 현재 인터뷰(ASK-응답) 턴 수를 계산
+     * SYSTEM 메시지(DACS 등)를 만나면 이전 대화이므로 중단
+     */
+    private fun countInterviewTurns(session: ConversationSession): Int {
+        var count = 0
+        for (msg in session.history.reversed()) {
+            if (msg.role == MessageRole.SYSTEM) break
+            if (msg.role == MessageRole.USER) count++
+        }
+        return count
+    }
+
+    /**
+     * 후속 데이터 요청인지 판단 — 실행 결과를 기반으로 추가 조회/상세/드릴다운 요청
+     */
+    private fun isFollowUpDataRequest(message: String): Boolean {
+        val lower = message.lowercase()
+        val followUpPatterns = listOf(
+            "상세", "자세", "보여", "알려", "확인", "조회",
+            "더 ", "좀 더", "다시", "또 ", "나머지",
+            "목록", "리스트", "내용", "데이터",
+            "가져", "불러", "검색", "찾아",
+            "어떤", "몇 개", "얼마"
+        )
+        return followUpPatterns.any { lower.contains(it) }
+    }
+
+    /**
+     * 코드/작업 수정 요청인지 판단
+     */
+    private fun isModificationRequest(message: String): Boolean {
+        val lower = message.lowercase()
+        val modifyPatterns = listOf(
+            "수정해", "고쳐", "변경해", "바꿔", "추가해", "넣어", "빼",
+            "기능도", "도 넣어", "도 추가", "도 만들어",
+            "에러 처리", "예외 처리", "타임아웃",
+            "fix", "modify", "change", "add", "update", "refactor"
+        )
+        return modifyPatterns.any { lower.contains(it) }
     }
 
     companion object {

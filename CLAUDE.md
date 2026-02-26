@@ -72,7 +72,7 @@ Spec (판단 자산)
     ↓
 Governor (판단 주체)
     ↓
-DACS (합의 엔진)
+DACS (Divergent Adversarial Consensus System)
     ↓
 Blueprint (판단의 고정)
     ↓
@@ -487,7 +487,7 @@ wiiiv rag size                   # 저장소 크기
 
 ---
 
-## DACS 정합성 규칙 (Canonical)
+## DACS (Divergent Adversarial Consensus System) 정합성 규칙 (Canonical)
 
 ### VetoConsensusEngine (이전 이름: MajorityConsensusEngine)
 

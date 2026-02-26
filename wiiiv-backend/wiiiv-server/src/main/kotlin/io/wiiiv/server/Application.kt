@@ -10,7 +10,8 @@ import io.wiiiv.server.config.configureSerialization
 import io.wiiiv.server.config.configureStatusPages
 
 fun main() {
-    embeddedServer(Netty, port = 8235, host = "0.0.0.0") {
+    val port = System.getenv("WIIIV_PORT")?.toIntOrNull() ?: 8235
+    embeddedServer(Netty, port = port, host = "0.0.0.0") {
         module()
     }.start(wait = true)
 }

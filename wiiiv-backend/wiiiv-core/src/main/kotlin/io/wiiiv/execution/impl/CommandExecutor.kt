@@ -230,6 +230,8 @@ class CommandExecutor : Executor {
                 put("stdout", JsonPrimitive(stdout))
                 put("truncated", JsonPrimitive(stdout.length >= MAX_OUTPUT_LENGTH))
             },
+            stdout = stdout,
+            exitCode = exitCode,
             artifacts = mapOf("stdout" to stdout)
         )
 

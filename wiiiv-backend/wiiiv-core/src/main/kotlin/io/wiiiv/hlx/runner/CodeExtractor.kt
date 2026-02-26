@@ -41,6 +41,20 @@ object CodeExtractor {
         Regex("""parse\s+the\s+body\b.*\bas\s+json""", RegexOption.IGNORE_CASE)
 
     /**
+     * SET Transform 노드를 코드로 실행한다.
+     *
+     * hint=SET이고 value가 있으면 그 값을 그대로 output 변수에 세팅한다.
+     * LLM 호출 없이 즉시 처리 — cachedTokens 주입에 사용.
+     *
+     * @return value가 있으면 JsonPrimitive, 없으면 null (LLM 폴백)
+     */
+    fun trySet(node: HlxNode.Transform, context: HlxContext): JsonElement? {
+        val value = node.value ?: return null
+        println("[HLX-CODE] Set: '${node.id}' → output='${node.output}' value='${value.take(50)}...'")
+        return JsonPrimitive(value)
+    }
+
+    /**
      * EXTRACT Transform 노드를 코드로 실행 시도한다.
      *
      * @return 추출 성공 시 JsonElement, 실패 시 null (LLM 폴백 필요)
@@ -164,6 +178,115 @@ object CodeExtractor {
 
         // 배열 등은 그대로
         return element
+    }
+
+    // ==========================================================
+    // Phase 2-M: MERGE 코드 변환
+    // ==========================================================
+
+    /** Merge 패턴: "Merge {var1} and {var2}" */
+    private val MERGE_PATTERN = Regex(
+        """merge\s+(\w+)\s+and\s+(\w+)""", RegexOption.IGNORE_CASE
+    )
+
+    /** Merge 다중 패턴: "Merge {var1}, {var2} and {var3}" */
+    private val MERGE_MULTI_PATTERN = Regex(
+        """merge\s+(\w+(?:\s*,\s*\w+)*)\s+and\s+(\w+)""", RegexOption.IGNORE_CASE
+    )
+
+    /** Tag 패턴: "tag (each item with its source )? {fieldName}" */
+    private val TAG_PATTERN = Regex(
+        """tag\s+(?:each\s+item\s+with\s+(?:its\s+)?(?:source\s+)?)?(\w+)""", RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * MERGE Transform 노드를 코드로 실행한다.
+     *
+     * description에서 병합할 변수명들을 추출하고, context에서 각 변수를 가져와
+     * 배열로 flatten한 뒤 concatenate하여 반환한다.
+     *
+     * tag 필드 지원: description에 "tag alertLevel" 패턴이 있으면
+     * 각 원본 배열 아이템에 해당 필드를 추가한다.
+     *
+     * @return 병합 성공 시 JsonArray, 실패 시 null (LLM 폴백)
+     */
+    fun tryMerge(node: HlxNode.Transform, context: HlxContext): JsonElement? {
+        return try {
+            val desc = node.description
+
+            // 변수명 추출: input 필드 우선 (comma-separated), description 폴백
+            val varNames = node.input?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() && context.variables.containsKey(it) }
+                ?.takeIf { it.size >= 2 }
+                ?: extractMergeVarNames(desc)
+                ?: return null
+            if (varNames.size < 2) return null
+
+            // tag 필드명 감지
+            val tagField = TAG_PATTERN.find(desc)?.groupValues?.get(1)
+
+            // 각 변수에서 배열 추출 + 병합
+            val merged = mutableListOf<JsonElement>()
+            for (varName in varNames) {
+                val data = context.variables[varName] ?: continue
+                val array = flattenToArray(data) ?: resolveBody(data)?.let { resolved ->
+                    if (resolved is JsonArray) resolved
+                    else JsonArray(listOf(resolved))
+                } ?: continue
+
+                if (tagField != null && array is JsonArray) {
+                    // 태그 추가: 각 아이템에 varName 기반 태그 설정
+                    for (item in array) {
+                        if (item is JsonObject) {
+                            val tagged = buildJsonObject {
+                                for ((k, v) in item) put(k, v)
+                                if (!item.containsKey(tagField)) {
+                                    put(tagField, JsonPrimitive(varName))
+                                }
+                            }
+                            merged.add(tagged)
+                        } else {
+                            merged.add(item)
+                        }
+                    }
+                } else if (array is JsonArray) {
+                    merged.addAll(array)
+                }
+            }
+
+            if (merged.isEmpty()) return null
+
+            println("[HLX-CODE] Merge: ${varNames.joinToString(" + ")} → ${merged.size} items" +
+                    (if (tagField != null) " (tagged: $tagField)" else ""))
+            JsonArray(merged)
+        } catch (e: Exception) {
+            println("[HLX-CODE] tryMerge failed for '${node.id}': ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * description에서 병합할 변수명 목록을 추출한다.
+     *
+     * 지원 패턴:
+     * - "Merge varA and varB"
+     * - "Merge varA, varB and varC"
+     */
+    private fun extractMergeVarNames(description: String): List<String>? {
+        // 다중 변수 패턴 먼저 시도: "Merge a, b and c"
+        val multiMatch = MERGE_MULTI_PATTERN.find(description)
+        if (multiMatch != null) {
+            val beforeAnd = multiMatch.groupValues[1].split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val afterAnd = multiMatch.groupValues[2].trim()
+            return beforeAnd + afterAnd
+        }
+
+        // 단순 패턴: "Merge a and b"
+        val simpleMatch = MERGE_PATTERN.find(description)
+        if (simpleMatch != null) {
+            return listOf(simpleMatch.groupValues[1], simpleMatch.groupValues[2])
+        }
+
+        return null
     }
 
     // ==========================================================

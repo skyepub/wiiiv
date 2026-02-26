@@ -51,6 +51,14 @@ class JdbcWorkflowStore(
     override fun save(record: WorkflowRecord) {
         // H2/MySQL 호환 upsert: DELETE + INSERT
         connectionProvider.getConnection("wf-save").use { conn ->
+            // 같은 workflow_id의 기존 레코드 삭제 (PK 충돌 방지)
+            conn.prepareStatement(
+                "DELETE FROM hlx_workflows WHERE workflow_id = ?"
+            ).use { ps ->
+                ps.setString(1, record.workflowId)
+                ps.executeUpdate()
+            }
+
             // 같은 이름+projectId의 기존 레코드 삭제 (이름 기반 덮어쓰기)
             conn.prepareStatement(
                 "DELETE FROM hlx_workflows WHERE name = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))"

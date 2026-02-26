@@ -128,9 +128,9 @@ fun main(args: Array<String>) = runBlocking {
     println("  ${DIM}Natural Language Multi-Decision System${RESET}")
     println()
 
-    // workspace 결정
+    // workspace 결정: WIIIV_WORKSPACE 환경변수 > ~/.wiiiv/projects
     val workspace = System.getenv("WIIIV_WORKSPACE")
-        ?: System.getProperty("user.dir")
+        ?: "${System.getProperty("user.home")}/.wiiiv/projects"
 
     // 세션 생성
     val sessionResponse = try {

@@ -2258,6 +2258,13 @@ repeat body에는 **어떤 노드든** 중첩할 수 있다 — act, transform, 
 - 한 시스템만 처리하고 나머지를 생략하면 **불완전한 워크플로우**다
 - 시스템 간 데이터를 연결할 때는 변수 참조 (`input`/`output`)를 사용하라
 
+⚠ **포트 일관성 규칙 (절대 위반 금지)**:
+- 시스템A에 로그인했으면 → 시스템A의 API는 반드시 시스템A의 host:port로 호출하라
+- 시스템B에 로그인했으면 → 시스템B의 API는 반드시 시스템B의 host:port로 호출하라
+- **login의 host:port와 그 토큰을 사용하는 API 호출의 host:port가 반드시 일치해야 한다**
+- 예: skystock(9091)에 로그인 → skystock 데이터 조회 시 반드시 9091 포트 사용. 9090으로 바꾸면 안 된다!
+- 예: skymall(9090)에 로그인 → skymall 데이터 조회 시 반드시 9090 포트 사용. 9091로 바꾸면 안 된다!
+
 ## 크로스 시스템 워크플로우 예시 (참고)
 
 시스템A(9090)에서 데이터를 조회하고 시스템B(9091)에서 작업하는 경우:
@@ -2317,6 +2324,7 @@ nodes 순서:
             }
             appendLine()
             appendLine("⚠ 이 토큰들이 있으면 해당 시스템의 login act 노드를 생성하지 마라. 토큰을 바로 사용하라.")
+            appendLine("⚠ **위 목록에 없는 시스템(host:port)에 접근하려면 반드시 login act 노드를 먼저 배치하라.** 다른 시스템의 토큰으로 대체할 수 없다!")
             appendLine()
         }
 
@@ -2326,6 +2334,7 @@ nodes 순서:
         domain?.let {
             appendLine("도메인: $it")
             appendLine("⚠ 이 요청은 **${it}** 시스템에 대한 것이다. 다른 시스템의 엔드포인트나 포트를 사용하지 마라.")
+            appendLine("⚠ 캐시 토큰 목록을 확인하라. **${it}** 시스템의 host:port에 해당하는 토큰이 없으면, 반드시 먼저 ${it}에 login act 노드를 배치하라. 다른 시스템의 토큰을 사용하면 안 된다.")
         }
         appendLine()
         // 파일 저장 경로가 지정된 경우
@@ -2388,6 +2397,7 @@ nodes 순서:
             }
             appendLine()
             appendLine("⚠ 이 토큰들이 있으면 해당 시스템의 login act 노드를 생성하지 마라. 토큰을 바로 사용하라.")
+            appendLine("⚠ **위 목록에 없는 시스템(host:port)에 접근하려면 반드시 login act 노드를 먼저 배치하라.** 다른 시스템의 토큰으로 대체할 수 없다!")
             appendLine()
         }
 
@@ -2448,6 +2458,7 @@ nodes 순서:
         appendLine("- [ ] 로그인 ACT 노드 뒤에 토큰 추출 TRANSFORM 노드가 있는가?")
         appendLine("- [ ] ACT 노드의 output이 바로 'token' 이름이 아닌 'login_result' 형태인가?")
         appendLine("- [ ] 모든 POST act 노드의 description에 \"with body {...}\" 가 포함되어 있는가?")
+        appendLine("- [ ] 각 시스템의 login host:port와 해당 시스템 API 호출의 host:port가 일치하는가? (9091 로그인 → 9091 API, 9090 로그인 → 9090 API)")
         appendLine()
 
         // 파일 저장 경로

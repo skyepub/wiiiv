@@ -121,6 +121,36 @@ SCENARIOS: dict[str, Scenario] = {
             "이게 너무 번거로워서... 자동으로 좀 해줬으면 좋겠어요."
         ),
     ),
+    "GX-C03": Scenario(
+        case_id="GX-C03",
+        name="이과장의 크로스시스템 조회",
+        persona=(
+            "경영지원팀 이과장. 30대 여성. 논리적이고 꼼꼼하다. "
+            "두 시스템(skymall, skystock)을 모두 사용하며, 데이터를 비교하고 싶어한다. "
+            "정확한 숫자와 결과를 원하고, 애매한 답변에는 다시 물어본다. "
+            "존댓말을 쓰지만 단호한 편이다."
+        ),
+        goal=(
+            "skymall에서 상품 목록을 조회한 뒤, "
+            "skystock에서 해당 상품들의 재고 현황을 확인하여 두 시스템의 데이터를 비교한다"
+        ),
+        constraints=[
+            "먼저 skymall(9090)에서 상품 목록을 요청한다",
+            "결과를 받으면, 이어서 skystock(9091)에서 재고를 요청한다",
+            "두 시스템을 명확히 구분하여 말한다 ('skymall 쪽', 'skystock 쪽' 등)",
+            "중간에 한 번 '아까 skymall에서 받은 결과 다시 보여줘' 식으로 이전 결과 재요청",
+            "최종적으로 두 시스템 데이터를 합쳐서 보고 싶다고 요청",
+        ],
+        max_turns=20,
+        judge_criteria=(
+            "skymall과 skystock 두 시스템 모두에 대해 API 호출이 실행되고 결과를 받으면 성공. "
+            "한쪽 시스템만 조회했거나, 포트를 혼동한 경우 실패."
+        ),
+        first_message_hint=(
+            "안녕하세요, 경영지원팀 이과장입니다. "
+            "skymall에 등록된 상품 목록을 좀 조회해주실 수 있을까요?"
+        ),
+    ),
 }
 
 
@@ -314,6 +344,7 @@ class GhostLlm:
             "wiiiv의 위 응답을 보고, 네 페르소나에 맞게 다음 메시지를 보내.\n"
             "목표에 가까워지고 있으면 점점 구체적으로 답해.\n"
             "wiiiv가 확인을 요청하면 승인해도 좋다.\n"
+            "목표를 이미 달성했으면 감사 인사 후 메시지 끝에 [DONE]을 붙여.\n"
             "메시지만 출력해. 설명이나 메타 코멘트 금지."
         )})
         return self._call_openai(messages)
@@ -365,6 +396,8 @@ class GhostLlm:
             "- 한 번에 너무 많은 정보를 주지 않는다.\n"
             "- 실제 사람처럼 불완전하게 말한다.\n"
             "- wiiiv가 실행 확인을 요청하면, 자연스럽게 승인한다.\n"
+            "- **목표를 달성했으면 인사 후 대화를 끝내라.** 마지막 메시지 끝에 [DONE] 태그를 붙여라.\n"
+            "- 이미 목표를 달성한 뒤에 같은 내용을 반복하지 마라. 깔끔하게 끝내라.\n"
         )
 
     def _call_openai(self, messages: list[dict]) -> str:
@@ -494,6 +527,11 @@ class GhostRunner:
                     scenario, self.conversation, turn_num
                 )
 
+            # [DONE] 태그 감지 → 조기 종료
+            done_detected = "[DONE]" in ghost_msg
+            if done_detected:
+                ghost_msg = ghost_msg.replace("[DONE]", "").strip()
+
             self.conversation.append({
                 "role": "ghost",
                 "content": ghost_msg,
@@ -501,6 +539,10 @@ class GhostRunner:
                 "timestamp": datetime.now().isoformat(),
             })
             print(f"{C.CYAN}[GHOST]{C.RESET} {ghost_msg}")
+
+            if done_detected:
+                print(f"{C.DIM}[GHOST] 목표 달성 — 대화 종료{C.RESET}\n")
+                break
 
             # Send to wiiiv
             try:
@@ -530,6 +572,20 @@ class GhostRunner:
             if len(wiiiv_msg) > 500:
                 print(f"{C.DIM}  ... ({len(wiiiv_msg)} chars total){C.RESET}")
             print()
+
+            # 반복 패턴 감지 — 3턴 연속 HLX 실행 없이 짧은 메시지면 조기 종료
+            if turn_num >= 3 and not action:
+                recent_ghost = [
+                    e["content"] for e in self.conversation[-6:]
+                    if e["role"] == "ghost"
+                ]
+                if (len(recent_ghost) >= 3
+                        and all(len(m) < 80 for m in recent_ghost[-3:])
+                        and not any("=== HLX" in e.get("content", "")
+                                    for e in self.conversation[-6:]
+                                    if e.get("role") == "wiiiv")):
+                    print(f"{C.DIM}[GHOST] 반복 패턴 감지 — 대화 조기 종료{C.RESET}\n")
+                    break
 
             # Brief pause to be polite to the server
             time.sleep(1)

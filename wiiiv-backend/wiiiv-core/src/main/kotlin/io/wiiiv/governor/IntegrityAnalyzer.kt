@@ -1030,6 +1030,24 @@ object IntegrityAnalyzer {
                     "Migrated .getBody() → .getPayload() (jjwt 0.12.x)", true))
             }
 
+            // Jwts.parserBuilder().setSigningKey(key).build() → Jwts.parser().verifyWith(Keys.hmacShaKeyFor(key.toByteArray())).build()
+            val parserBuilderPattern = Regex("""Jwts\.parserBuilder\(\)\s*\.setSigningKey\(([^)]+)\)\s*\.build\(\)""")
+            if (parserBuilderPattern.containsMatchIn(content)) {
+                content = parserBuilderPattern.replace(content) { match ->
+                    val keyExpr = match.groupValues[1].trim()
+                    // If key already wrapped in Keys.hmacShaKeyFor(), keep it
+                    if (keyExpr.contains("Keys.hmacShaKeyFor")) {
+                        "Jwts.parser().verifyWith($keyExpr).build()"
+                    } else {
+                        "Jwts.parser().verifyWith(Keys.hmacShaKeyFor($keyExpr.toByteArray())).build()"
+                    }
+                }
+                needsKeysImport = true
+                modified = true
+                changes.add(IntegrityChange(file.path, "JjwtApiMigration",
+                    "Migrated parserBuilder().setSigningKey() → parser().verifyWith().build() (jjwt 0.12.x)", true))
+            }
+
             // Jwts.parser().setSigningKey(key) → Jwts.parser().verifyWith(Keys.hmacShaKeyFor(key.toByteArray())).build()
             val setSigningKeyPattern = Regex("""Jwts\.parser\(\)\s*\.setSigningKey\(([^)]+)\)""")
             if (setSigningKeyPattern.containsMatchIn(content)) {
@@ -2064,6 +2082,18 @@ object IntegrityAnalyzer {
                     "Replaced empty @Value(\"\") → 24h default for ${expMatch.groupValues[2]}", true))
             }
 
+            // Pattern 4: @Value(""\${...}"") 이중 이스케이프 — LLM이 JSON 직렬화 시 따옴표 중복
+            // @Value("\"\${jwt.secret}\"") → @Value("\${jwt.secret}")
+            val doubleEscapePattern = Regex("""@Value\("\\"\$\{([^}]+)\}\\"\s*"\)""")
+            if (doubleEscapePattern.containsMatchIn(content)) {
+                content = doubleEscapePattern.replace(content) { match ->
+                    """@Value("\${'$'}{${match.groupValues[1]}}")"""
+                }
+                modified = true
+                changes.add(IntegrityChange(file.path, "BrokenValueAnnotation",
+                    "Fixed double-escaped @Value annotation (removed extra quotes around \${} expression)", true))
+            }
+
             if (modified) GeneratedFile(file.path, content) else file
         }
         return updatedFiles to changes
@@ -2508,6 +2538,18 @@ object IntegrityAnalyzer {
                 modified = true
                 changes.add(IntegrityChange(file.path, "StrayBackslash",
                     "Removed stray backslash before @", true))
+            }
+
+            // \$variable → $variable (JSON 직렬화에서 $ escape → Kotlin 문자열 보간 파괴)
+            // SimpleGrantedAuthority("ROLE_\$role") 같은 패턴을 수정
+            val escapedDollarPattern = Regex("""(["'])((?:[^"'\\]|\\.)*)\\(\$[a-zA-Z_]\w*)""")
+            if (escapedDollarPattern.containsMatchIn(content)) {
+                content = escapedDollarPattern.replace(content) { m ->
+                    "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]}"
+                }
+                modified = true
+                changes.add(IntegrityChange(file.path, "StrayBackslash",
+                    "Fixed escaped dollar sign \\$ → $ (Kotlin string interpolation)", true))
             }
 
             // )\ + 공백 + 코드 → )\n + 공백 + 코드 (줄바꿈이 백슬래시로 잘못됨)

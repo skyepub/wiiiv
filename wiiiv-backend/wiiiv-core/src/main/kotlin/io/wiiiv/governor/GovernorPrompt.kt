@@ -1206,6 +1206,7 @@ class JwtAuthFilter(private val jwtProvider: JwtProvider) : OncePerRequestFilter
   - Controller가 `service.authenticate(username, password)`를 호출하면, Service 클래스에 해당 메서드 정의 필수
   - **규칙: 파일을 생성할 때, 그 파일이 호출하는 모든 메서드가 대상 클래스/인터페이스에 존재하는지 확인하라**
   - Spring Data JPA의 `findAll()`, `findById()`, `save()`, `deleteById()`는 JpaRepository가 제공하므로 별도 정의 불요. 그 외 커스텀 쿼리 메서드는 반드시 Repository에 선언해야 한다
+  - **Controller↔Service 메서드명 일치 원칙** ⚡: Controller가 `service.findAll()`, `service.save()`, `service.findById()` 등을 호출하면, Service 클래스에도 **정확히 같은 이름의 메서드**가 있어야 한다. Service에 `getAllMenus()` 메서드가 있는데 Controller에서 `service.findAll()`을 호출하면 컴파일 에러이다. **먼저 Service를 생성하고, Controller는 Service의 메서드명을 그대로 사용하라.**
 
 ## MVP Controller 필수 생성 규칙 ⚡
 
@@ -2120,6 +2121,13 @@ Act 노드의 description에는 **정확한 API 호출 정보**를 포함해야 
 ```
 ⚠ **절대로** username이나 password에 placeholder(예: "your_username", "your_password")를 사용하지 마라.
 API 스펙 문서에 명시된 **실제 값**을 그대로 사용하라.
+
+★★★ CRITICAL — 모든 POST/PUT/PATCH act 노드에 body 필수 ★★★
+- POST, PUT, PATCH 메서드의 act 노드는 **반드시** description에 `with body {...}` 를 포함해야 한다.
+- body가 없는 POST/PUT/PATCH 요청은 HTTP 400 또는 403 에러를 유발한다.
+- body에는 API 스펙의 정확한 필드명과 값을 사용하라 (변수 참조 {var} 허용).
+- 예: `"POST http://host:9091/api/mappings with body {\"productId\":{product_id},\"supplierId\":{supplier_id}}"`
+- ❌ 금지: `"POST http://host:9091/api/mappings"` (body 없음 → 400/403 에러)
 ⚠ body의 JSON 구조는 API 스펙에서 정의된 필드명(supplierId, items, skymallProductId 등)을 **정확히** 따라야 한다.
 
 ### 5. Act 노드의 HTTP 응답 구조 ⚡ 중요!

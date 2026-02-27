@@ -976,6 +976,17 @@ object IntegrityAnalyzer {
                 }
             }
 
+            // ── 0b. signingKey(.toByteArray()) → signingKey() 구문 복구 ──
+            // LLM이 signingKey() 함수 반환값에 .toByteArray()를 중첩 호출하려다 구문 파괴
+            // e.g. Keys.hmacShaKeyFor(signingKey(.toByteArray())) → Keys.hmacShaKeyFor(signingKey())
+            val brokenSigningKeyPattern = Regex("""signingKey\(\.toByteArray\(\)\)""")
+            if (brokenSigningKeyPattern.containsMatchIn(content)) {
+                content = brokenSigningKeyPattern.replace(content, "signingKey()")
+                modified = true
+                changes.add(IntegrityChange(file.path, "JjwtApiMigration",
+                    "Fixed broken signingKey(.toByteArray()) → signingKey() (syntax error)", true))
+            }
+
             // ── 1. Jwts.claims() 패턴 → builder 체인 리팩토링 ──
             if (content.contains("Jwts.claims()")) {
                 val refactored = refactorJwtClaimsPattern(content, changes, file.path)

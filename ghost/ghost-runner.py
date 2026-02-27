@@ -1653,6 +1653,249 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         first_message_hint="skymall 상품 전체 조회해서 /tmp/final_products.json에 저장해.",
     ),
+
+    # ============================================================
+    # Phase Z — 초극강 최종 시험 (5케이스)
+    # GHOST의 피날레. 복수 파이프라인 관통, 30턴+ 규모.
+    # 왠만한 AI는 절대 통과할 수 없는 수준.
+    # ============================================================
+
+    "GX-Z01": Scenario(
+        case_id="GX-Z01",
+        name="김CTO의 전사 데이터 플랫폼 구축",
+        persona=(
+            "CTO 김상무. 50대 초반 남성. 기술 깊이가 있고 전략적이다. "
+            "한 세션에서 조회→분석→백엔드 생성→워크플로우까지 전부 끝내고 싶어한다. "
+            "단계마다 이전 결과를 참조하며, '아까 그 데이터 구조 기반으로' 식으로 연결한다. "
+            "반말과 존댓말을 섞어 쓰고, 핵심만 짧게 말한다. "
+            "기술 판단은 위임하지만 아키텍처 방향은 직접 지시한다. "
+            "'이걸로 끝이 아니야' 가 입버릇이다."
+        ),
+        goal=(
+            "5단계 풀코스: "
+            "(1) skymall 상품 조회 → 카테고리별 분석 → /tmp/z01_products.json 저장 "
+            "(2) skystock 공급사 조회 → /tmp/z01_suppliers.json 저장 "
+            "(3) 두 시스템 교차 분석 질문 (Electronics 상품 수 + 전자 공급사 매칭) "
+            "(4) '이 데이터를 관리할 백엔드를 만들어' → PROJECT_CREATE "
+            "    (Product/Supplier/Mapping 3엔티티, CRUD, 공급사 매칭 로직 포함) "
+            "(5) '자동 동기화 워크플로우도 만들어' → WORKFLOW_CREATE + 실행. "
+            "API_WORKFLOW + FILE_WRITE + PROJECT_CREATE + WORKFLOW_CREATE 4파이프라인 관통."
+        ),
+        constraints=[
+            "1단계: 'skymall 상품 뽑아봐' → 결과 보고 '카테고리별로 정리해서 /tmp/z01_products.json에 넣어'",
+            "2단계: 'skystock 공급사도 뽑아. /tmp/z01_suppliers.json' — 이전 결과 참조 없이 단순 지시",
+            "3단계: '아까 상품 중에 Electronics가 몇 개였지? 공급사 중에 전자 관련 업체랑 매칭이 되나?' — 크로스시스템 분석 질문",
+            "4단계: '이 데이터 구조를 관리하는 백엔드를 만들어. Spring Boot + Kotlin. Product, Supplier, Mapping 세 엔티티. CRUD. 공급사 자동 매칭 로직 넣어' → PROJECT_CREATE 진입",
+            "인터뷰 질문에 짧게 답변: '아까 뽑은 데이터 구조대로', 'JWT', '그래 그거면 돼'",
+            "WorkOrder가 나오면 한 가지 수정: '매칭 로직에 리드타임 5일 이하 조건 추가해'",
+            "수정 후 승인 → 코드 생성",
+            "5단계: 코드 생성 완료 후 '이걸로 끝이 아니야. skymall-skystock 자동 동기화 워크플로우도 만들어' → WORKFLOW_CREATE",
+            "워크플로우 인터뷰에 최소 답변: '아까 쓴 시스템 그대로', '매일 동기화', '결과는 /tmp/z01_sync_result.json'",
+            "WorkOrder 승인 → 실행 → 결과 확인 후 '됐어' 마무리",
+        ],
+        max_turns=45,
+        judge_criteria=(
+            "5단계 전부 완료되어야 PASS: "
+            "(1) skymall API 호출 + /tmp/z01_products.json 저장 "
+            "(2) skystock API 호출 + /tmp/z01_suppliers.json 저장 "
+            "(3) 교차 분석 질문에 합리적 답변 "
+            "(4) PROJECT_CREATE 파이프라인 진입 + WorkOrder 생성 + 코드 파일 생성 "
+            "(5) WORKFLOW_CREATE 파이프라인 진입 + 워크플로우 생성 + 실행. "
+            "4단계 이상 완료 시 부분 성공. 3단계 이하면 FAIL."
+        ),
+        first_message_hint="skymall 상품 전체 뽑아봐.",
+    ),
+
+    "GX-Z02": Scenario(
+        case_id="GX-Z02",
+        name="장전무의 요구사항 폭탄 + 3회 피벗",
+        persona=(
+            "COO 장전무. 50대 후반 남성. 회의에서 막 나온 것처럼 매 턴 새로운 지시를 추가한다. "
+            "반말, 극도로 짧은 문장. '그거 취소' '아니 이거 먼저' '아까 그건 나중에'. "
+            "3번 방향을 완전히 바꾸고, 중간에 이전 작업을 참조하며, "
+            "마지막에 전체를 통합하는 워크플로우를 요구한다. "
+            "세부 사항에 '알아서' 라고 답하지만, 결과에는 까다롭다."
+        ),
+        goal=(
+            "피벗 3회 + 최종 통합: "
+            "(1) skystock 공급사 조회 시작 → "
+            "(2) '아 그거 취소. skymall 상품부터 해' → 첫 번째 피벗 "
+            "(3) skymall 상품 조회 + /tmp/z02_products.json 저장 "
+            "(4) '잠깐, 백엔드가 먼저야' → 두 번째 피벗 → PROJECT_CREATE (주문관리 시스템) "
+            "(5) WorkOrder 중간에 '아 그게 아니라 재고관리다' → 세 번째 피벗 (요구사항 전면 변경) "
+            "(6) 재고관리 백엔드 생성 완료 "
+            "(7) '이제 아까 미뤘던 skystock 공급사도 뽑아' → skystock 조회 + 저장 "
+            "(8) '전부 합쳐서 자동화 워크플로우' → WORKFLOW_CREATE + 실행. "
+            "취소/피벗 처리 + PROJECT_CREATE + WORKFLOW_CREATE 복합."
+        ),
+        constraints=[
+            "1단계: 'skystock 공급사 목록 뽑아' 시작",
+            "2단계: wiiiv 진행 시작하면 즉시 '아 잠깐 그거 취소. skymall 상품부터 해' → 첫 번째 피벗",
+            "3단계: skymall 조회 완료 후 '/tmp/z02_products.json에 넣어'",
+            "4단계: 저장 후 '잠깐 급한 게 있어. 주문관리 백엔드를 만들어야 해. Spring Boot + Kotlin' → PROJECT_CREATE 진입",
+            "5단계: 인터뷰 2~3번째에서 '아 그게 아니라 재고관리 시스템이야. Stock, Warehouse, Alert 엔티티로 바꿔' → 세 번째 피벗 (요구사항 전면 변경)",
+            "인터뷰에 짧게: '알아서 해' 'CRUD' 'JWT' 'H2'",
+            "WorkOrder 승인 → 코드 생성 완료",
+            "6단계: '이제 아까 보류한 skystock 공급사 뽑아. /tmp/z02_suppliers.json' → skystock 조회",
+            "7단계: '아까 뽑은 상품이랑 공급사 연결하는 워크플로우 만들어. 자동으로. 결과는 /tmp/z02_combined.json' → WORKFLOW_CREATE",
+            "인터뷰에 최소 답변, WorkOrder 승인, 실행 후 '됐어' 마무리",
+        ],
+        max_turns=45,
+        judge_criteria=(
+            "피벗 처리 + 최종 작업 완료가 핵심: "
+            "(1) 첫 skystock 요청이 취소/중단됨 "
+            "(2) skymall 조회 + /tmp/z02_products.json 저장 "
+            "(3) PROJECT_CREATE 진입 + WorkOrder + 코드 생성 "
+            "(4) skystock 조회 + /tmp/z02_suppliers.json 저장 "
+            "(5) WORKFLOW_CREATE + 실행. "
+            "피벗을 무시하고 원래 작업을 계속하면 FAIL. "
+            "PROJECT_CREATE와 WORKFLOW_CREATE 양쪽 모두 진입해야 PASS. "
+            "4단계 이상 완료 시 부분 성공."
+        ),
+        first_message_hint="skystock 공급사 목록 뽑아.",
+    ),
+
+    "GX-Z03": Scenario(
+        case_id="GX-Z03",
+        name="박실장의 크로스시스템 10노드 워크플로우 + 백엔드 생성",
+        persona=(
+            "SCM혁신팀 박실장. 40대 후반 남성. SCM 전문가이자 기술에도 밝다. "
+            "복잡한 워크플로우를 정밀하게 설계하고, 완성 후 관리 도구도 요구한다. "
+            "단계별로 정확하게 요구하고, 에러 처리에 집요하다. "
+            "노드 수가 부족하면 지적하고, WorkOrder에 빈틈이 있으면 추가 요구한다. "
+            "존댓말을 쓰고, 매우 체계적이며 논리적이다. "
+            "최종적으로 '이걸 관리할 도구도 필요합니다' 로 PROJECT_CREATE까지 요구한다."
+        ),
+        goal=(
+            "2단계 대규모 시험: "
+            "(1) skymall 상품 + skystock 공급사 크로스매칭 워크플로우 생성 "
+            "    — REPEAT(상품별 공급사 매칭) + DECIDE(매칭/미매칭 분기) + 에러 정책 포함 "
+            "    — 10노드 이상 대규모 HLX → 실행 → /tmp/z03_procurement.json 저장 "
+            "(2) '이 워크플로우 결과를 관리하는 백엔드를 만들어주세요' → PROJECT_CREATE "
+            "    — ProcurementResult/SupplierMatch/UnmatchedItem 3엔티티 "
+            "WORKFLOW_CREATE(대규모) + PROJECT_CREATE 직렬 관통."
+        ),
+        constraints=[
+            "1단계: '안녕하세요. skymall 상품에 대해 skystock 공급사를 자동으로 매칭하는 워크플로우를 만들어야 합니다'",
+            "인터뷰에서 상세 흐름 설명: (1) skymall 전체 조회 (2) 상품별로 skystock 공급사 검색 — 반복 (3) 매칭된 것과 안 된 것 분리 (4) 결과 저장",
+            "에러 처리를 집요하게 요구: '공급사 조회 실패 시 재시도 2번, 그래도 실패하면 미매칭으로 분류하고 계속 진행'",
+            "WorkOrder에서 노드 수가 5개 미만이면 '이걸로 충분한가요? 반복 조회와 분기가 각각 독립 노드여야 합니다' 지적",
+            "시스템 정보: skymall=home.skyepub.net:9090, skystock=home.skyepub.net:9091",
+            "결과 저장 경로: /tmp/z03_procurement.json",
+            "워크플로우 실행 후 결과 확인: '매칭된 것과 안 된 것 각각 몇 개입니까?'",
+            "2단계: '좋습니다. 이제 이 워크플로우 결과를 관리하는 백엔드를 만들어주세요. Spring Boot + Kotlin'",
+            "인터뷰: 'ProcurementResult, SupplierMatch, UnmatchedItem 3개 엔티티', 'CRUD', 'JWT', '아까 워크플로우 결과를 import하는 API도 넣어주세요'",
+            "WorkOrder 승인 → 코드 생성 → '감사합니다' 마무리",
+        ],
+        max_turns=45,
+        judge_criteria=(
+            "2단계 모두 완료되어야 PASS: "
+            "(1) WORKFLOW_CREATE: 크로스시스템 워크플로우 생성 + 실행 (skymall+skystock 양쪽 API 호출) "
+            "(2) PROJECT_CREATE: WorkOrder 생성 + 코드 파일 생성. "
+            "워크플로우만 완료하고 PROJECT_CREATE 미진입이면 부분 성공. "
+            "워크플로우 없이 단순 API 호출만이면 FAIL."
+        ),
+        first_message_hint=(
+            "안녕하세요, SCM혁신팀 박실장입니다. "
+            "skymall 상품에 대해 skystock 공급사를 자동으로 매칭하는 워크플로우를 만들어야 합니다. "
+            "가능할까요?"
+        ),
+    ),
+
+    "GX-Z04": Scenario(
+        case_id="GX-Z04",
+        name="이사장의 '알아서 해' 완전 자율 미션",
+        persona=(
+            "이사장. 60대 남성. 극도의 반말. 'ㅇㅇ' '그래' '됐고' 수준의 초극단 짧은 답변. "
+            "처음에 거대한 목표를 한 문장으로 던지고, 이후 모든 질문에 '알아서 해' '몰라' '그거' 만 반복한다. "
+            "wiiiv가 알아서 판단하고 실행해야 한다. "
+            "시스템명, 포트, 인증 정보 일체를 제공하지 않는다. "
+            "중간 보고에 '짧게' '핵심만' 으로 응답. "
+            "최종 결과에만 관심 있고, 과정은 신경 안 쓴다."
+        ),
+        goal=(
+            "최소 입력으로 최대 실행: "
+            "이사장의 한 문장: '쇼핑몰이랑 재고 시스템 전부 파악하고, 자동화하고, 관리 도구도 만들어. 알아서 해.' "
+            "(1) skymall 상품 조회 + /tmp/z04_products.json 저장 "
+            "(2) skystock 공급사 조회 + /tmp/z04_suppliers.json 저장 "
+            "(3) 크로스시스템 워크플로우 생성 + 실행 → /tmp/z04_automation.json "
+            "(4) 관리용 백엔드 PROJECT_CREATE. "
+            "wiiiv의 자율 판단 능력 극한 테스트."
+        ),
+        constraints=[
+            "첫 메시지: '쇼핑몰이랑 재고 시스템 전부 파악하고, 자동화하고, 관리 도구도 만들어. 알아서 해.'",
+            "이후 모든 인터뷰/확인 질문에 극한 짧은 답변만: '알아서 해' '그래' '됐고' 'ㅇㅇ' '몰라 니가 판단해' '그거'",
+            "시스템명을 절대 정확히 말하지 않음: 'skymall' 대신 '쇼핑몰', 'skystock' 대신 '재고 시스템'",
+            "포트, 호스트, 인증 정보 질문에 '몰라' '알아서 해'",
+            "WorkOrder에 '됐고 진행해'",
+            "중간 보고에 '핵심만' '짧게'",
+            "최종 결과에만 '얼마나 했어?' '됐어?' 로 관심",
+            "4단계 전부 시키지만, 단계를 명시하지 않음 — wiiiv가 분해해야 함",
+        ],
+        max_turns=45,
+        judge_criteria=(
+            "4단계 중 3단계 이상 완료 시 PASS: "
+            "(1) skymall API 호출 + 파일 저장 "
+            "(2) skystock API 호출 + 파일 저장 "
+            "(3) 워크플로우 생성 + 실행 "
+            "(4) PROJECT_CREATE 진입 + WorkOrder + 코드 생성. "
+            "'알아서 해' 지시에 대해 시스템을 올바르게 식별(쇼핑몰→skymall, 재고→skystock)해야 한다. "
+            "2단계 이하면 FAIL."
+        ),
+        first_message_hint="쇼핑몰이랑 재고 시스템 전부 파악하고, 자동화하고, 관리 도구도 만들어. 알아서 해.",
+    ),
+
+    "GX-Z05": Scenario(
+        case_id="GX-Z05",
+        name="최종 보스 — 전체 엔진 관통 스트레스",
+        persona=(
+            "디지털혁신위원회 위원장. 50대 중반 남성. 존댓말을 쓰지만 요구 수준이 극도로 높다. "
+            "매 단계에서 결과를 정밀하게 검증하고, 이전 단계 결과를 반드시 참조한다. "
+            "'아까 그 숫자와 일치하나요?' '2단계에서 저장한 파일의 데이터가 여기 반영됐나요?' "
+            "중간에 1번 요구사항 변경 + 1번 이전 단계 재실행 요청. "
+            "완벽주의자이면서 논리적. 빈틈을 절대 용납하지 않는다. "
+            "'증거를 보여주세요' 가 입버릇이다."
+        ),
+        goal=(
+            "6단계 + 검증 + 수정 + 재실행 = 최종 보스: "
+            "(1) skymall 상품 조회 → 정확한 상품 수 확인 → /tmp/z05_products.json 저장 "
+            "(2) 저장된 파일 읽기 → 내용 확인 "
+            "(3) skystock 공급사 조회 → /tmp/z05_suppliers.json 저장 "
+            "(4) 크로스시스템 분석 질문 3개 (카테고리별 수, 공급사 리드타임, 매칭 가능성) "
+            "(5) 분석 결과 기반 워크플로우 생성 + 실행 → /tmp/z05_analysis.json "
+            "(6) '아까 상품 수가 틀렸으니 다시 조회해주세요' → 1단계 재실행 "
+            "(7) 최종: '이 전체 프로세스를 관리할 백엔드를 만들어주세요' → PROJECT_CREATE. "
+            "FILE_READ + API_WORKFLOW + WORKFLOW_CREATE + PROJECT_CREATE + 재실행 포함."
+        ),
+        constraints=[
+            "1단계: 'skymall 상품을 전체 조회해주세요' → 결과 후 '총 몇 개입니까?' 정확한 수 확인",
+            "'/tmp/z05_products.json에 저장해주세요'",
+            "2단계: '방금 저장한 파일을 읽어서 내용을 확인해주세요' → FILE_READ",
+            "3단계: 'skystock 공급사도 조회해주세요' → '/tmp/z05_suppliers.json에 저장'",
+            "4단계: 크로스시스템 분석 질문 3개: (a) 'Electronics 카테고리 상품은 몇 개입니까?' (b) '리드타임 3일 이하인 공급사는?' (c) '전자 상품과 전자 공급사 매칭이 가능한가요?'",
+            "5단계: '이 분석을 자동화하는 워크플로우를 만들어주세요. skymall+skystock 크로스매칭' → WORKFLOW_CREATE",
+            "인터뷰에 체계적으로 답변, 에러 처리 요구: 'retry 1번, 실패 시 skip'",
+            "WorkOrder 승인 → 실행 → /tmp/z05_analysis.json 저장 확인",
+            "6단계: '아까 1단계에서 조회한 상품 수가 맞는지 다시 확인하고 싶습니다. 다시 조회해주세요' → skymall 재조회",
+            "7단계: '마지막으로, 이 전체 프로세스를 관리할 백엔드를 만들어주세요. Spring Boot + Kotlin' → PROJECT_CREATE",
+            "인터뷰: 'AnalysisResult, ProductSnapshot, SupplierSnapshot, MatchRecord 4개 엔티티', 'CRUD + 분석 결과 import API', 'JWT'",
+            "WorkOrder 승인 → 코드 생성 → '모든 단계가 완료되었군요. 수고하셨습니다' 마무리",
+        ],
+        max_turns=50,
+        judge_criteria=(
+            "7단계 중 5단계 이상 완료 시 PASS: "
+            "(1) skymall 조회 + /tmp/z05_products.json 저장 "
+            "(2) 파일 읽기 (FILE_READ) "
+            "(3) skystock 조회 + /tmp/z05_suppliers.json 저장 "
+            "(4) 크로스시스템 분석 질문 답변 "
+            "(5) WORKFLOW_CREATE + 실행 "
+            "(6) skymall 재조회 (이전 단계 재실행) "
+            "(7) PROJECT_CREATE + WorkOrder + 코드 생성. "
+            "WORKFLOW_CREATE와 PROJECT_CREATE 양쪽 모두 완료가 핵심. "
+            "4단계 이하면 FAIL."
+        ),
+        first_message_hint="안녕하세요. skymall 상품을 전체 조회해주세요.",
+    ),
 }
 
 

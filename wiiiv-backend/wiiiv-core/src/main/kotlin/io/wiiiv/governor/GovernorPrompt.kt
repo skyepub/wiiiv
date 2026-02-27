@@ -1534,10 +1534,22 @@ plugins {
         appendLine("이 프로젝트는 **여러 턴에 걸쳐** 파일을 분할 생성한다.")
         appendLine("이번 턴에서는 **기반 파일을 우선 생성**하라.")
         appendLine()
+
+        // 작업지시서에서 패키지명을 추출하여 첫 턴부터 강제
+        val basePackage = extractBasePackageFromWorkOrder(workOrderContent)
+        if (basePackage != null) {
+            appendLine("### ⚠ 패키지 규칙 (절대 준수)")
+            appendLine("- 루트 패키지: `$basePackage`")
+            appendLine("- **모든 파일**의 package 선언은 `$basePackage` 또는 그 하위 패키지여야 한다")
+            appendLine("- 파일 경로: `src/main/kotlin/${basePackage.replace('.', '/')}/` 하위에만 생성")
+            appendLine("- `com.example.*` 등 작업지시서에 없는 패키지 사용 **절대 금지**")
+            appendLine()
+        }
+
         appendLine("### 이번 턴 생성 우선순위")
         appendLine("1. build.gradle.kts + settings.gradle.kts + application.yml")
         appendLine("2. Entity 클래스 + Repository 인터페이스")
-        appendLine("3. SecurityConfig + JwtProvider + JwtAuthFilter")
+        appendLine("3. SecurityConfig + JwtProvider + JwtAuthFilter + AuthController")
         appendLine("4. Application.kt (메인 클래스)")
         appendLine("5. (토큰 여유가 있으면) Service 클래스")
         appendLine()
@@ -1547,6 +1559,8 @@ plugins {
         appendLine("- 단, 생성하는 파일은 반드시 **컴파일 가능한 완결 형태**로 작성하라")
         appendLine("- **Service, Controller, DTO, DataInitializer 등은 다음 턴에서 생성한다**")
         appendLine("- 이번 턴의 목표: build.gradle.kts + Entity + Repository + Config + Application")
+        appendLine("- Entity 필드는 **작업지시서에 명시된 것을 모두** 포함하라. 필드를 생략하지 마라")
+        appendLine("- 양방향 JPA 관계(@OneToMany/@ManyToOne)에는 **반드시 @JsonIgnore** 또는 @JsonBackReference를 부모 컬렉션에 추가하라")
         appendLine()
         appendLine("## 작업지시서")
         appendLine()
@@ -2591,5 +2605,40 @@ nodes 순서:
             appendLine()
             appendLine(result)
         }
+    }
+
+    /**
+     * 작업지시서에서 루트 패키지명을 추출한다.
+     *
+     * 패턴 매칭 우선순위:
+     * 1. "루트 패키지: `com.xxx.yyy`" 형식
+     * 2. "패키지: com.xxx.yyy" 형식
+     * 3. "메인 Application 클래스: `com.xxx.yyy.XxxApplication`"에서 추출
+     * 4. "com.xxx.yyy" 패턴 중 첫 번째 (com.example 제외)
+     */
+    fun extractBasePackageFromWorkOrder(workOrder: String): String? {
+        // 1. "루트 패키지" 명시적 선언
+        val rootPkgRegex = Regex("""루트\s*패키지[:\s]*`?([a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+)`?""")
+        rootPkgRegex.find(workOrder)?.let { return it.groupValues[1] }
+
+        // 2. "패키지:" 선언
+        val pkgRegex = Regex("""패키지[:\s]*`?([a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){2,})`?""")
+        pkgRegex.find(workOrder)?.let {
+            val pkg = it.groupValues[1]
+            if (!pkg.startsWith("com.example")) return pkg
+        }
+
+        // 3. "메인 Application 클래스" FQCN에서 패키지 추출
+        val appClassRegex = Regex("""Application\s*클래스[^`]*`?([a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+)\.\w+Application`?""")
+        appClassRegex.find(workOrder)?.let { return it.groupValues[1] }
+
+        // 4. 일반 패키지 패턴 (com.example 제외)
+        val generalPkgRegex = Regex("""(com\.[a-z][a-z0-9]*\.[a-z][a-z0-9]*)""")
+        for (match in generalPkgRegex.findAll(workOrder)) {
+            val pkg = match.groupValues[1]
+            if (!pkg.startsWith("com.example")) return pkg
+        }
+
+        return null
     }
 }

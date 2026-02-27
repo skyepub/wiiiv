@@ -2962,6 +2962,45 @@ class ConversationalGovernor(
             missing.add("Repository(${repositoryCount}/${minRequired})")
         }
 
+        // JWT/Security 관련 필수 컴포넌트 검증
+        val hasSecurityDep = files.any { it.content.contains("spring-boot-starter-security") }
+        val hasJwtDep = files.any { it.content.contains("jjwt-api") || it.content.contains("jsonwebtoken") }
+
+        if (hasSecurityDep || hasJwtDep) {
+            val hasAuthController = files.any {
+                it.path.contains("AuthController", ignoreCase = true) &&
+                (it.content.contains("@RestController") || it.content.contains("@Controller"))
+            }
+            val hasJwtProvider = files.any {
+                it.path.contains("JwtProvider", ignoreCase = true) ||
+                (it.content.contains("Jwts.builder") && it.content.contains("@Component"))
+            }
+            val hasJwtFilter = files.any {
+                it.path.contains("JwtAuthFilter", ignoreCase = true) ||
+                it.path.contains("JwtFilter", ignoreCase = true) ||
+                it.content.contains("OncePerRequestFilter")
+            }
+            val hasSecurityConfig = files.any {
+                it.content.contains("@EnableWebSecurity") ||
+                it.path.contains("SecurityConfig", ignoreCase = true)
+            }
+
+            if (!hasAuthController) missing.add("AuthController(필수: JWT 인증 login/register)")
+            if (!hasJwtProvider) missing.add("JwtProvider(필수: JWT 토큰 생성/검증)")
+            if (!hasJwtFilter) missing.add("JwtAuthFilter(필수: JWT 인증 필터)")
+            if (!hasSecurityConfig) missing.add("SecurityConfig(필수: @EnableWebSecurity)")
+        }
+
+        // DataInitializer 검증 — 초기 데이터가 작업지시서에 명시된 경우
+        val hasDataInitializer = files.any {
+            it.path.contains("DataInitializer", ignoreCase = true) ||
+            it.path.contains("data.sql", ignoreCase = true) ||
+            it.content.contains("CommandLineRunner")
+        }
+        if (entityCount > 0 && !hasDataInitializer) {
+            missing.add("DataInitializer(초기 데이터 누락)")
+        }
+
         return missing
     }
 

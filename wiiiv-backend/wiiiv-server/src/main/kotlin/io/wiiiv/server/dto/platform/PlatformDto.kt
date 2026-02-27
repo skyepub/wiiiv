@@ -55,7 +55,12 @@ data class CreateApiKeyRequest(
 data class UpdatePolicyRequest(
     val allowedStepTypes: String? = null,
     val allowedPlugins: String? = null,
-    val maxRequestsPerDay: Int? = null
+    val maxRequestsPerDay: Int? = null,
+    val llmProvider: String? = null,
+    val llmBaseUrl: String? = null,
+    val governorModel: String? = null,
+    val generatorModel: String? = null,
+    val embeddingModel: String? = null
 )
 
 // ════════════════════════════════════════════
@@ -133,6 +138,11 @@ data class ProjectPolicyDto(
     val allowedStepTypes: String,
     val allowedPlugins: String,
     val maxRequestsPerDay: Int? = null,
+    val llmProvider: String? = null,
+    val llmBaseUrl: String? = null,
+    val governorModel: String? = null,
+    val generatorModel: String? = null,
+    val embeddingModel: String? = null,
     val createdAt: String,
     val updatedAt: String? = null
 )
@@ -183,6 +193,11 @@ fun ProjectPolicy.toDto(): ProjectPolicyDto = ProjectPolicyDto(
     allowedStepTypes = allowedStepTypes,
     allowedPlugins = allowedPlugins,
     maxRequestsPerDay = maxRequestsPerDay,
+    llmProvider = llmProvider,
+    llmBaseUrl = llmBaseUrl,
+    governorModel = governorModel,
+    generatorModel = generatorModel,
+    embeddingModel = embeddingModel,
     createdAt = createdAt,
     updatedAt = updatedAt
 )

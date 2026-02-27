@@ -263,6 +263,127 @@ fun Route.ragRoutes() {
                 )
             }
 
+            // ════════════════════════════════════════
+            //  Scoped Ingest — scope별 문서 수집
+            // ════════════════════════════════════════
+
+            // POST /rag/global/ingest — 전역 스코프
+            post("/global/ingest") {
+                val rag = requireRag() ?: return@post
+                val request = call.receive<IngestRequest>()
+
+                val document = Document(
+                    id = request.documentId ?: java.util.UUID.randomUUID().toString(),
+                    content = request.content,
+                    title = request.title,
+                    metadata = request.metadata + mapOf("scope" to "global")
+                )
+
+                val result = rag.ingest(document)
+
+                // DB에 메타데이터 저장
+                WiiivRegistry.platformStore?.saveRagDocument(
+                    io.wiiiv.rag.RagDocument(
+                        documentId = document.id,
+                        scope = "global",
+                        title = request.title ?: document.id,
+                        content = request.content,
+                        contentHash = io.wiiiv.platform.store.JdbcPlatformStore.sha256Hex(request.content),
+                        chunkCount = result.chunkCount
+                    )
+                )
+
+                if (result.success) {
+                    call.respond(HttpStatusCode.Created, ApiResponse.success(
+                        IngestResponse(documentId = result.documentId, title = result.title, chunkCount = result.chunkCount, success = true)
+                    ))
+                } else {
+                    call.respond(HttpStatusCode.InternalServerError, ApiResponse.error<IngestResponse>(
+                        ApiError(code = "INGEST_FAILED", message = result.error ?: "Ingestion failed")
+                    ))
+                }
+            }
+
+            // POST /rag/users/{userId}/ingest — 사용자 스코프
+            post("/users/{userId}/ingest") {
+                val rag = requireRag() ?: return@post
+                val userId = call.parameters["userId"] ?: return@post call.respond(
+                    HttpStatusCode.BadRequest, ApiResponse.error<Unit>(ApiError("INVALID_PARAM", "userId required"))
+                )
+                val request = call.receive<IngestRequest>()
+                val scope = "user:$userId"
+
+                val document = Document(
+                    id = request.documentId ?: java.util.UUID.randomUUID().toString(),
+                    content = request.content,
+                    title = request.title,
+                    metadata = request.metadata + mapOf("scope" to scope)
+                )
+
+                val result = rag.ingest(document)
+
+                WiiivRegistry.platformStore?.saveRagDocument(
+                    io.wiiiv.rag.RagDocument(
+                        documentId = document.id,
+                        scope = scope,
+                        title = request.title ?: document.id,
+                        content = request.content,
+                        contentHash = io.wiiiv.platform.store.JdbcPlatformStore.sha256Hex(request.content),
+                        chunkCount = result.chunkCount
+                    )
+                )
+
+                if (result.success) {
+                    call.respond(HttpStatusCode.Created, ApiResponse.success(
+                        IngestResponse(documentId = result.documentId, title = result.title, chunkCount = result.chunkCount, success = true)
+                    ))
+                } else {
+                    call.respond(HttpStatusCode.InternalServerError, ApiResponse.error<IngestResponse>(
+                        ApiError(code = "INGEST_FAILED", message = result.error ?: "Ingestion failed")
+                    ))
+                }
+            }
+
+            // POST /rag/projects/{projectId}/ingest — 프로젝트 스코프
+            post("/projects/{projectId}/ingest") {
+                val rag = requireRag() ?: return@post
+                val projectId = call.parameters["projectId"] ?: return@post call.respond(
+                    HttpStatusCode.BadRequest, ApiResponse.error<Unit>(ApiError("INVALID_PARAM", "projectId required"))
+                )
+                val request = call.receive<IngestRequest>()
+                val scope = "project:$projectId"
+
+                val document = Document(
+                    id = request.documentId ?: java.util.UUID.randomUUID().toString(),
+                    content = request.content,
+                    title = request.title,
+                    metadata = request.metadata + mapOf("scope" to scope)
+                )
+
+                val result = rag.ingest(document)
+
+                WiiivRegistry.platformStore?.saveRagDocument(
+                    io.wiiiv.rag.RagDocument(
+                        documentId = document.id,
+                        scope = scope,
+                        title = request.title ?: document.id,
+                        content = request.content,
+                        contentHash = io.wiiiv.platform.store.JdbcPlatformStore.sha256Hex(request.content),
+                        chunkCount = result.chunkCount
+                    )
+                )
+
+                if (result.success) {
+                    call.respond(HttpStatusCode.Created, ApiResponse.success(
+                        IngestResponse(documentId = result.documentId, title = result.title, chunkCount = result.chunkCount, success = true)
+                    ))
+                } else {
+                    call.respond(HttpStatusCode.InternalServerError, ApiResponse.error<IngestResponse>(
+                        ApiError(code = "INGEST_FAILED", message = result.error ?: "Ingestion failed")
+                    ))
+                }
+            }
+
             // Clear all documents
             delete {
                 val rag = requireRag() ?: return@delete

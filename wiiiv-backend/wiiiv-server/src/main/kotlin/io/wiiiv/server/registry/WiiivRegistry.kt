@@ -32,10 +32,13 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object WiiivRegistry {
 
+    // === Default Model (환경변수로 오버라이드 가능) ===
+    val defaultModel: String = System.getenv("WIIIV_DEFAULT_MODEL") ?: "gpt-4o-mini"
+
     // === LLM Provider (Executor보다 먼저 초기화 — LlmExecutor가 참조) ===
     val llmProvider: LlmProvider? = run {
         val key = System.getenv("OPENAI_API_KEY") ?: ""
-        if (key.isNotBlank()) OpenAIProvider.fromEnv(model = "gpt-4o-mini") else null
+        if (key.isNotBlank()) OpenAIProvider.fromEnv(model = defaultModel) else null
     }
 
     // === DB Provider (환경변수 기반 — WIIIV_DB_URL 없으면 비활성화) ===
@@ -62,7 +65,7 @@ object WiiivRegistry {
 
     // === DACS ===
     val dacs: DACS = if (llmProvider != null) {
-        HybridDACS(llmProvider, "gpt-4o-mini")
+        HybridDACS(llmProvider, defaultModel)
     } else {
         SimpleDACS.DEFAULT  // Degraded Mode (개발 모드 - 느슨한 허용)
     }
@@ -71,7 +74,7 @@ object WiiivRegistry {
     val governor: Governor = LlmGovernor.create(
         dacs = dacs,
         llmProvider = llmProvider,
-        model = if (llmProvider != null) "gpt-4o-mini" else null
+        model = if (llmProvider != null) defaultModel else null
     )
 
     // === Blueprint Runner ===
@@ -215,7 +218,7 @@ object WiiivRegistry {
             gate = permissionGate,
             gateChain = gateChain,
             executorMetaRegistry = executorMetaRegistry,
-            model = "gpt-4o-mini",
+            model = defaultModel,
             workflowResolver = { id -> getHlxWorkflow(id)?.workflow }
         )
     }
@@ -285,17 +288,48 @@ object WiiivRegistry {
         }
     }
 
+    // === RAG 자동 재수집 (서버 시작 시 DB에서 문서 복원) ===
+    init {
+        if (ragPipeline != null && platformStore != null) {
+            try {
+                val docs = platformStore.listRagDocuments()
+                if (docs.isNotEmpty()) {
+                    println("[RAG-REINDEX] Found ${docs.size} documents in DB, re-vectorizing...")
+                    var reindexed = 0
+                    kotlinx.coroutines.runBlocking {
+                        for (doc in docs) {
+                            val content = doc.content ?: doc.filePath?.let {
+                                try { java.io.File(it).readText() } catch (_: Exception) { null }
+                            } ?: continue
+
+                            ragPipeline.ingestText(
+                                text = content,
+                                title = doc.title,
+                                metadata = mapOf("scope" to doc.scope, "documentId" to doc.documentId)
+                            )
+                            reindexed++
+                        }
+                    }
+                    println("[RAG-REINDEX] Completed: $reindexed/${docs.size} documents re-vectorized")
+                }
+            } catch (e: Exception) {
+                println("[RAG-REINDEX] Failed: ${e.message}")
+            }
+        }
+    }
+
     // === Conversational Governor (세션 API용) ===
     val conversationalGovernor: ConversationalGovernor = ConversationalGovernor.create(
         id = "gov-server",
         dacs = dacs,
         llmProvider = llmProvider,
-        model = if (llmProvider != null) "gpt-4o-mini" else null,
+        model = if (llmProvider != null) defaultModel else null,
         blueprintRunner = blueprintRunner,
         ragPipeline = ragPipeline,
         hlxRunner = hlxRunner,
         auditStore = auditStore,
-        workflowStore = workflowStore
+        workflowStore = workflowStore,
+        platformStore = platformStore
     )
 
     // === Session Manager ===

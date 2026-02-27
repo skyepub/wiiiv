@@ -228,12 +228,18 @@ class OpenAIProvider(
 
         /**
          * 환경 변수에서 Provider 생성
+         *
+         * apiKey/baseUrl을 명시하면 환경변수 대신 해당 값 사용 (프로젝트별 LLM 설정)
          */
         fun fromEnv(
             model: String = DEFAULT_MODEL,
-            maxTokens: Int = DEFAULT_MAX_TOKENS
+            maxTokens: Int = DEFAULT_MAX_TOKENS,
+            apiKey: String? = null,
+            baseUrl: String? = null
         ): OpenAIProvider {
             return OpenAIProvider(
+                apiKey = apiKey ?: System.getenv("OPENAI_API_KEY") ?: "",
+                baseUrl = baseUrl ?: System.getenv("OPENAI_BASE_URL") ?: DEFAULT_BASE_URL,
                 defaultModel = model,
                 defaultMaxTokens = maxTokens
             )

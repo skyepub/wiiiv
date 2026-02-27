@@ -43,4 +43,14 @@ interface PlatformStore {
     // ── Policy (F-4 준비, 스키마만) ──
     fun getPolicy(projectId: Long): ProjectPolicy?
     fun upsertPolicy(policy: ProjectPolicy): Boolean
+
+    // ── Memory ──
+    fun getMemory(userId: Long, projectId: Long?): UserMemory?
+    fun upsertMemory(userId: Long, projectId: Long?, content: String): Boolean
+
+    // ── RAG Documents ──
+    fun saveRagDocument(doc: io.wiiiv.rag.RagDocument): Boolean
+    fun getRagDocument(documentId: String): io.wiiiv.rag.RagDocument?
+    fun listRagDocuments(scope: String? = null): List<io.wiiiv.rag.RagDocument>
+    fun deleteRagDocument(documentId: String): Boolean
 }

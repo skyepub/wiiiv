@@ -66,7 +66,8 @@ class ConversationalGovernor(
     private val ragPipeline: RagPipeline? = null,
     private val hlxRunner: HlxRunner? = null,
     private val auditStore: AuditStore? = null,
-    private val workflowStore: io.wiiiv.hlx.store.WorkflowStore? = null
+    private val workflowStore: io.wiiiv.hlx.store.WorkflowStore? = null,
+    private val platformStore: io.wiiiv.platform.store.PlatformStore? = null
 ) : Governor {
 
     var progressListener: GovernorProgressListener? = null
@@ -133,6 +134,25 @@ class ConversationalGovernor(
 
         // 사용자 메시지 기록
         session.addUserMessage(userMessage)
+
+        // ── 메모리 로드 (첫 턴에만, 캐시 없을 때) ──
+        if (platformStore != null && session.userMemory == null) {
+            val numericUserId = effectiveUserId.toLongOrNull()
+            if (numericUserId != null) {
+                session.userId = numericUserId
+                try {
+                    session.userMemory = platformStore.getMemory(numericUserId, null)?.content
+                    if (session.projectId != null) {
+                        session.projectMemory = platformStore.getMemory(numericUserId, session.projectId)?.content
+                    }
+                    if (session.userMemory != null || session.projectMemory != null) {
+                        println("[MEMORY] Loaded: userMemory=${session.userMemory?.length ?: 0} chars, projectMemory=${session.projectMemory?.length ?: 0} chars")
+                    }
+                } catch (e: Exception) {
+                    println("[MEMORY] Failed to load: ${e.message}")
+                }
+            }
+        }
 
         // ── DraftSpec 소실 방어 ──
         // 원인 불명으로 DraftSpec이 비워지는 현상에 대한 방어.
@@ -313,7 +333,7 @@ class ConversationalGovernor(
             println("[GOVERNOR] DraftSpec after update: intent=${session.draftSpec.intent?.take(30)}, taskType=${session.draftSpec.taskType}, filled=${session.draftSpec.getFilledSlots()}")
         }
 
-        // ── State Determinism Gate ──
+        // ── ConversationFlowController ──
         // LLM의 ASK/CONFIRM/EXECUTE 선택은 확률적이다.
         // Governor가 DraftSpec 상태를 기준으로 최종 상태 전환을 결정한다.
         val finalAction = when {
@@ -326,10 +346,10 @@ class ConversationalGovernor(
                 && !session.context.hasAnyExecution() -> {
                 // 2차 복원 시도 (chat 시작 시 1차 복원이 실패했거나, specUpdates 처리 중 소실된 경우)
                 if (session.restoreSpecIfLost()) {
-                    println("[GOVERNOR] State Determinism Gate: DraftSpec was empty but RESTORED from snapshot → keeping ${governorAction.action}")
+                    println("[FLOW-CTRL] DraftSpec was empty but RESTORED from snapshot → keeping ${governorAction.action}")
                     governorAction  // 복원 성공 — 원래 action 유지, 다음 gate에서 정상 처리
                 } else {
-                    println("[GOVERNOR] State Determinism Gate: ${governorAction.action} suppressed → ASK (DraftSpec empty — intent/taskType both null, no snapshot)")
+                    println("[FLOW-CTRL] ${governorAction.action} suppressed → ASK (DraftSpec empty — intent/taskType both null, no snapshot)")
                     governorAction.copy(action = ActionType.ASK)
                 }
             }
@@ -342,7 +362,7 @@ class ConversationalGovernor(
                 && session.draftSpec.taskType == null
                 && !session.context.hasAnyExecution()
                 && isProjectCreationContext(session, userMessage) -> {
-                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} suppressed → ASK (project creation detected but taskType not set)")
+                println("[FLOW-CTRL] ${governorAction.action} suppressed → ASK (project creation detected but taskType not set)")
                 // 추론으로 taskType 설정
                 session.updateSpec(mapOf(
                     "intent" to kotlinx.serialization.json.JsonPrimitive("프로젝트 생성"),
@@ -358,7 +378,7 @@ class ConversationalGovernor(
                 && session.draftSpec.taskType == TaskType.PROJECT_CREATE
                 && !session.context.hasAnyExecution()
                 && isCompositeRequestWithInvestigation(userMessage) -> {
-                println("[GOVERNOR] State Determinism Gate: PROJECT_CREATE → API_WORKFLOW (composite request with investigation intent)")
+                println("[FLOW-CTRL] PROJECT_CREATE → API_WORKFLOW (composite request with investigation intent)")
                 // domain 자동 추출 — 사용자 메시지에서 시스템명/키워드 추출
                 val autoUpdates = mutableMapOf<String, kotlinx.serialization.json.JsonElement>(
                     "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.API_WORKFLOW.name)
@@ -381,7 +401,7 @@ class ConversationalGovernor(
                 && session.draftSpec.taskType in listOf(TaskType.API_WORKFLOW, TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
                 && !session.context.hasAnyExecution()     // 현재 세션에서 첫 실행
                 && isComplexRequest(userMessage) -> {
-                println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → ASK (complex first-turn request)")
+                println("[FLOW-CTRL] EXECUTE suppressed → ASK (complex first-turn request)")
                 governorAction.copy(action = ActionType.ASK)
             }
 
@@ -397,7 +417,7 @@ class ConversationalGovernor(
                     "WorkOrder not shown yet — must show before execution"
                 else
                     "PROJECT_CREATE modification in progress"
-                println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → CONFIRM ($reason)")
+                println("[FLOW-CTRL] EXECUTE suppressed → CONFIRM ($reason)")
                 governorAction.copy(action = ActionType.CONFIRM)
             }
 
@@ -411,7 +431,7 @@ class ConversationalGovernor(
                     "WorkOrder not shown yet — must show before execution"
                 else
                     "WORKFLOW_CREATE modification in progress"
-                println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → CONFIRM ($reason)")
+                println("[FLOW-CTRL] EXECUTE suppressed → CONFIRM ($reason)")
                 governorAction.copy(action = ActionType.CONFIRM)
             }
 
@@ -423,7 +443,7 @@ class ConversationalGovernor(
                 && !isWorkOrderRequest(userMessage) -> {
                 val turns = countInterviewTurns(session)
                 if (turns < 3) {
-                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (WORKFLOW_CREATE only $turns interview turns, need 3+)")
+                    println("[FLOW-CTRL] CONFIRM suppressed → ASK (WORKFLOW_CREATE only $turns interview turns, need 3+)")
                     val missingSlots = session.draftSpec.getMissingSlots()
                     val nextQuestion = when {
                         "domain" in missingSlots ->
@@ -439,7 +459,7 @@ class ConversationalGovernor(
                     }
                     governorAction.copy(action = ActionType.ASK, message = nextQuestion)
                 } else {
-                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (requesting work order permission, $turns interview turns)")
+                    println("[FLOW-CTRL] CONFIRM suppressed → ASK (requesting work order permission, $turns interview turns)")
                     governorAction.copy(
                         action = ActionType.ASK,
                         message = "워크플로우 정보가 충분히 수집되었습니다. 작업지시서를 만들어도 될까요?"
@@ -453,7 +473,7 @@ class ConversationalGovernor(
                 && session.draftSpec.workOrderContent == null
                 && (session.draftSpec.isComplete() || countInterviewTurns(session) >= 3)
                 && (isConfirmationMessage(userMessage) || isWorkOrderRequest(userMessage)) -> {
-                println("[GOVERNOR] State Determinism Gate: ASK → CONFIRM (WORKFLOW_CREATE user confirmed, ${countInterviewTurns(session)} interview turns)")
+                println("[FLOW-CTRL] ASK → CONFIRM (WORKFLOW_CREATE user confirmed, ${countInterviewTurns(session)} interview turns)")
                 governorAction.copy(
                     action = ActionType.CONFIRM,
                     message = "워크플로우 작업지시서를 정리해 보겠습니다."
@@ -471,7 +491,7 @@ class ConversationalGovernor(
                 && !isWorkOrderRequest(userMessage) -> {
                 val turns = countInterviewTurns(session)
                 if (turns < 4) {
-                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (only $turns interview turns, need 4+)")
+                    println("[FLOW-CTRL] CONFIRM suppressed → ASK (only $turns interview turns, need 4+)")
                     val missingSlots = session.draftSpec.getMissingSlots()
                     val nextQuestion = when {
                         "domain" in missingSlots ->
@@ -488,7 +508,7 @@ class ConversationalGovernor(
                     }
                     governorAction.copy(action = ActionType.ASK, message = nextQuestion)
                 } else {
-                    println("[GOVERNOR] State Determinism Gate: CONFIRM suppressed → ASK (requesting work order permission, $turns interview turns)")
+                    println("[FLOW-CTRL] CONFIRM suppressed → ASK (requesting work order permission, $turns interview turns)")
                     governorAction.copy(
                         action = ActionType.ASK,
                         message = "정보가 충분히 수집되었습니다. 작업지시서를 만들어도 될까요?"
@@ -504,7 +524,7 @@ class ConversationalGovernor(
                 && session.draftSpec.workOrderContent == null
                 && (session.draftSpec.isComplete() || countInterviewTurns(session) >= 4)
                 && (isConfirmationMessage(userMessage) || isWorkOrderRequest(userMessage)) -> {
-                println("[GOVERNOR] State Determinism Gate: ASK suppressed → CONFIRM (user confirmed work order creation, ${countInterviewTurns(session)} interview turns)")
+                println("[FLOW-CTRL] ASK suppressed → CONFIRM (user confirmed work order creation, ${countInterviewTurns(session)} interview turns)")
                 governorAction.copy(
                     action = ActionType.CONFIRM,
                     message = "작업지시서를 정리해 보겠습니다."
@@ -525,7 +545,7 @@ class ConversationalGovernor(
                         && userMessage.trim().length <= 10))  // 순수 확인만 (새 요청 오인 방지)
                 && !(session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
                     && session.draftSpec.workOrderContent == null) -> {
-                println("[GOVERNOR] State Determinism Gate: ASK suppressed → EXECUTE (confirmation + ${session.draftSpec.taskType})")
+                println("[FLOW-CTRL] ASK suppressed → EXECUTE (confirmation + ${session.draftSpec.taskType})")
                 governorAction.copy(action = ActionType.EXECUTE)
             }
 
@@ -535,7 +555,7 @@ class ConversationalGovernor(
                 && session.context.executionHistory.isNotEmpty()
                 && session.draftSpec.requiresExecution()
                 && (isModificationRequest(userMessage) || isFollowUpDataRequest(userMessage)) -> {
-                println("[GOVERNOR] State Determinism Gate: ASK suppressed → EXECUTE (post-execution action request)")
+                println("[FLOW-CTRL] ASK suppressed → EXECUTE (post-execution action request)")
                 governorAction.copy(action = ActionType.EXECUTE)
             }
 
@@ -546,7 +566,7 @@ class ConversationalGovernor(
                 && session.draftSpec.workOrderContent != null
                 && isConfirmationMessage(userMessage)
                 && !isModificationRequest(userMessage) -> {
-                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → EXECUTE (WorkOrder confirmed)")
+                println("[FLOW-CTRL] ${governorAction.action} → EXECUTE (WorkOrder confirmed)")
                 governorAction.copy(action = ActionType.EXECUTE)
             }
 
@@ -558,7 +578,7 @@ class ConversationalGovernor(
                 && session.draftSpec.workOrderContent != null
                 && !session.context.hasAnyExecution()
                 && isModificationRequest(userMessage) -> {
-                println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → CONFIRM (WorkOrder modification requested)")
+                println("[FLOW-CTRL] ${governorAction.action} → CONFIRM (WorkOrder modification requested)")
                 governorAction.copy(action = ActionType.CONFIRM)
             }
 
@@ -568,21 +588,21 @@ class ConversationalGovernor(
                 && session.context.executionHistory.isNotEmpty()
                 && session.draftSpec.requiresExecution()
                 && (isModificationRequest(userMessage) || isFollowUpDataRequest(userMessage)) -> {
-                println("[GOVERNOR] State Determinism Gate: REPLY suppressed → EXECUTE (action request after execution)")
+                println("[FLOW-CTRL] REPLY suppressed → EXECUTE (action request after execution)")
                 governorAction.copy(action = ActionType.EXECUTE)
             }
 
             // ── CANCEL 억제: 확인 응답을 CANCEL로 잘못 분류하는 것 방지 ──
             governorAction.action == ActionType.CANCEL
                 && isConfirmationMessage(userMessage) -> {
-                println("[GOVERNOR] State Determinism Gate: CANCEL suppressed → EXECUTE (user confirming, not canceling)")
+                println("[FLOW-CTRL] CANCEL suppressed → EXECUTE (user confirming, not canceling)")
                 governorAction.copy(action = ActionType.EXECUTE)
             }
 
             // ── CANCEL → REPLY: LLM이 직접 CANCEL을 출력해도 세션 파괴 대신 정중한 거절 ──
             // CANCEL은 사용자가 명시적으로 취소할 때만 허용. 위험 요청 거부는 REPLY로 충분
             governorAction.action == ActionType.CANCEL -> {
-                println("[GOVERNOR] State Determinism Gate: CANCEL suppressed → REPLY (session preservation)")
+                println("[FLOW-CTRL] CANCEL suppressed → REPLY (session preservation)")
                 governorAction.copy(action = ActionType.REPLY)
             }
 
@@ -600,15 +620,63 @@ class ConversationalGovernor(
         // Governor 메시지 기록
         session.addGovernorMessage(response.message)
 
+        // ── "기억해" 감지 + 메모리 저장 (EXECUTE 중에는 금지) ──
+        if (platformStore != null
+            && finalAction.action !in listOf(ActionType.EXECUTE, ActionType.CONFIRM)
+            && isMemoryRequest(userMessage)
+        ) {
+            try {
+                saveUserMemory(session, userMessage)
+            } catch (e: Exception) {
+                println("[MEMORY] Save failed: ${e.message}")
+            }
+        }
+
         return response
+    }
+
+    /**
+     * "기억해" 패턴 감지
+     */
+    private fun isMemoryRequest(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("기억해") || lower.contains("기억하세요") || lower.contains("기억해줘")
+            || lower.contains("remember this") || lower.contains("remember that")
+    }
+
+    /**
+     * 사용자 메모리 저장 — 기존 메모리에 새 항목을 추가
+     */
+    private fun saveUserMemory(session: ConversationSession, userMessage: String) {
+        val numericUserId = session.userId ?: return
+        val projectId = session.projectId
+
+        // 기존 메모리 + 새 메시지를 결합
+        val existing = if (projectId != null) {
+            session.projectMemory ?: ""
+        } else {
+            session.userMemory ?: ""
+        }
+        val newEntry = "- $userMessage"
+        val updated = if (existing.isBlank()) newEntry else "$existing\n$newEntry"
+
+        platformStore!!.upsertMemory(numericUserId, projectId, updated)
+
+        // 캐시 갱신
+        if (projectId != null) {
+            session.projectMemory = updated
+        } else {
+            session.userMemory = updated
+        }
+        println("[MEMORY] Saved: userId=$numericUserId, projectId=$projectId, length=${updated.length}")
     }
 
     /**
      * LLM을 통해 다음 행동 결정
      */
     private suspend fun decideAction(session: ConversationSession, userMessage: String, images: List<LlmImage> = emptyList()): GovernorAction {
-        // RAG 검색 — 사용자 메시지로 관련 문서 조회
-        val ragContext = consultRag(userMessage, session.draftSpec)
+        // RAG 검색 — 사용자 메시지로 관련 문서 조회 (scope 필터 적용)
+        val ragContext = consultRag(userMessage, session.draftSpec, session.userId, session.projectId)
 
         // [DEBUG] RAG 상태 로깅
         if (ragContext != null) {
@@ -624,7 +692,9 @@ class ConversationalGovernor(
             taskList = session.context.tasks.values.toList(),
             ragContext = ragContext,
             workspace = session.context.workspace,
-            imageCount = images.size
+            imageCount = images.size,
+            userMemory = session.userMemory,
+            projectMemory = session.projectMemory
         )
 
         // System prompt + 사용자 메시지를 하나의 프롬프트로 결합
@@ -668,7 +738,7 @@ class ConversationalGovernor(
      *
      * 검색 실패 시 1회 재시도한다. 임베딩 API가 일시적으로 불안정할 수 있기 때문.
      */
-    private suspend fun consultRag(userMessage: String, draftSpec: DraftSpec): String? {
+    private suspend fun consultRag(userMessage: String, draftSpec: DraftSpec, userId: Long? = null, projectId: Long? = null): String? {
         if (ragPipeline == null) return null
         if (ragPipeline.size() == 0) return null  // 문서가 없으면 스킵
 
@@ -693,12 +763,28 @@ class ConversationalGovernor(
         // 1회 재시도 (임베딩 API 일시 장애 대응)
         repeat(2) { attempt ->
             try {
+                // scope 필터: 더 많이 가져온 후 필터링
+                val topK = if (userId != null || projectId != null) 10 else 5
                 val result = if (queries.size == 1) {
-                    ragPipeline.search(queries.first(), topK = 5)
+                    ragPipeline.search(queries.first(), topK = topK)
                 } else {
-                    ragPipeline.searchMulti(queries, topK = 5)
+                    ragPipeline.searchMulti(queries, topK = topK)
                 }
-                if (result.isNotEmpty()) return result.toNumberedContext()
+
+                // scope 필터 적용
+                val filteredResult = if (userId != null || projectId != null) {
+                    val filteredDocs = result.results.filter { doc ->
+                        val scope = doc.metadata["scope"] ?: "global"
+                        scope == "global"
+                            || (userId != null && scope == "user:$userId")
+                            || (projectId != null && scope == "project:$projectId")
+                    }.take(5)
+                    result.copy(results = filteredDocs, totalFound = filteredDocs.size)
+                } else {
+                    result
+                }
+
+                if (filteredResult.isNotEmpty()) return filteredResult.toNumberedContext()
                 return null  // 검색 성공했지만 결과 없음
             } catch (e: Exception) {
                 if (attempt == 0) {
@@ -1142,7 +1228,21 @@ class ConversationalGovernor(
             )
         }
 
-        // 4. DACS (risky이고 첫 실행일 때만)
+        // 4. Shadow DACS — 모든 EXECUTE에서 관찰 (비risky도 로그만, 차단 없음)
+        if (!draftSpec.isRisky()) {
+            try {
+                val shadowContext = "taskType=${draftSpec.taskType?.name}, intent=${draftSpec.intent?.take(50)}"
+                val shadowDacsResult = dacs.evaluate(DACSRequest(
+                    spec = spec,
+                    context = shadowContext
+                ))
+                println("[SHADOW-DACS] ${draftSpec.taskType}: consensus=${shadowDacsResult.consensus}")
+            } catch (e: Exception) {
+                println("[SHADOW-DACS] Evaluation failed (non-blocking): ${e.message}")
+            }
+        }
+
+        // 4b. DACS (risky이고 첫 실행일 때만 — 기존 경로 보존)
         if (draftSpec.isRisky() && session.context.executionHistory.isEmpty()) {
             // DACS REVISION 후 사용자가 확인하면 재평가를 건너뛴다 (informed consent)
             val dacsAlreadyReviewed = session.history.any {
@@ -4947,9 +5047,10 @@ class ConversationalGovernor(
             ragPipeline: RagPipeline? = null,
             hlxRunner: HlxRunner? = null,
             auditStore: AuditStore? = null,
-            workflowStore: io.wiiiv.hlx.store.WorkflowStore? = null
+            workflowStore: io.wiiiv.hlx.store.WorkflowStore? = null,
+            platformStore: io.wiiiv.platform.store.PlatformStore? = null
         ): ConversationalGovernor {
-            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner, auditStore, workflowStore)
+            return ConversationalGovernor(id, dacs, llmProvider, model, blueprintRunner, ragPipeline, hlxRunner, auditStore, workflowStore, platformStore)
         }
     }
 }

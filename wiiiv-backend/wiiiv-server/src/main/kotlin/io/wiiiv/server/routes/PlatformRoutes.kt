@@ -14,6 +14,7 @@ import io.wiiiv.server.dto.common.ApiError
 import io.wiiiv.server.dto.common.ApiResponse
 import io.wiiiv.server.dto.platform.*
 import io.wiiiv.server.registry.WiiivRegistry
+import kotlinx.serialization.Serializable
 import org.mindrot.jbcrypt.BCrypt
 
 /**
@@ -335,6 +336,11 @@ fun Route.platformRoutes() {
                             allowedStepTypes = req.allowedStepTypes ?: current.allowedStepTypes,
                             allowedPlugins = req.allowedPlugins ?: current.allowedPlugins,
                             maxRequestsPerDay = req.maxRequestsPerDay,
+                            llmProvider = req.llmProvider ?: current.llmProvider,
+                            llmBaseUrl = req.llmBaseUrl ?: current.llmBaseUrl,
+                            governorModel = req.governorModel ?: current.governorModel,
+                            generatorModel = req.generatorModel ?: current.generatorModel,
+                            embeddingModel = req.embeddingModel ?: current.embeddingModel,
                             updatedAt = java.time.Instant.now().toString()
                         )
                         store.upsertPolicy(updated)
@@ -401,9 +407,97 @@ fun Route.platformRoutes() {
                 store.revokeApiKey(keyId)
                 call.respond(ApiResponse.success(mapOf("revoked" to true)))
             }
+
+            // ════════════════════════════════════════
+            //  Memory — 사용자 전역 메모리
+            // ════════════════════════════════════════
+
+            route("/users/{userId}/memory") {
+
+                // GET /platform/users/{userId}/memory — 사용자 전역 메모리 조회
+                get {
+                    val store = requirePlatformStore() ?: return@get
+                    val currentUser = currentUserId() ?: return@get
+                    val targetUserId = call.parameters["userId"]?.toLongOrNull()
+                        ?: return@get call.respond(HttpStatusCode.BadRequest,
+                            ApiResponse.error<Unit>(ApiError("INVALID_PARAM", "Invalid userId")))
+
+                    // 본인 메모리만 조회 가능
+                    if (currentUser != targetUserId) {
+                        return@get call.respond(HttpStatusCode.Forbidden,
+                            ApiResponse.error<Unit>(ApiError("FORBIDDEN", "Can only access your own memory")))
+                    }
+
+                    val memory = store.getMemory(targetUserId, null)
+                    call.respond(ApiResponse.success(memory ?: mapOf("content" to "")))
+                }
+
+                // PUT /platform/users/{userId}/memory — 사용자 전역 메모리 수정
+                put {
+                    val store = requirePlatformStore() ?: return@put
+                    val currentUser = currentUserId() ?: return@put
+                    val targetUserId = call.parameters["userId"]?.toLongOrNull()
+                        ?: return@put call.respond(HttpStatusCode.BadRequest,
+                            ApiResponse.error<Unit>(ApiError("INVALID_PARAM", "Invalid userId")))
+
+                    if (currentUser != targetUserId) {
+                        return@put call.respond(HttpStatusCode.Forbidden,
+                            ApiResponse.error<Unit>(ApiError("FORBIDDEN", "Can only modify your own memory")))
+                    }
+
+                    val body = call.receive<MemoryUpdateRequest>()
+                    store.upsertMemory(targetUserId, null, body.content)
+                    val updated = store.getMemory(targetUserId, null)
+                    call.respond(ApiResponse.success(updated ?: mapOf("content" to body.content)))
+                }
+            }
+
+            // ════════════════════════════════════════
+            //  Memory — 프로젝트 스코프 메모리
+            // ════════════════════════════════════════
+
+            route("/projects/{projectId}/memory") {
+
+                // GET /platform/projects/{projectId}/memory
+                get {
+                    val store = requirePlatformStore() ?: return@get
+                    val userId = currentUserId() ?: return@get
+                    val projectId = projectIdParam() ?: return@get
+
+                    if (!store.isMember(projectId, userId)) {
+                        return@get call.respond(HttpStatusCode.Forbidden,
+                            ApiResponse.error<Unit>(ApiError("NOT_MEMBER", "Not a member")))
+                    }
+
+                    val memory = store.getMemory(userId, projectId)
+                    call.respond(ApiResponse.success(memory ?: mapOf("content" to "")))
+                }
+
+                // PUT /platform/projects/{projectId}/memory
+                put {
+                    val store = requirePlatformStore() ?: return@put
+                    val userId = currentUserId() ?: return@put
+                    val projectId = projectIdParam() ?: return@put
+
+                    if (!store.isMember(projectId, userId)) {
+                        return@put call.respond(HttpStatusCode.Forbidden,
+                            ApiResponse.error<Unit>(ApiError("NOT_MEMBER", "Not a member")))
+                    }
+
+                    val body = call.receive<MemoryUpdateRequest>()
+                    store.upsertMemory(userId, projectId, body.content)
+                    val updated = store.getMemory(userId, projectId)
+                    call.respond(ApiResponse.success(updated ?: mapOf("content" to body.content)))
+                }
+            }
         }
     }
 }
+
+@Serializable
+data class MemoryUpdateRequest(
+    val content: String
+)
 
 // ════════════════════════════════════════════
 //  Helper extensions

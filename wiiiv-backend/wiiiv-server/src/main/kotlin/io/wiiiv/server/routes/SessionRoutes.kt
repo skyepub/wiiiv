@@ -232,7 +232,7 @@ fun Route.sessionRoutes() {
 
                 val llmProvider = WiiivRegistry.llmProvider
                 val serverInfo = ServerInfoDto(
-                    modelName = if (llmProvider != null) "gpt-4o-mini" else null,
+                    modelName = if (llmProvider != null) WiiivRegistry.defaultModel else null,
                     dacsTypeName = if (llmProvider != null) "HybridDACS" else "SimpleDACS",
                     llmAvailable = llmProvider != null,
                     ragAvailable = llmProvider != null

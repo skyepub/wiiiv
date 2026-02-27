@@ -98,10 +98,46 @@ class JdbcPlatformStore(
                         allowed_step_types   VARCHAR(2000) NOT NULL DEFAULT '[]',
                         allowed_plugins      VARCHAR(2000) NOT NULL DEFAULT '[]',
                         max_requests_per_day INT NULL,
+                        llm_provider         VARCHAR(20) NULL,
+                        llm_base_url         VARCHAR(500) NULL,
+                        governor_model       VARCHAR(100) NULL,
+                        generator_model      VARCHAR(100) NULL,
+                        embedding_model      VARCHAR(100) NULL,
                         created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at           TIMESTAMP NULL,
                         CONSTRAINT fk_policy_project FOREIGN KEY (project_id)
                             REFERENCES projects(project_id) ON DELETE CASCADE
+                    )
+                """)
+
+                // 기존 테이블에 LLM 컬럼이 없으면 추가 (마이그레이션)
+                try { stmt.execute("ALTER TABLE project_policies ADD COLUMN IF NOT EXISTS llm_provider VARCHAR(20) NULL") } catch (_: Exception) {}
+                try { stmt.execute("ALTER TABLE project_policies ADD COLUMN IF NOT EXISTS llm_base_url VARCHAR(500) NULL") } catch (_: Exception) {}
+                try { stmt.execute("ALTER TABLE project_policies ADD COLUMN IF NOT EXISTS governor_model VARCHAR(100) NULL") } catch (_: Exception) {}
+                try { stmt.execute("ALTER TABLE project_policies ADD COLUMN IF NOT EXISTS generator_model VARCHAR(100) NULL") } catch (_: Exception) {}
+                try { stmt.execute("ALTER TABLE project_policies ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(100) NULL") } catch (_: Exception) {}
+
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS user_memories (
+                        user_id    BIGINT NOT NULL,
+                        project_id BIGINT NULL,
+                        content    VARCHAR(4000) NOT NULL DEFAULT '',
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE (user_id, project_id)
+                    )
+                """)
+
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS rag_documents (
+                        document_id  VARCHAR(100) PRIMARY KEY,
+                        scope        VARCHAR(50) NOT NULL DEFAULT 'global',
+                        title        VARCHAR(500) NOT NULL,
+                        file_path    VARCHAR(1000) NULL,
+                        content      CLOB NULL,
+                        content_hash CHAR(64) NOT NULL,
+                        chunk_count  INT NOT NULL DEFAULT 0,
+                        created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
             }
@@ -596,9 +632,10 @@ class JdbcPlatformStore(
         val conn = db.getConnection(null)
         try {
             val ps = conn.prepareStatement("""
-                MERGE INTO project_policies (project_id, allowed_step_types, allowed_plugins, max_requests_per_day, updated_at)
+                MERGE INTO project_policies (project_id, allowed_step_types, allowed_plugins, max_requests_per_day,
+                    llm_provider, llm_base_url, governor_model, generator_model, embedding_model, updated_at)
                 KEY (project_id)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             ps.setLong(1, policy.projectId)
             ps.setString(2, policy.allowedStepTypes)
@@ -608,7 +645,12 @@ class JdbcPlatformStore(
             } else {
                 ps.setNull(4, java.sql.Types.INTEGER)
             }
-            ps.setTimestamp(5, java.sql.Timestamp.from(Instant.now()))
+            ps.setString(5, policy.llmProvider)
+            ps.setString(6, policy.llmBaseUrl)
+            ps.setString(7, policy.governorModel)
+            ps.setString(8, policy.generatorModel)
+            ps.setString(9, policy.embeddingModel)
+            ps.setTimestamp(10, java.sql.Timestamp.from(Instant.now()))
             val updated = ps.executeUpdate()
             ps.close()
             return updated > 0
@@ -622,8 +664,155 @@ class JdbcPlatformStore(
         allowedStepTypes = rs.getString("allowed_step_types"),
         allowedPlugins = rs.getString("allowed_plugins"),
         maxRequestsPerDay = rs.getObject("max_requests_per_day") as? Int,
+        llmProvider = rs.getString("llm_provider"),
+        llmBaseUrl = rs.getString("llm_base_url"),
+        governorModel = rs.getString("governor_model"),
+        generatorModel = rs.getString("generator_model"),
+        embeddingModel = rs.getString("embedding_model"),
         createdAt = rs.getTimestamp("created_at").toInstant().toString(),
         updatedAt = rs.getTimestamp("updated_at")?.toInstant()?.toString()
+    )
+
+    // ════════════════════════════════════════════
+    //  Memory
+    // ════════════════════════════════════════════
+
+    override fun getMemory(userId: Long, projectId: Long?): UserMemory? {
+        val conn = db.getConnection(null)
+        try {
+            val ps = if (projectId != null) {
+                conn.prepareStatement("SELECT * FROM user_memories WHERE user_id = ? AND project_id = ?").also {
+                    it.setLong(1, userId)
+                    it.setLong(2, projectId)
+                }
+            } else {
+                conn.prepareStatement("SELECT * FROM user_memories WHERE user_id = ? AND project_id IS NULL").also {
+                    it.setLong(1, userId)
+                }
+            }
+            val rs = ps.executeQuery()
+            val memory = if (rs.next()) UserMemory(
+                userId = rs.getLong("user_id"),
+                projectId = rs.getObject("project_id") as? Long,
+                content = rs.getString("content"),
+                updatedAt = rs.getTimestamp("updated_at").toInstant().toString()
+            ) else null
+            ps.close()
+            return memory
+        } finally {
+            db.releaseConnection(conn)
+        }
+    }
+
+    override fun upsertMemory(userId: Long, projectId: Long?, content: String): Boolean {
+        val conn = db.getConnection(null)
+        try {
+            val ps = conn.prepareStatement("""
+                MERGE INTO user_memories (user_id, project_id, content, updated_at)
+                KEY (user_id, project_id)
+                VALUES (?, ?, ?, ?)
+            """)
+            ps.setLong(1, userId)
+            if (projectId != null) {
+                ps.setLong(2, projectId)
+            } else {
+                ps.setNull(2, java.sql.Types.BIGINT)
+            }
+            ps.setString(3, content)
+            ps.setTimestamp(4, java.sql.Timestamp.from(Instant.now()))
+            val updated = ps.executeUpdate()
+            ps.close()
+            return updated > 0
+        } finally {
+            db.releaseConnection(conn)
+        }
+    }
+
+    // ════════════════════════════════════════════
+    //  RAG Documents
+    // ════════════════════════════════════════════
+
+    override fun saveRagDocument(doc: io.wiiiv.rag.RagDocument): Boolean {
+        val conn = db.getConnection(null)
+        try {
+            val ps = conn.prepareStatement("""
+                MERGE INTO rag_documents (document_id, scope, title, file_path, content, content_hash, chunk_count, updated_at)
+                KEY (document_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+            ps.setString(1, doc.documentId)
+            ps.setString(2, doc.scope)
+            ps.setString(3, doc.title)
+            ps.setString(4, doc.filePath)
+            ps.setString(5, doc.content)
+            ps.setString(6, doc.contentHash)
+            ps.setInt(7, doc.chunkCount)
+            ps.setTimestamp(8, java.sql.Timestamp.from(Instant.now()))
+            val updated = ps.executeUpdate()
+            ps.close()
+            return updated > 0
+        } finally {
+            db.releaseConnection(conn)
+        }
+    }
+
+    override fun getRagDocument(documentId: String): io.wiiiv.rag.RagDocument? {
+        val conn = db.getConnection(null)
+        try {
+            val ps = conn.prepareStatement("SELECT * FROM rag_documents WHERE document_id = ?")
+            ps.setString(1, documentId)
+            val rs = ps.executeQuery()
+            val doc = if (rs.next()) mapRagDocument(rs) else null
+            ps.close()
+            return doc
+        } finally {
+            db.releaseConnection(conn)
+        }
+    }
+
+    override fun listRagDocuments(scope: String?): List<io.wiiiv.rag.RagDocument> {
+        val conn = db.getConnection(null)
+        try {
+            val ps = if (scope != null) {
+                conn.prepareStatement("SELECT * FROM rag_documents WHERE scope = ? ORDER BY created_at").also {
+                    it.setString(1, scope)
+                }
+            } else {
+                conn.prepareStatement("SELECT * FROM rag_documents ORDER BY created_at")
+            }
+            val rs = ps.executeQuery()
+            val docs = mutableListOf<io.wiiiv.rag.RagDocument>()
+            while (rs.next()) docs.add(mapRagDocument(rs))
+            ps.close()
+            return docs
+        } finally {
+            db.releaseConnection(conn)
+        }
+    }
+
+    override fun deleteRagDocument(documentId: String): Boolean {
+        val conn = db.getConnection(null)
+        try {
+            val ps = conn.prepareStatement("DELETE FROM rag_documents WHERE document_id = ?")
+            ps.setString(1, documentId)
+            val deleted = ps.executeUpdate()
+            ps.close()
+            return deleted > 0
+        } finally {
+            db.releaseConnection(conn)
+        }
+    }
+
+    private fun mapRagDocument(rs: ResultSet): io.wiiiv.rag.RagDocument = io.wiiiv.rag.RagDocument(
+        documentId = rs.getString("document_id"),
+        scope = rs.getString("scope"),
+        title = rs.getString("title"),
+        filePath = rs.getString("file_path"),
+        content = rs.getString("content"),
+        contentHash = rs.getString("content_hash"),
+        chunkCount = rs.getInt("chunk_count"),
+        createdAt = rs.getTimestamp("created_at").toInstant().toString(),
+        updatedAt = rs.getTimestamp("updated_at").toInstant().toString()
     )
 
     // ════════════════════════════════════════════

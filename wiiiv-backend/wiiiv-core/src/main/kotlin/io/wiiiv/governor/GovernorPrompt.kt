@@ -654,7 +654,9 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
         taskList: List<TaskSlot> = emptyList(),
         ragContext: String? = null,
         workspace: String? = null,
-        imageCount: Int = 0
+        imageCount: Int = 0,
+        userMemory: String? = null,
+        projectMemory: String? = null
     ): String = buildString {
         appendLine(DEFAULT)
         appendLine()
@@ -670,6 +672,24 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
             appendLine()
             appendLine(ragContext)
             appendLine()
+        }
+
+        // 사용자 메모리 주입 (RAG 다음, Current State 전)
+        if (userMemory != null || projectMemory != null) {
+            appendLine("## User Memory")
+            appendLine()
+            appendLine("아래는 이 사용자가 기억해달라고 한 정보이다. 대화 시 자연스럽게 참고하라.")
+            appendLine()
+            if (userMemory != null) {
+                appendLine("### Global Memory")
+                appendLine(userMemory)
+                appendLine()
+            }
+            if (projectMemory != null) {
+                appendLine("### Project Memory")
+                appendLine(projectMemory)
+                appendLine()
+            }
         }
 
         if (imageCount > 0) {

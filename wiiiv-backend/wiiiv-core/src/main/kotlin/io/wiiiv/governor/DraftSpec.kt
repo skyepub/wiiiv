@@ -583,7 +583,10 @@ class ConversationSession(
     var confirmed: Boolean = false,
     val context: SessionContext = SessionContext(),
     val createdAt: Long = System.currentTimeMillis(),
-    var projectId: Long? = null          // F-4: 프로젝트 스코핑
+    var projectId: Long? = null,         // F-4: 프로젝트 스코핑
+    var userId: Long? = null,            // 메모리 로드용 사용자 ID
+    var userMemory: String? = null,      // 사용자 전역 메모리 (캐시)
+    var projectMemory: String? = null    // 프로젝트 메모리 (캐시)
 ) {
     /**
      * 프록시: activeTask가 있으면 그 task의 draftSpec, 없으면 fallback

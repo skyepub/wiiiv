@@ -1,0 +1,69 @@
+{
+  "case_id": "GX-Y19",
+  "name": "임과장의 조건부 워크플로우",
+  "timestamp": "2026-02-27T08:32:21.142643",
+  "turns": 4,
+  "elapsed_sec": 115.8,
+  "verdict": "PASS",
+  "reason": "워크플로우가 성공적으로 생성되고 실행되었습니다. skymall API 호출, 조건에 따른 상품 분류, 그리고 결과 파일 저장이 모두 완료되었습니다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "skymall 상품을 조회해서 분석하는 워크플로우를 만들어주세요. 시작할 준비가 되셨으면 알려주세요.",
+      "turn": 1,
+      "timestamp": "2026-02-27T08:30:24.772993"
+    },
+    {
+      "role": "wiiiv",
+      "content": "좋습니다! 이 워크플로우가 어떤 목적을 가지고 있는지 알려주실 수 있나요? 예를 들어, 재고 분석, 판매 추세 확인 등의 목적이 있을 수 있습니다.",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-27T08:30:27.450561"
+    },
+    {
+      "role": "ghost",
+      "content": "이 워크플로우의 주된 목적은 skymall 상품의 가격을 기준으로 분류하고 그 결과를 분석하여 저장하는 것입니다. 상품 가격이 200달러 이상이면 프리미엄으로, 미만이면 일반으로 분류해주세요. 그런 다음 결과를 /tmp/analysis_result.json에 저장할 수 있도록 설정해주세요. 조건 분기 포함된 작업지시서를 확인하고 싶습니다. 준비가 되었나요?",
+      "turn": 2,
+      "timestamp": "2026-02-27T08:30:31.225917"
+    },
+    {
+      "role": "wiiiv",
+      "content": "작업지시서를 준비했습니다. 이 워크플로우는 다음과 같은 흐름으로 설정됩니다:\n\n1. skymall에서 상품 데이터를 조회합니다.\n2. 가격이 200달러 이상인 경우 프리미엄으로 분류합니다.\n3. 가격이 200달러 미만인 경우 일반으로 분류합니다.\n4. 분류 결과를 /tmp/analysis_result.json 파일에 저장합니다.\n\n이대로 진행해도 될까요?",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-27T08:30:35.973672"
+    },
+    {
+      "role": "ghost",
+      "content": "네, 정확합니다. 이렇게 진행해주세요. 워크플로우 설정이 완료되면 실행을 시작해도 될까요?",
+      "turn": 3,
+      "timestamp": "2026-02-27T08:30:38.295498"
+    },
+    {
+      "role": "wiiiv",
+      "content": "워크플로우 작업지시서 를 정리했습니다.\n\n---\n### 1. 워크플로우 개요\n- **워크플로우 이름**: skymall-product-analysis\n- **목적/설명**: skymall 상품의 가격을 기준으로 분류하고 분석한 결과를 저장합니다.\n- **트리거 조건**: 수동\n\n### 2. 데이터 소스\n- **시스템명**: skymall\n- **Base URL + 포트**: http://home.skyepub.net:9090\n- **사용할 API 엔드포인트 목록**:\n  - **GET** `/api/products?page=0&size=20&sort=price,desc`: 전체 상품 조회\n- **인증 방식**: 없음\n- **인증 credentials**: [기본값]\n\n### 3. 노드 목록 (실행 순서)\n- **노드 ID**: fetch-products\n  - **노드 타입**: observe\n  - **설명**: skymall에서 상품 데이터 조회\n  - **입력**: [없음]\n  - **처리**: skymall 상품 데이터를 API로 조회\n  - **출력**: 상품 데이터 목록\n  - **onError 정책**: abort\n\n- **노드 ID**: classify-products\n  - **노드 타입**: transform\n  - **설명**: 조회한 상품 가격을 기준으로 프리미엄 및 일반으로 분류\n  - **입력**: fetch-products의 결과\n  - **처리**: 가격이 200달러 이상인 경우 '프리미엄', 미만인 경우 '일반'으로 분류\n  - **출력**: 분류된 상품 목록\n  - **onError 정책**: skip\n\n- **노드 ID**: save-results\n  - **노드 타입**: act\n  - **설명**: 분류된 결과를 파일에 저장\n  - **입력**: classify-products의 결과\n  - **처리**: 분석 결과를 `/tmp/analysis_result.json` 파일에 저장\n  - **출력**: [없음]\n  - **onError 정책**: abort\n\n### 4. 분기/반복 로직\n- 추가적인 분기나 반복 구조는 포함되어 있지 않습니다. \n\n### 5. 에러 처리 전략\n- **전체 워크플로우 레벨**: 부분 실패 허용: 아니오\n- **노드 레벨**:\n  - fetch-products: abort\n  - classify-products: skip\n  - save-results: abort\n- **타임아웃**: API 호출별, 전체 워크플로우: [기본값]\n\n### 6. 출력 형식\n- **최종 결과 형식**: JSON\n- **출력 경로**: /tmp/analysis_result.json\n- **결과 요약 방식**: [기본값]\n---\n\n이대로 진행할까요?\n\n### 1. 워크플로우 개요\n- **워크플로우 이름**: skymall-product-analysis\n- **목적/설명**: skymall 상품의 가격을 기준으로 분류하고 분석한 결과를 저장합니다.\n- **트리거 조건**: 수동\n\n### 2. 데이터 소스\n- **시스템명**: skymall\n- **Base URL + 포트**: http://home.skyepub.net:9090\n- **사용할 API 엔드포인트 목록**:\n  - **GET** `/api/products?page=0&size=20&sort=price,desc`: 전체 상품 조회\n- **인증 방식**: 없음\n- **인증 credentials**: [기본값]\n\n### 3. 노드 목록 (실행 순서)\n- **노드 ID**: fetch-products\n  - **노드 타입**: observe\n  - **설명**: skymall에서 상품 데이터 조회\n  - **입력**: [없음]\n  - **처리**: skymall 상품 데이터를 API로 조회\n  - **출력**: 상품 데이터 목록\n  - **onError 정책**: abort\n\n- **노드 ID**: classify-products\n  - **노드 타입**: transform\n  - **설명**: 조회한 상품 가격을 기준으로 프리미엄 및 일반으로 분류\n  - **입력**: fetch-products의 결과\n  - **처리**: 가격이 200달러 이상인 경우 '프리미엄', 미만인 경우 '일반'으로 분류\n  - **출력**: 분류된 상품 목록\n  - **onError 정책**: skip\n\n- **노드 ID**: save-results\n  - **노드 타입**: act\n  - **설명**: 분류된 결과를 파일에 저장\n  - **입력**: classify-products의 결과\n  - **처리**: 분석 결과를 `/tmp/analysis_result.json` 파일에 저장\n  - **출력**: [없음]\n  - **onError 정책**: abort\n\n### 4. 분기/��복 로직\n- 추가적인 분기나 반복 구조는 포함되어 있지 않습니다. \n\n### 5. 에러 처리 전략\n- **전체 워크플로우 레벨**: 부분 실패 허용: 아니오\n- **노드 레벨**:\n  - fetch-products: abort\n  - classify-products: skip\n  - save-results: abort\n- **타임아웃**: API 호출별, 전체 워크플로우: [기본값]\n\n### 6. 출력 형식\n- **최종 결과 형식**: JSON\n- **출력 경로**: /tmp/analysis_result.json\n- **결과 요약 방식**: [기본값]",
+      "turn": 3,
+      "action": "",
+      "timestamp": "2026-02-27T08:30:55.443214"
+    },
+    {
+      "role": "ghost",
+      "content": "네, 작업지시서가 잘 정리된 것 같습니다. 이대로 워크플로우를 실행해 주세요. 결과물을 확인해 보겠습니다.",
+      "turn": 4,
+      "timestamp": "2026-02-27T08:30:58.089032"
+    },
+    {
+      "role": "wiiiv",
+      "content": "스카이몰의 상품을 가격 기준으로 분류해보면, 두 가지 프리미엄 제품이 있습니다. 'Laptop Pro 15 inch'는 899.99달러로 전문 사용자에게 적합하며, 'Smartphone X'는 449.99달러로 최신 기술을 담고 있습니다. 이 두 제품 모두 전자기기로, 충분한 재고가 확보되어 있습니다.\n\n=== HLX Workflow: skymall-product-analysis ===\nStatus: OK | Duration: 65.5s | Nodes: 3\n\n[OK] fetch-products (ACT) 1.6s\n[OK] classify-products (TRANSFORM) 36.6s\n[OK] save-results (ACT) 27.3s\n\nResult: {\"path\":\"/tmp/analysis_result.json\",\"size\":4768,\"action\":\"WRITE\"}\n\n=== HLX Node Details ===\n[OK] fetch-products (ACT) 1588ms\n  → {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products?page=0&size=20&sort=price,desc\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":3,\\\"name\\\":\\\"Laptop Pro 15 inch\\\",\\\"description\\\":\\\"Powerful laptop for professionals with a stunning Retina display.\\\",\\\"price\\\":899.9955,\\\"stock\\\":81,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\":\\\"Electronics\\\"},\\\"createdAt\\\":\\\"2025-09-05T13:01:09\\\"},{\\\"id\\\":4,\\\"name\\\":\\\"Smartphone X\\\",\\\"description\\\":\\\"The latest smartphone with an advanced camera system.\\\",\\\"pric...\n[OK] classify-products (TRANSFORM) 36572ms\n  → [{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerful laptop for professionals with a stunning Retina display.\",\"price\":899.9955,\"stock\":81,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\",\"classification\":\"Premium\"},{\"id\":4,\"name\":\"Smartphone X\",\"description\":\"The latest smartphone with an advanced camera system.\",\"price\":449.9955,\"stock\":197,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\",\"classification\":\"Premium\"},{\"id\":1,\"name\":\"4K...\n[OK] save-results (ACT) 27297ms\n  → {\"path\":\"/tmp/analysis_result.json\",\"size\":4768,\"action\":\"WRITE\"}\n\n=== Final Variables ===\nproducts_raw: {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products?page=0&size=20&sort=price,desc\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":3,\\\"name\\\":\\\"Laptop Pro 15 inch\\\",\\\"description\\\":\\\"Powerful laptop for professionals with a stunning Retina display.\\\",\\\"price\\\":899.9955,\\\"stock\\\":81,\\\"ca...\nclassified_products: [{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerful laptop for professionals with a stunning Retina display.\",\"price\":899.9955,\"stock\":81,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\",\"classification\":\"Premium\"},{\"id\":4,\"name\":\"Smartphone X\",\"description\":\"The l...\nsave_result: {\"path\":\"/tmp/analysis_result.json\",\"size\":4768,\"action\":\"WRITE\"}\n\n\n---\n워크플로우 'skymall-product-analysis' (3 nodes)이 저장되었습니다.\n재실행: `/hlx run skymall-product-analysis`\n",
+      "turn": 4,
+      "action": "",
+      "timestamp": "2026-02-27T08:32:16.328122"
+    },
+    {
+      "role": "ghost",
+      "content": "결과가 성공적으로 저장된 것 같네요. /tmp/analysis_result.json 파일도 확인했습니다. 조건 분기와 워크플로우가 문제없이 작동하네요. 도움 주셔서 감사합니다!",
+      "turn": 5,
+      "timestamp": "2026-02-27T08:32:19.240536"
+    }
+  ]
+}

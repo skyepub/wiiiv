@@ -1,0 +1,121 @@
+{
+  "case_id": "GX-Y01",
+  "name": "박이사의 풀스택 백엔드 생성",
+  "timestamp": "2026-02-27T05:37:17.445567",
+  "turns": 8,
+  "elapsed_sec": 239.9,
+  "verdict": "FAIL",
+  "reason": "대화에서 인터뷰가 두 번 이상 진행되었고, WorkOrder가 생성되었으며, 파일이 생성 및 기록되었지만, 작업지시서(WorkOrder) 표시가 명확히 드러나지 않고 시나리오 내에서 FILE_WRITE로의 기록 완성을 확인할 수 없다. 따라서 명시된 절차를 온전히 충족하지 못했다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "도서 대출 시스템 만들어줘.",
+      "turn": 1,
+      "timestamp": "2026-02-27T05:33:15.021129"
+    },
+    {
+      "role": "wiiiv",
+      "content": "어떤 용도로 도서 대출 시스템을 만들고 싶으신가요?",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-27T05:33:24.468234"
+    },
+    {
+      "role": "ghost",
+      "content": "사내 관리용이다. 됐고.",
+      "turn": 2,
+      "timestamp": "2026-02-27T05:33:36.041223"
+    },
+    {
+      "role": "wiiiv",
+      "content": "사내 관리용 도서 대출 시스템의 핵심 기능은 무엇인가요? 예를 들어, 사용자 등록, 도서 대출, 반납 관리 같은 기능이 있을 수 있습니다.",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-27T05:33:49.049354"
+    },
+    {
+      "role": "ghost",
+      "content": "도서/회원/대출 세 개.",
+      "turn": 3,
+      "timestamp": "2026-02-27T05:33:51.284668"
+    },
+    {
+      "role": "wiiiv",
+      "content": "좋습니다! 도서, 회원, 대출 관리에 대해 파악했습니다. 그러면, 이 시스템의 화면이나 페이지는 어떤 것이 필요할까요? 예를 들어, 로그인 페이지, 도서 목록, 대출 기록 같은 페이지가 있을 수 있습니다.",
+      "turn": 3,
+      "action": "",
+      "timestamp": "2026-02-27T05:34:04.460743"
+    },
+    {
+      "role": "ghost",
+      "content": "로그인 필요하다. 다음.",
+      "turn": 4,
+      "timestamp": "2026-02-27T05:34:06.735249"
+    },
+    {
+      "role": "wiiiv",
+      "content": "로그인 페이지가 필요하군요! 이 시스템에서 사용할 데이터 모델은 어떻게 구성하실 건가요? 예를 들어, 도서, 회원, 대출 등을 포함한 엔티티와 그 관계를 말씀해 주세요.",
+      "turn": 4,
+      "action": "",
+      "timestamp": "2026-02-27T05:34:19.624907"
+    },
+    {
+      "role": "ghost",
+      "content": "도서/회원/대출. 관계는 기본적이다. 다음.",
+      "turn": 5,
+      "timestamp": "2026-02-27T05:34:21.504031"
+    },
+    {
+      "role": "wiiiv",
+      "content": "기본적인 관계를 이해했습니다. 이 시스템에서는 어떤 API 설계가 필요한가요? 예를 들어, 도서 목록 조회, 회원 등록, 대출 요청 등의 주요 엔드포인트가 있을 수 있습니다.",
+      "turn": 5,
+      "action": "",
+      "timestamp": "2026-02-27T05:34:33.579780"
+    },
+    {
+      "role": "ghost",
+      "content": "CRUD 필요하다. 됐고.",
+      "turn": 6,
+      "timestamp": "2026-02-27T05:34:35.270602"
+    },
+    {
+      "role": "wiiiv",
+      "content": "정보가 충분히 수집되었습니다. 작업지시서를 만들어도 될까요?",
+      "turn": 6,
+      "action": "",
+      "timestamp": "2026-02-27T05:34:44.605845"
+    },
+    {
+      "role": "ghost",
+      "content": "그래. 진행해.",
+      "turn": 7,
+      "timestamp": "2026-02-27T05:34:46.401636"
+    },
+    {
+      "role": "wiiiv",
+      "content": "작업지시서 를 정리했습니다.\n\n---\n### 1. 프로젝트 개요\n- 프로젝트 이름: `library-loan-system`\n- 목적/설명: 사내 관리용 도서 대출 시스템으로 도서, 회원, 대출 관리를 수행합니다.\n- 도메인: 사내 관리용 도서 대출 시스템\n- **메인 Application 클래스**: `com.example.libraryloansystem.LibraryLoanSystemApplication`\n\n### 2. 기술 스택\n- 언어: Kotlin 1.9.22\n- 프레임워크: Spring Boot 3.4.2\n- 빌드 도구: Gradle + Kotlin DSL\n- 데이터베이스: H2 in-memory\n- 추가 라이브러리: Spring Security, JWT\n\n### 3. 프로젝트 구조\n- 루트 패키지: `com.example.libraryloansystem`\n- 디렉토리 레이아웃:\n  - controller\n  - model/entity\n  - repository\n  - service\n  - config\n  - dto\n\n### 4. 데이터 모델\n\n- 엔티티명 / 클래스명: Book\n  - 필드 목록:\n    - id: Long, 제약조건: @Id, @GeneratedValue\n    - title: String, 제약조건: @NotNull\n    - author: String, 제약조건: @NotNull\n  - 테이블명: books\n\n- 엔티티명 / 클래스명: Member\n  - 필드 목록:\n    - id: Long, 제약조건: @Id, @GeneratedValue\n    - name: String, 제약조건: @NotNull\n    - email: String, 제약조건: @NotNull, @Email\n  - 테이블명: members\n\n- 엔티티명 / 클래스명: Loan\n  - 필드 목록:\n    - id: Long, 제약조건: @Id, @GeneratedValue\n    - bookId: Long, 제약조건: @NotNull, @ManyToOne\n    - memberId: Long, 제약조건: @NotNull, @ManyToOne\n    - loanDate: LocalDate, 제약조건: @NotNull\n    - returnDate: LocalDate, 제약조건: [기본값] null\n  - 테이블명: loans\n\n**엔티티 관계도**:\n```\nBook (1) --- (N) Loan\nMember (1) --- (N) Loan\n```\n\n### 5. API 설계\n\n- 기본 경로: /api/books\n  - 엔드포인트 목록:\n    - GET / - 모든 도서 조회\n    - POST / - 도서 등록\n    - PUT /{id} - 도서 수정\n    - DELETE /{id} - 도서 삭제\n\n- 기본 경로: /api/members\n  - 엔드포인트 목록:\n    - GET / - 모든 회원 조회\n    - POST / - 회원 등록\n    - PUT /{id} - 회원 수정\n    - DELETE /{id} - 회원 삭제\n\n- 기본 경로: /api/loans\n  - 엔드포인트 목록:\n    - GET / - 모든 대출 기록 조회\n    - POST / - 대출 요청\n    - PUT /{id} - 대출 수정\n    - DELETE /{id} - 대출 반납\n\n### 6. 보안/인증\n- 인증 방식: JWT\n- 역할/권한: ADMIN, USER\n- 보안 설정: \n  - 공개 경로: /api/books, /api/members (GET)\n  - 인증 필요 경로: /api/books, /api/members (POST, PUT, DELETE), /api/loans\n- 초기 계정 정보:\n  - ADMIN 계정: username: admin, password: admin123\n\n### 7. 설정 (application.yml)\n```yaml\nserver:\n  port: 8080\n\nspring:\n  datasource:\n    url: jdbc:h2:mem:libraryloansystem;DB_CLOSE_DELAY=-1\n    driver-class-name: org.h2.Driver\n    username: sa\n    password:\n  jpa:\n    hibernate:\n      ddl-auto: create-drop\n    show-sql: true\n    defer-datasource-initialization: true\n  h2:\n    console:\n      enabled: true\n      path: /h2-console\n```\n\n### 8. 초기 데이터\n- data.sql 내용:\n```sql\nINSERT INTO books (id, title, author) VALUES (1, 'Effective Java', 'Joshua Bloch');\nINSERT INTO books (id, title, author) VALUES (2, 'Spring in Action', 'Craig Walls');\nINSERT INTO members (id, name, email) VALUES (1, 'John Doe', 'john.doe@example.com');\nINSERT INTO loans (id, book_id, member_id, loan_date) VALUES (1, 1, 1, CURRENT_DATE);\n```\n\n### 9. 빌드/실행\n- 빌드 명령어: `./gradlew build`\n- 실행 방법: `./gradlew bootRun`\n- 테스트 실행 명령어: `./gradlew test`\n\n### 10. build.gradle.kts 필수 플러그인 및 의존성 체크리스트\n**필수 plugins 블록**:\n```kotlin\nplugins {\n    kotlin(\"jvm\") version \"1.9.22\"\n    kotlin(\"plugin.spring\") version \"1.9.22\"\n    kotlin(\"plugin.jpa\") version \"1.9.22\"\n    id(\"org.springframework.boot\") version \"3.4.2\"\n    id(\"io.spring.dependency-management\") version \"1.1.4\"\n}\n```\n\n**필수 의존성**:\n- `implementation(\"org.jetbrains.kotlin:kotlin-reflect\")`\n- `implementation(\"org.springframework.boot:spring-boot-starter-security\")`\n- `implementation(\"io.jsonwebtoken:jjwt-api:0.12.5\")`\n- `implementation(\"io.jsonwebtoken:jjwt-impl:0.12.5\")`\n- `implementation(\"io.jsonwebtoken:jjwt-jackson:0.12.5\")`\n---\n\n이대로 진행할까요?\n",
+      "turn": 7,
+      "action": "",
+      "timestamp": "2026-02-27T05:35:17.853965"
+    },
+    {
+      "role": "ghost",
+      "content": "대출 기한을 14일로 해.",
+      "turn": 8,
+      "timestamp": "2026-02-27T05:35:21.705396"
+    },
+    {
+      "role": "wiiiv",
+      "content": "프로젝트 생성 완료!\n\n파일 생성: 29개 step 성공\n\n⚠ 빌드/테스트 실행 실패 — 수동 확인 필요\n  - step-build-714a: Command exited with code 127\n",
+      "turn": 8,
+      "action": "",
+      "timestamp": "2026-02-27T05:37:12.585582"
+    },
+    {
+      "role": "ghost",
+      "content": "됐다. 고마워.",
+      "turn": 9,
+      "timestamp": "2026-02-27T05:37:14.276886"
+    }
+  ]
+}

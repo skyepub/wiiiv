@@ -1991,6 +1991,10 @@ body가 없는 POST 요청은 HTTP 400 에러를 유발한다. 절대 body를 �
 - 각 노드의 `output` 변수에 결과를 저장
 - 다음 노드의 `input`으로 이전 노드의 output 변수를 참조
 - 토큰, 조회 결과, ID 목록 등 모든 중간 데이터를 변수로 연결
+- ⚠ **`input`은 반드시 단일 문자열(변수명)**이어야 한다. JSON 객체나 배열 금지!
+  - ✅ 올바름: `"input": "suppliers_raw"`
+  - ❌ 금지: `"input": {"suppliers": "suppliers_raw", "products": "products_raw"}`
+  - 여러 변수가 필요하면 `description`에서 참조하라 (예: "Merge {var1} and {var2} into..."). `input`에는 주 변수 하나만 지정.
 
 ### 4. Act 노드 description 형식 ⚡ 가장 중요!
 Act 노드의 description에는 **정확한 API 호출 정보**를 포함해야 한다:
@@ -2024,6 +2028,12 @@ Act 노드가 API 호출을 실행하면, output 변수에 다음 구조의 JSON
 - 따라서 Act 노드 다음에는 **반드시 Transform 노드를 배치**하여 body에서 필요한 데이터를 추출하라.
 
 ### 6. Transform 노드 사용법
+⚠ **Transform의 `input` 필드는 반드시 단일 문자열(변수명)이어야 한다.**
+- ✅ `"input": "login_result"` (문자열)
+- ✅ `"input": null` (생략 가능)
+- ❌ `"input": {"a": "var1", "b": "var2"}` ← **JSON 객체 금지! 파싱 에러 발생!**
+- 여러 변수를 합치려면: `"input"`에 주 변수 하나, `"description"`에서 `{다른변수}` 참조
+
 **토큰 추출** — 로그인 act 노드 직후:
 ```json
 {

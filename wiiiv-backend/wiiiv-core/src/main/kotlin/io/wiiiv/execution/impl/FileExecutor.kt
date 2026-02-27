@@ -186,6 +186,11 @@ class FileExecutor : Executor {
         // Create parent directories if needed
         file.parentFile?.mkdirs()
 
+        // If the target path exists as a directory, remove it before writing
+        if (file.isDirectory) {
+            file.deleteRecursively()
+        }
+
         file.writeText(content)
 
         val output = StepOutput(

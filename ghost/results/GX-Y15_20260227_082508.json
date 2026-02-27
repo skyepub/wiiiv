@@ -1,0 +1,82 @@
+{
+  "case_id": "GX-Y15",
+  "name": "오과장의 워크플로우 에러 처리 확인",
+  "timestamp": "2026-02-27T08:25:08.563382",
+  "turns": 5,
+  "elapsed_sec": 74.0,
+  "verdict": "PASS",
+  "reason": "워크플로우 'skystock-suppliers-fetch'가 생성되었고, 성공적으로 실행되어 skystock API를 통한 공급사 조회와 /tmp/qa_suppliers.json에 데이터 저장이 완료되었습니다. 모든 요구 사항과 판정 기준이 충족되었습니다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "skystock 공급사 전체 조회해서 /tmp/qa_suppliers.json에 저장하는 워크플로우를 만들어주세요.",
+      "turn": 1,
+      "timestamp": "2026-02-27T08:23:52.468365"
+    },
+    {
+      "role": "wiiiv",
+      "content": "좋습니다! skystock의 공급사 목록을 전체 조회하기 위해 어떤 처리 흐름을 원하시는지 말씀해 주세요. 예를 들어, 조회 후 저장 형식이나 추가적인 필터가 필요하신가요?",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-27T08:23:55.375624"
+    },
+    {
+      "role": "ghost",
+      "content": "특별한 필터는 필요 없고, 조회된 목록을 /tmp/qa_suppliers.json 파일에 저장만 해주세요. 실패 시 한 번 재시도하고, 그래도 실패하면 중단해주세요.",
+      "turn": 2,
+      "timestamp": "2026-02-27T08:23:57.551609"
+    },
+    {
+      "role": "wiiiv",
+      "content": "파악했습니다. skystock의 공급사 목록을 전체 조회한 후, 결과를 /tmp/qa_suppliers.json 파일에 저장하는 워크플로우를 생성하겠습니다. 실패 시 한 번 재시도하고, 그래도 실패하면 중단하도록 하겠습니다.",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-27T08:24:00.808893"
+    },
+    {
+      "role": "ghost",
+      "content": "워크플로우가 제대로 생성됐는지 실행해보고 알려주세요.",
+      "turn": 3,
+      "timestamp": "2026-02-27T08:24:02.724867"
+    },
+    {
+      "role": "wiiiv",
+      "content": "워크플로우 작업지시서 를 정리했습니다.\n\n---\n## 1. 워크플로우 개요\n- **워크플로우 이름**: skystock-suppliers-fetch\n- **목적/설명**: skystock의 공급사 목록을 전체 조회하고, 결과를 파일에 저장합니다.\n- **트리거 조건**: 수동\n\n## 2. 데이터 소스\n- **시스템명**: skystock\n- **Base URL + 포트**: http://home.skyepub.net:9091\n- **사용할 API 엔드포인트 목록**:\n  - **메서드**: GET\n    - **경로**: /api/suppliers\n    - **설명**: 전체 공급사 조회\n- **인증 방식**: API Key\n- **인증 credentials**: 토큰\n\n## 3. 노드 목록 (실행 순서)\n- **노드 ID**: fetch-suppliers\n  - **노드 타입**: observe\n  - **설명**: skystock의 공급사 목록을 전체 조회합니다.\n  - **입력**: 없음\n  - **처리**: GET 요청을 통해 공급사 목록을 조회\n  - **출력**: 조회된 공급사 목록(JSON)\n  - **onError 정책**: retry:1\n\n- **노드 ID**: save-suppliers\n  - **노드 타입**: act\n  - **설명**: 조회된 공급사 목록을 파일에 저장합니다.\n  - **입력**: fetch-suppliers 결과\n  - **처리**: /tmp/qa_suppliers.json 파일에 저장\n  - **출력**: 성공/실패 상태\n  - **onError 정책**: abort\n\n## 4. 분기/반복 로직\n- 해당 워크플로우에는 반복 노드가 없습니다.\n\n### 데이터 흐름도\n- fetch-suppliers → save-suppliers\n\n## 5. 에러 처리 전략\n- 전체 워크플로우 레벨: 부분 실패 허용 없음\n- 노드 레벨: \n  - fetch-suppliers: retry 1회\n  - save-suppliers: abort\n- 타임아웃: [기본값]\n\n## 6. 출력 형식\n- **최종 결과 형식**: JSON\n- **출력 경로**: /tmp/qa_suppliers.json\n- **결과 요약 방식**: 성공/실패 결과 표시\n---\n\n이대로 진행할까요?\n",
+      "turn": 3,
+      "action": "",
+      "timestamp": "2026-02-27T08:24:15.787735"
+    },
+    {
+      "role": "ghost",
+      "content": "네, 이대로 진행해 주세요. 각 노드별 상태를 알려주세요.",
+      "turn": 4,
+      "timestamp": "2026-02-27T08:24:17.968249"
+    },
+    {
+      "role": "wiiiv",
+      "content": "요청하신 skystock 공급사 전체 조회가 완료되었습니다. 관련 데이터가 성공적으로 저장되었습니다. 추가적인 정보나 도움이 필요하시면 언제든지 말씀해 주세요.\n\n=== HLX Workflow: skystock-suppliers-fetch ===\nStatus: OK | Duration: 31.5s | Nodes: 4\n\n[OK] login-skystock (ACT) 2.4s\n[OK] extract-token (TRANSFORM) 0.0s\n[OK] fetch-suppliers (ACT) 1.5s\n[OK] save-suppliers (ACT) 27.6s\n\nResult: {\"path\":\"/tmp/qa_suppliers.json\",\"size\":3855,\"action\":\"WRITE\"}\n\n=== HLX Node Details ===\n[OK] login-skystock (ACT) 2374ms\n  → {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9091/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjE0ODI2OSwiZXhwIjoxNzcyMjM0NjY5fQ.1HDO1SUBEAbaj7LtR-n7XKHB7tph3VguZ3iNrlZTD1QzdRjg7kp-pJsryd4kbPCU\\\",\\\"userId\\\":1,\\\"username\\\":\\\"admin\\\",\\\"role\\\":\\\"ADMIN\\\"}\",\"truncated\":false,\"contentLength\":255}\n[OK] extract-token (TRANSFORM) 1ms\n  → \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjE0ODI2OSwiZXhwIjoxNzcyMjM0NjY5fQ.1HDO1SUBEAbaj7LtR-n7XKHB7tph3VguZ3iNrlZTD1QzdRjg7kp-pJsryd4kbPCU\"\n[OK] fetch-suppliers (ACT) 1490ms\n  → {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9091/api/suppliers\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"Samsung Electronics\\\",\\\"contactEmail\\\":\\\"supply@samsung.com\\\",\\\"contactPhone\\\":\\\"02-1234-5678\\\",\\\"address\\\":\\\"서울 서초구 삼성로 129 (updated)\\\",\\\"leadTimeDays\\\":3,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:24:08.918774\\\"},{\\\"id\\\":2,\\\"name\\\":\\\"LG Electronics\\\",\\\"contactEmail\\\":\\\"supply@lg.com\\\",\\\"contactPhone\\\":\\\"02-2345-6789\\\",\\\"address\\\":\\\"서울 영등포구 여의대로 128\\\",\\\"leadTimeDay...\n[OK] save-suppliers (ACT) 27603ms\n  → {\"path\":\"/tmp/qa_suppliers.json\",\"size\":3855,\"action\":\"WRITE\"}\n\n=== Final Variables ===\nlogin_result: {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9091/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjE0ODI2OSwiZXhwIjoxNzcyMjM0NjY5fQ.1HDO1SUBEAbaj7LtR-n7XKHB7tph3VguZ3iNrlZTD1QzdRjg7kp-pJsryd4...\nauth_token: \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc3MjE0ODI2OSwiZXhwIjoxNzcyMjM0NjY5fQ.1HDO1SUBEAbaj7LtR-n7XKHB7tph3VguZ3iNrlZTD1QzdRjg7kp-pJsryd4kbPCU\"\nsuppliers_raw: {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9091/api/suppliers\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"Samsung Electronics\\\",\\\"contactEmail\\\":\\\"supply@samsung.com\\\",\\\"contactPhone\\\":\\\"02-1234-5678\\\",\\\"address\\\":\\\"서울 서초구 삼성로 129 (updated)\\\",\\\"leadTimeDays\\\":3,\\\"isActive\\\":true...\nfile_result: {\"path\":\"/tmp/qa_suppliers.json\",\"size\":3855,\"action\":\"WRITE\"}\n\n\n---\n워크플로우 'skystock-suppliers-fetch' (4 nodes)이 저장되었습니다.\n재실행: `/hlx run skystock-suppliers-fetch`\n",
+      "turn": 4,
+      "action": "",
+      "timestamp": "2026-02-27T08:24:59.764805"
+    },
+    {
+      "role": "ghost",
+      "content": "파일이 정상적으로 저장됐는지 확인해주세요.",
+      "turn": 5,
+      "timestamp": "2026-02-27T08:25:01.617088"
+    },
+    {
+      "role": "wiiiv",
+      "content": "실행 완료!\n\n성공: 1개 step\n\n[/tmp/qa_suppliers.json]\n{\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9091/api/suppliers\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"Samsung Electronics\\\",\\\"contactEmail\\\":\\\"supply@samsung.com\\\",\\\"contactPhone\\\":\\\"02-1234-5678\\\",\\\"address\\\":\\\"서울 서초구 삼성로 129 (updated)\\\",\\\"leadTimeDays\\\":3,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:24:08.918774\\\"},{\\\"id\\\":2,\\\"name\\\":\\\"LG Electronics\\\",\\\"contactEmail\\\":\\\"supply@lg.com\\\",\\\"contactPhone\\\":\\\"02-2345-6789\\\",\\\"address\\\":\\\"서울 영등포구 여의대로 128\\\",\\\"leadTimeDays\\\":4,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:24:09.030918\\\"},{\\\"id\\\":3,\\\"name\\\":\\\"Global Fashion Co.\\\",\\\"contactEmail\\\":\\\"order@globalfashion.com\\\",\\\"contactPhone\\\":\\\"02-3456-7890\\\",\\\"address\\\":\\\"서울 강남구 압구정로 340\\\",\\\"leadTimeDays\\\":7,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:24:09.050015\\\"},{\\\"id\\\":4,\\\"name\\\":\\\"BookWorld Distribution\\\",\\\"contactEmail\\\":\\\"supply@bookworld.com\\\",\\\"contactPhone\\\":\\\"031-456-7890\\\",\\\"address\\\":\\\"경기도 파주시 출판로 201\\\",\\\"leadTimeDays\\\":2,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:24:09.069899\\\"},{\\\"id\\\":5,\\\"name\\\":\\\"Home Essentials Ltd.\\\",\\\"contactEmail\\\":\\\"order@homeessentials.com\\\",\\\"contactPhone\\\":\\\"02-5678-9012\\\",\\\"address\\\":\\\"서울 마포구 상암로 330\\\",\\\"leadTimeDays\\\":5,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:24:09.086432\\\"},{\\\"id\\\":6,\\\"name\\\":\\\"신세계인터내셔널\\\",\\\"contactEmail\\\":\\\"supply@shinsegae-int.com\\\",\\\"contactPhone\\\":\\\"02-3447-1234\\\",\\\"address\\\":\\\"서울 강남구 도산대로 317\\\",\\\"leadTimeDays\\\":5,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:30:46.851084\\\"},{\\\"id\\\":7,\\\"name\\\":\\\"하이마트유통\\\",\\\"contactEmail\\\":\\\"order@himart.co.kr\\\",\\\"contactPhone\\\":\\\"02-2163-5678\\\",\\\"address\\\":\\\"서울 강남구 테헤란로 405\\\",\\\"leadTimeDays\\\":2,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:30:46.933679\\\"},{\\\"id\\\":8,\\\"name\\\":\\\"아모레퍼시픽\\\",\\\"contactEmail\\\":\\\"b2b@amorepacific.com\\\",\\\"contactPhone\\\":\\\"02-6040-3456\\\",\\\"address\\\":\\\"서울 용산구 한강대로 100\\\",\\\"leadTimeDays\\\":4,\\\"isActive\\\":true,\\\"createdAt\\\":\\\"2026-02-16T21:30:46.987637\\\"},{\\\"id\\\":9,\\\"name\\\":\\\"CJ올리브영\\\",\\\"contactEmail\\\":\\\"sup\n",
+      "turn": 5,
+      "action": "",
+      "timestamp": "2026-02-27T08:25:03.659299"
+    },
+    {
+      "role": "ghost",
+      "content": "감사합니다. QA 완료입니다.",
+      "turn": 6,
+      "timestamp": "2026-02-27T08:25:05.544650"
+    }
+  ]
+}

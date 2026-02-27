@@ -1,0 +1,82 @@
+{
+  "case_id": "GX-Y09",
+  "name": "서인턴의 삽질 대모험",
+  "timestamp": "2026-02-27T05:50:05.279486",
+  "turns": 5,
+  "elapsed_sec": 125.1,
+  "verdict": "PASS",
+  "reason": "시스템명, 포트, 호스트 정보를 처음에 잘못 시작했으나, wiiiv가 이를 교정하여 skymall API를 성공적으로 호출하였고, 최종적으로 /tmp/intern_report.json 파일에 데이터를 저장하였다. 따라서 목표를 성공적으로 달성하였다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "안녕하세요! 총무팀 서인턴입니다. 선배님이 스카이쇼핑이라는 시스템에서 상품 목록을 뽑아오라고 하셨는데요, localhost:8080이라고 적혀있었거든요. 도와주실 수 있나요?",
+      "turn": 1,
+      "timestamp": "2026-02-27T05:47:59.460424"
+    },
+    {
+      "role": "wiiiv",
+      "content": "스카이쇼핑에서 두 가지 전자제품을 확인할 수 있습니다. 15인치 프로 노트북이 899.99달러에 판매되며, 81대의 재고가 있습니다. 그리고 449.99달러의 최신 스마트폰 X는 197대의 재고가 확보되어 있습니다. 추가로 65인치 4K 스마트 TV도 목록에 포함되어 있습니다. 필요한 정보가 더 있으면 말씀해 주세요!\n\n=== HLX Workflow: 스카이쇼핑 상품 목록 조회 ===\nStatus: OK | Duration: 35.3s | Nodes: 5\n\n[OK] login (ACT) 1.8s\n[OK] extract-token (TRANSFORM) 0.0s\n[OK] fetch-products (ACT) 2.1s\n[OK] extract-products (TRANSFORM) 0.0s\n[OK] save-to-file (ACT) 31.4s\n\nResult: {\"path\":\"/tmp/products_list.json\",\"size\":4228,\"action\":\"WRITE\"}\n\n=== HLX Node Details ===\n[OK] login (ACT) 1750ms\n  → {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9090/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM4ODk0LCJleHAiOjE3NzIyMjUyOTR9.0x-0V3WYCYkp-fkFeCi663jWoO93Mjxzgbd4odTRQTqq9ISKrSbLnoXXIxq7Y-I1\\\",\\\"userId\\\":2,\\\"username\\\":\\\"jane_smith\\\",\\\"role\\\":\\\"ADMIN\\\"}\",\"truncated\":false,\"contentLength\":266}\n[OK] extract-token (TRANSFORM)\n  → \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM4ODk0LCJleHAiOjE3NzIyMjUyOTR9.0x-0V3WYCYkp-fkFeCi663jWoO93Mjxzgbd4odTRQTqq9ISKrSbLnoXXIxq7Y-I1\"\n[OK] fetch-products (ACT) 2096ms\n  → {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products?page=0&size=20&sort=price,desc\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":3,\\\"name\\\":\\\"Laptop Pro 15 inch\\\",\\\"description\\\":\\\"Powerful laptop for professionals with a stunning Retina display.\\\",\\\"price\\\":899.9955,\\\"stock\\\":81,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\":\\\"Electronics\\\"},\\\"createdAt\\\":\\\"2025-09-05T13:01:09\\\"},{\\\"id\\\":4,\\\"name\\\":\\\"Smartphone X\\\",\\\"description\\\":\\\"The latest smartphone with an advanced camera system.\\\",\\\"pric...\n[OK] extract-products (TRANSFORM)\n  → [{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerful laptop for professionals with a stunning Retina display.\",\"price\":899.9955,\"stock\":81,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":4,\"name\":\"Smartphone X\",\"description\":\"The latest smartphone with an advanced camera system.\",\"price\":449.9955,\"stock\":197,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":1,\"name\":\"4K Smart TV 65 inch\",\"description\":\"Stunning 4K display ...\n[OK] save-to-file (ACT) 31432ms\n  → {\"path\":\"/tmp/products_list.json\",\"size\":4228,\"action\":\"WRITE\"}\n\n=== Final Variables ===\nlogin_result: {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9090/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM4ODk0LCJleHAiOjE3NzIyMjUyOTR9.0x-0V3WYCYkp-fkFeCi663jWoO93Mjxzgbd4odTRQTqq9ISKrSbLn...\nauth_token: \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM4ODk0LCJleHAiOjE3NzIyMjUyOTR9.0x-0V3WYCYkp-fkFeCi663jWoO93Mjxzgbd4odTRQTqq9ISKrSbLnoXXIxq7Y-I1\"\nproducts_raw: {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products?page=0&size=20&sort=price,desc\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":3,\\\"name\\\":\\\"Laptop Pro 15 inch\\\",\\\"description\\\":\\\"Powerful laptop for professionals with a stunning Retina display.\\\",\\\"price\\\":899.9955,\\\"stock\\\":81,\\\"ca...\nproducts: [{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerful laptop for professionals with a stunning Retina display.\",\"price\":899.9955,\"stock\":81,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":4,\"name\":\"Smartphone X\",\"description\":\"The latest smartphone with an ad...\nfile_result: {\"path\":\"/tmp/products_list.json\",\"size\":4228,\"action\":\"WRITE\"}\n",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-27T05:48:49.993894"
+    },
+    {
+      "role": "ghost",
+      "content": "아 네! 스카이쇼핑 맞습니다! 그럼, 스카이쇼핑에서 상품을 뽑아주실 수 있나요? 근데 포트가 8080이 아니었나요? 확인 좀 부탁드립니다.",
+      "turn": 2,
+      "timestamp": "2026-02-27T05:48:53.708084"
+    },
+    {
+      "role": "wiiiv",
+      "content": "스카이쇼핑의 API는 포트 9090을 사용합니다. 상품 목록을 뽑아서 보여드리겠습니다. 잠시만 기다려 주세요.",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-27T05:48:56.473108"
+    },
+    {
+      "role": "ghost",
+      "content": "아 그렇군요! 스카이쇼핑 API는 포트 9090을 사용하는군요. 감사합니다! 그리고 호스트가 localhost가 아닌가요? 확인 부탁드립니다.",
+      "turn": 3,
+      "timestamp": "2026-02-27T05:48:58.461912"
+    },
+    {
+      "role": "wiiiv",
+      "content": "스카이쇼핑 API의 호스트는 'home.skyepub.net'입니다. localhost가 아닌 이 호스트를 사용하여 연결해야 합니다. 더 궁금한 점이 있으시면 말씀해 주세요!",
+      "turn": 3,
+      "action": "",
+      "timestamp": "2026-02-27T05:49:01.838788"
+    },
+    {
+      "role": "ghost",
+      "content": "아 그렇군요! home.skyepub.net을 사용해야 하는군요. 감사합니다! 그럼 스카이쇼핑에서 상품 목록을 home.skyepub.net:9090로 조회해주세요. 그리고 결과는 C:\\Users\\서인턴\\바탕화면\\report.json에 저장해주세요.",
+      "turn": 4,
+      "timestamp": "2026-02-27T05:49:04.660399"
+    },
+    {
+      "role": "wiiiv",
+      "content": "스카이쇼핑 상품 목록을 조회하여 C:\\Users\\서인턴\\바탕화면\\report.json에 저장하겠습니다.",
+      "turn": 4,
+      "action": "",
+      "timestamp": "2026-02-27T05:49:08.062694"
+    },
+    {
+      "role": "ghost",
+      "content": "아, 윈도우 경로가 아닌 리눅스 경로로 해야 한다고 들어서요. 그럼 결과를 /tmp/intern_report.json에 저장해주실 수 있나요? 부탁드립니다!",
+      "turn": 5,
+      "timestamp": "2026-02-27T05:49:10.464791"
+    },
+    {
+      "role": "wiiiv",
+      "content": "스카이쇼핑에서 제공하는 상품 목록에는 다음과 같은 제품들이 있습니다. 첫째, \"Laptop Pro 15 inch\"는 899.99달러에 판매되며, 재고는 81대입니다. 둘째, \"Smartphone X\"는 449.99달러로, 재고는 197대입니다. 마지막으로, \"4K Smart TV 65 inch\" 역시 판매 중입니다.\n\n=== HLX Workflow: 스카이쇼핑 상품 목록 조회 ===\nStatus: OK | Duration: 36.7s | Nodes: 4\n\n[OK] inject-token-0 (TRANSFORM) 0.0s\n[OK] fetch-products (ACT) 1.8s\n[OK] extract-products (TRANSFORM) 0.0s\n[OK] save-to-file (ACT) 34.9s\n\nResult: {\"path\":\"/tmp/intern_report.json\",\"size\":4228,\"action\":\"WRITE\"}\n\n=== HLX Node Details ===\n[OK] inject-token-0 (TRANSFORM)\n  → \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM4ODk0LCJleHAiOjE3NzIyMjUyOTR9.0x-0V3WYCYkp-fkFeCi663jWoO93Mjxzgbd4odTRQTqq9ISKrSbLnoXXIxq7Y-I1\"\n[OK] fetch-products (ACT) 1768ms\n  → {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products?page=0&size=20&sort=price,desc\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":3,\\\"name\\\":\\\"Laptop Pro 15 inch\\\",\\\"description\\\":\\\"Powerful laptop for professionals with a stunning Retina display.\\\",\\\"price\\\":899.9955,\\\"stock\\\":81,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\":\\\"Electronics\\\"},\\\"createdAt\\\":\\\"2025-09-05T13:01:09\\\"},{\\\"id\\\":4,\\\"name\\\":\\\"Smartphone X\\\",\\\"description\\\":\\\"The latest smartphone with an advanced camera system.\\\",\\\"pric...\n[OK] extract-products (TRANSFORM)\n  → [{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerful laptop for professionals with a stunning Retina display.\",\"price\":899.9955,\"stock\":81,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":4,\"name\":\"Smartphone X\",\"description\":\"The latest smartphone with an advanced camera system.\",\"price\":449.9955,\"stock\":197,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":1,\"name\":\"4K Smart TV 65 inch\",\"description\":\"Stunning 4K display ...\n[OK] save-to-file (ACT) 34903ms\n  → {\"path\":\"/tmp/intern_report.json\",\"size\":4228,\"action\":\"WRITE\"}\n\n=== Final Variables ===\ncached_token_9090: \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTM4ODk0LCJleHAiOjE3NzIyMjUyOTR9.0x-0V3WYCYkp-fkFeCi663jWoO93Mjxzgbd4odTRQTqq9ISKrSbLnoXXIxq7Y-I1\"\nproducts_raw: {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products?page=0&size=20&sort=price,desc\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":3,\\\"name\\\":\\\"Laptop Pro 15 inch\\\",\\\"description\\\":\\\"Powerful laptop for professionals with a stunning Retina display.\\\",\\\"price\\\":899.9955,\\\"stock\\\":81,\\\"ca...\nproducts: [{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerful laptop for professionals with a stunning Retina display.\",\"price\":899.9955,\"stock\":81,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":4,\"name\":\"Smartphone X\",\"description\":\"The latest smartphone with an ad...\nfile_result: {\"path\":\"/tmp/intern_report.json\",\"size\":4228,\"action\":\"WRITE\"}\n",
+      "turn": 5,
+      "action": "",
+      "timestamp": "2026-02-27T05:50:01.436211"
+    },
+    {
+      "role": "ghost",
+      "content": "와, 감사합니다! 정말 도움이 많이 됐습니다. 이 정보들을 이용해서 잘 보고하겠습니다. 수고하셨습니다!",
+      "turn": 6,
+      "timestamp": "2026-02-27T05:50:03.461502"
+    }
+  ]
+}

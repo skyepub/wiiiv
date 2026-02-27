@@ -641,6 +641,12 @@ class ConversationSession(
         val current = draftSpec
         if (current.taskType != null || current.intent != null) return false // 비어있지 않음
         val snapshot = _projectSpecSnapshot ?: return false
+        // 완료된 작업이 있으면 복원하지 않음 — 빈 spec은 작업 완료 후 의도적 초기화
+        // (restoreSpecIfLost는 "원인 불명 소실" 방어용이지, 정상 완료 후 복원용이 아님)
+        if (context.hasAnyExecution()) {
+            println("[SPEC-TRACE] restoreSpecIfLost: skipped — spec is empty but prior execution exists (intentional reset after task completion)")
+            return false
+        }
         // 스냅샷이 있고 현재 spec이 비어있으면 복원
         draftSpec = snapshot
         return true

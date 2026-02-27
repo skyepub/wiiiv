@@ -1,0 +1,43 @@
+{
+  "case_id": "GX-C24",
+  "name": "백과장의 우회적 표현 해석",
+  "timestamp": "2026-02-27T21:55:03.969497",
+  "turns": 2,
+  "elapsed_sec": 77.4,
+  "verdict": "PASS",
+  "reason": "사용자는 '그 쇼핑몰 시스템'이라는 비기술적 표현을 사용하여 Skymall을 언급했고, WIIIV는 이를 Skymall로 정확하게 해석하여 상품 목록을 조회하고 파일로 저장하는 작업을 수행했다. 시스템명을 정확히 말하지 않았지만, 요청한 작업이 성공적으로 완료되었음을 확인했다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "안녕하세요~ 그 쇼핑몰 시스템 있잖아요, 거기 상품 목록 좀 볼 수 있을까요? 부탁드려요!",
+      "turn": 1,
+      "timestamp": "2026-02-27T21:53:45.281289"
+    },
+    {
+      "role": "wiiiv",
+      "content": "Skymall의 상품 목록에는 다음과 같은 제품들이 있습니다. 65인치 4K 스마트 TV가 가격 359.99달러로 판매 중이며, 현재 재고는 52개입니다. 무선 노이즈캔슬링 헤드폰은 157.50달러에, 재고는 119개입니다. 또한 15인치 노트북 프로도 포함되어 있습니다. 필요한 추가 정보가 있으시면 말씀해 주세요!\n\n=== HLX Workflow: Skymall 상품 목록 조회 ===\nStatus: OK | Duration: 52.7s | Nodes: 5\n\n[OK] login (ACT) 2.4s\n[OK] extract-token (TRANSFORM) 0.0s\n[OK] fetch-items (ACT) 2.8s\n[OK] extract-items (TRANSFORM) 0.0s\n[OK] save-to-file (ACT) 47.5s\n\nResult: {\"path\":\"/tmp/skymall_products.json\",\"size\":4035,\"action\":\"WRITE\"}\n\n=== HLX Node Details ===\n[OK] login (ACT) 2422ms\n  → {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9090/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTk2ODQxLCJleHAiOjE3NzIyODMyNDF9.3zJrnV8DECkZFfmp-oyhaGWMCKp5udEb9yIcw5szxWm17O_T5HjaWruq09dSTj-4\\\",\\\"userId\\\":2,\\\"username\\\":\\\"jane_smith\\\",\\\"role\\\":\\\"ADMIN\\\"}\",\"truncated\":false,\"contentLength\":266}\n[OK] extract-token (TRANSFORM)\n  → \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTk2ODQxLCJleHAiOjE3NzIyODMyNDF9.3zJrnV8DECkZFfmp-oyhaGWMCKp5udEb9yIcw5szxWm17O_T5HjaWruq09dSTj-4\"\n[OK] fetch-items (ACT) 2773ms\n  → {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"4K Smart TV 65 inch\\\",\\\"description\\\":\\\"Stunning 4K display with smart features.\\\",\\\"price\\\":359.9955,\\\"stock\\\":52,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\":\\\"Electronics\\\"},\\\"createdAt\\\":\\\"2025-09-05T13:01:09\\\"},{\\\"id\\\":2,\\\"name\\\":\\\"Wireless Noise-Cancelling Headphones\\\",\\\"description\\\":\\\"Immersive sound experience with industry-leading noise cancellation.\\\",\\\"price\\\":157.4955,\\\"s...\n[OK] extract-items (TRANSFORM) 1ms\n  → [{\"id\":1,\"name\":\"4K Smart TV 65 inch\",\"description\":\"Stunning 4K display with smart features.\",\"price\":359.9955,\"stock\":52,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":2,\"name\":\"Wireless Noise-Cancelling Headphones\",\"description\":\"Immersive sound experience with industry-leading noise cancellation.\",\"price\":157.4955,\"stock\":119,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":3,\"name\":\"Laptop Pro 15 inch\",\"description\":\"Powerf...\n[OK] save-to-file (ACT) 47523ms\n  → {\"path\":\"/tmp/skymall_products.json\",\"size\":4035,\"action\":\"WRITE\"}\n\n=== Final Variables ===\nlogin_result: {\"method\":\"POST\",\"url\":\"http://home.skyepub.net:9090/api/auth/login\",\"statusCode\":200,\"body\":\"{\\\"accessToken\\\":\\\"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTk2ODQxLCJleHAiOjE3NzIyODMyNDF9.3zJrnV8DECkZFfmp-oyhaGWMCKp5udEb9yIcw5szxWm17O_T5HjaW...\nauth_token: \"eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJqYW5lX3NtaXRoIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzcyMTk2ODQxLCJleHAiOjE3NzIyODMyNDF9.3zJrnV8DECkZFfmp-oyhaGWMCKp5udEb9yIcw5szxWm17O_T5HjaWruq09dSTj-4\"\nitems_raw: {\"method\":\"GET\",\"url\":\"http://home.skyepub.net:9090/api/products\",\"statusCode\":200,\"body\":\"{\\\"content\\\":[{\\\"id\\\":1,\\\"name\\\":\\\"4K Smart TV 65 inch\\\",\\\"description\\\":\\\"Stunning 4K display with smart features.\\\",\\\"price\\\":359.9955,\\\"stock\\\":52,\\\"category\\\":{\\\"id\\\":1,\\\"name\\\":\\\"Electronics\\\"},\\\"createdA...\nitems: [{\"id\":1,\"name\":\"4K Smart TV 65 inch\",\"description\":\"Stunning 4K display with smart features.\",\"price\":359.9955,\"stock\":52,\"category\":{\"id\":1,\"name\":\"Electronics\"},\"createdAt\":\"2025-09-05T13:01:09\"},{\"id\":2,\"name\":\"Wireless Noise-Cancelling Headphones\",\"description\":\"Immersive sound experience with ...\nfile_result: {\"path\":\"/tmp/skymall_products.json\",\"size\":4035,\"action\":\"WRITE\"}\n",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-27T21:54:54.273609"
+    },
+    {
+      "role": "ghost",
+      "content": "제가 요청한 상품 목록이 파일로 잘 저장됐나요? 적당한 데에 저장해 주셨으면 좋겠어요~!",
+      "turn": 2,
+      "timestamp": "2026-02-27T21:54:56.709502"
+    },
+    {
+      "role": "wiiiv",
+      "content": "네, 요청하신 상품 목록이 `/tmp/skymall_products.json` 파일에 성공적으로 저장되었습니다. 필요하신 다른 정보나 추가 요청이 있으신가요?",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-27T21:54:59.782594"
+    },
+    {
+      "role": "ghost",
+      "content": "아, 네! 정말 감사합니다. 필요한 정보가 제대로 저장됐으니 정말 다행이에요. 수고하셨습니다~ 좋은 하루 보내세요!",
+      "turn": 3,
+      "timestamp": "2026-02-27T21:55:02.046358"
+    }
+  ]
+}

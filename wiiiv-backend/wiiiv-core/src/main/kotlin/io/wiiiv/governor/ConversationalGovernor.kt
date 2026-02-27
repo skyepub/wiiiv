@@ -248,6 +248,21 @@ class ConversationalGovernor(
                 }
             }
             session.updateSpec(filteredUpdates)
+            // ── Post-specUpdates 교정: 파이프라인 전환 시 LLM의 taskType 오분류 보정 ──
+            // 시나리오: PROJECT_CREATE 완료 후 사용자가 "워크플로우 만들어줘" → resetSpec() → taskType null
+            // → LLM이 대화 이력(PROJECT_CREATE 컨텍스트)에 의해 taskType을 PROJECT_CREATE로 설정
+            // → 실제로는 WORKFLOW_CREATE가 올바름
+            // 조건: (1) 이전 실행 이력 존재 (2) LLM이 PROJECT_CREATE로 설정 (3) 사용자 메시지에 워크플로우 생성 의도
+            if (session.context.hasAnyExecution()
+                && session.draftSpec.taskType == TaskType.PROJECT_CREATE) {
+                val lowerMsg = userMessage.lowercase()
+                val hasWorkflowKeyword = lowerMsg.contains("워크플로우") || lowerMsg.contains("workflow")
+                val hasCreationKeyword = listOf("만들", "생성", "구축", "자동화").any { lowerMsg.contains(it) }
+                if (hasWorkflowKeyword && hasCreationKeyword) {
+                    session.updateSpec(mapOf("taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.WORKFLOW_CREATE.name)))
+                    println("[GOVERNOR] Post-specUpdates correction: PROJECT_CREATE → WORKFLOW_CREATE (user requested workflow creation after prior execution)")
+                }
+            }
             // intent가 null인데 taskType이 있으면 기본 intent 자동 설정
             if (session.draftSpec.intent == null && session.draftSpec.taskType != null) {
                 val defaultIntent = when (session.draftSpec.taskType) {
@@ -276,7 +291,7 @@ class ConversationalGovernor(
             governorAction.action in listOf(ActionType.CONFIRM, ActionType.EXECUTE)
                 && session.draftSpec.intent == null
                 && session.draftSpec.taskType == null
-                && session.context.executionHistory.isEmpty() -> {
+                && !session.context.hasAnyExecution() -> {
                 // 2차 복원 시도 (chat 시작 시 1차 복원이 실패했거나, specUpdates 처리 중 소실된 경우)
                 if (session.restoreSpecIfLost()) {
                     println("[GOVERNOR] State Determinism Gate: DraftSpec was empty but RESTORED from snapshot → keeping ${governorAction.action}")
@@ -290,9 +305,10 @@ class ConversationalGovernor(
             // ── 범용 안전장치 2: 대화에서 프로젝트 생성이 감지되면 taskType 강제 설정 ──
             // LLM이 specUpdates를 누락했지만, 대화 내용에 프로젝트 생성 의도가 명확한 경우
             // taskType을 PROJECT_CREATE로 추론 설정한 뒤 ASK 유지
+            // ⚠ hasAnyExecution() 사용: 이전 task 완료 후 새 요청이면 이 gate를 건너뜀
             governorAction.action in listOf(ActionType.CONFIRM, ActionType.EXECUTE)
                 && session.draftSpec.taskType == null
-                && session.context.executionHistory.isEmpty()
+                && !session.context.hasAnyExecution()
                 && isProjectCreationContext(session, userMessage) -> {
                 println("[GOVERNOR] State Determinism Gate: ${governorAction.action} suppressed → ASK (project creation detected but taskType not set)")
                 // 추론으로 taskType 설정
@@ -307,7 +323,7 @@ class ConversationalGovernor(
             // LLM이 복잡한 요청을 EXECUTE로 직행하는 것을 방지
             governorAction.action == ActionType.EXECUTE
                 && session.draftSpec.taskType in listOf(TaskType.API_WORKFLOW, TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
-                && session.context.executionHistory.isEmpty()     // 첫 턴
+                && !session.context.hasAnyExecution()     // 현재 세션에서 첫 실행
                 && isComplexRequest(userMessage) -> {
                 println("[GOVERNOR] State Determinism Gate: EXECUTE suppressed → ASK (complex first-turn request)")
                 governorAction.copy(action = ActionType.ASK)
@@ -318,7 +334,7 @@ class ConversationalGovernor(
             // WorkOrder가 있어도 사용자가 수정 요청이면 CONFIRM으로 되돌림
             governorAction.action == ActionType.EXECUTE
                 && session.draftSpec.taskType == TaskType.PROJECT_CREATE
-                && session.context.executionHistory.isEmpty()
+                && !session.context.hasAnyExecution()
                 && !(isConfirmationMessage(userMessage) && !isModificationRequest(userMessage)
                     && session.draftSpec.workOrderContent != null) -> {
                 val reason = if (session.draftSpec.workOrderContent == null)
@@ -332,7 +348,7 @@ class ConversationalGovernor(
             // ── EXECUTE 억제: WORKFLOW_CREATE에서 작업지시서 미표시 → 무조건 CONFIRM ──
             governorAction.action == ActionType.EXECUTE
                 && session.draftSpec.taskType == TaskType.WORKFLOW_CREATE
-                && session.context.executionHistory.isEmpty()
+                && !session.context.hasAnyExecution()
                 && !(isConfirmationMessage(userMessage) && !isModificationRequest(userMessage)
                     && session.draftSpec.workOrderContent != null) -> {
                 val reason = if (session.draftSpec.workOrderContent == null)
@@ -484,7 +500,7 @@ class ConversationalGovernor(
             governorAction.action in listOf(ActionType.REPLY, ActionType.ASK)
                 && session.draftSpec.taskType in listOf(TaskType.PROJECT_CREATE, TaskType.WORKFLOW_CREATE)
                 && session.draftSpec.workOrderContent != null
-                && session.context.executionHistory.isEmpty()
+                && !session.context.hasAnyExecution()
                 && isModificationRequest(userMessage) -> {
                 println("[GOVERNOR] State Determinism Gate: ${governorAction.action} → CONFIRM (WorkOrder modification requested)")
                 governorAction.copy(action = ActionType.CONFIRM)

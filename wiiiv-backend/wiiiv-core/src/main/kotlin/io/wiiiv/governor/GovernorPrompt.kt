@@ -205,6 +205,19 @@ domain과 techStack만으로는 절대 부족하다. 최소한 다음을 파악�
 | ~조회, ~검색, ~쿼리, ~DB, ~데이터베이스, ~테이블 | DB_QUERY | "상품 목록 조회해줘", "재고 10개 이하 검색" |
 | ~워크플로우 저장/로드/목록/삭제 | WORKFLOW_MANAGE | "워크플로우 저장해줘", "워크플로우 목록 보여줘" (Pre-LLM 자동 처리) |
 
+## 복합 요청 분해 ⚡ 중요!
+
+사용자가 한 문장에 여러 작업을 요청할 때 (예: "시스템 파악하고, 자동화 만들고, 백엔드 개발해줘"):
+- **절대 하나의 taskType으로 축소하지 마라**
+- 조회/분석이 먼저 필요하면 → 먼저 API_WORKFLOW로 시작
+- 순서: 조회(API_WORKFLOW) → 분석(API_WORKFLOW) → 자동화(WORKFLOW_CREATE) → 생성(PROJECT_CREATE)
+- 각 단계가 완료되면 다음 단계를 진행한다
+- "알아서 해", "전부 다 해줘" 같은 포괄적 요청도 위 순서로 분해하라
+
+예시:
+- "skymall 재고 파악하고 자동 발주 시스템 만들어줘" → 1단계: API_WORKFLOW (재고 조회), 2단계: WORKFLOW_CREATE (자동 발주)
+- "현황 분석해서 보고서 만들고 백엔드도 개발해줘" → 1단계: API_WORKFLOW (현황 분석+보고서), 2단계: PROJECT_CREATE (백엔드)
+
 ## 의도 변경 (피봇) 처리
 
 사용자가 진행 중인 작업을 변경하려는 경우:
@@ -701,16 +714,26 @@ RAG 문서는 **API 명세서(스펙)**이지 실시간 데이터가 아니다.
             }
 
             // 최근 완료된 작업의 실행 결과 (LLM이 참조할 수 있도록)
+            // ⚠ 현재 스펙이 비어있으면(새 요청 대기) 요약을 1줄로 축소 — 이전 맥락 오염 방지
             val recentCompleted = taskList
                 .filter { it.status == TaskStatus.COMPLETED && it.context.executionHistory.isNotEmpty() }
                 .sortedByDescending { it.context.executionHistory.lastOrNull()?.timestamp ?: 0 }
                 .take(3)
+            val isNewRequestState = draftSpec.intent == null && draftSpec.taskType == null
             if (recentCompleted.isNotEmpty()) {
                 appendLine("### Recent Completed Tasks")
-                for (task in recentCompleted) {
-                    appendLine("**${task.label}**:")
-                    for (turn in task.context.executionHistory.takeLast(2)) {
-                        appendLine("  ${turn.summary.take(1000)}")
+                if (isNewRequestState) {
+                    // 새 요청 대기 — 이전 작업 요약만 (LLM이 새 요청에 이전 taskType을 적용하지 않도록)
+                    appendLine("⚠ 아래는 **이미 완료된** 작업이다. 새 사용자 요청의 taskType 판단에 영향을 주지 마라.")
+                    for (task in recentCompleted) {
+                        appendLine("- ✅ ${task.label} (완료)")
+                    }
+                } else {
+                    for (task in recentCompleted) {
+                        appendLine("**${task.label}**:")
+                        for (turn in task.context.executionHistory.takeLast(2)) {
+                            appendLine("  ${turn.summary.take(1000)}")
+                        }
                     }
                 }
                 appendLine()
@@ -1016,24 +1039,102 @@ buildCommand/testCommand는 **추가 설치 없이 즉시 실행 가능**해야 
 
 - **WebSecurityConfigurerAdapter는 삭제됨**. 절대 사용하지 마라
 - `antMatchers()` 사용 금지 → `requestMatchers()` 사용
-- **SecurityFilterChain은 반드시 3요소를 모두 포함**해야 한다. 하나라도 빠지면 Security가 동작하지 않는다:
+- **httpBasic() 사용 금지** ⚡: JWT 프로젝트에서 `httpBasic()`은 절대 사용하지 마라. `addFilterBefore()`로 JWT 필터를 등록하라
+- **SecurityFilterChain은 반드시 3요소를 모두 포함**해야 한다:
   1. **보호 정책**: `csrf { it.disable() }` + `sessionManagement { STATELESS }`
   2. **인가 규칙**: `authorizeHttpRequests { permitAll / authenticated }`
-  3. **인증 메커니즘**: `httpBasic()`, `formLogin()`, 또는 커스텀 JWT 필터 중 최소 1개
-  - 인증 메커니즘이 없으면 `anyRequest().authenticated()`가 모든 요청을 거부한다 (permitAll 경로 포함)
-  - JWT 인증 필터를 직접 구현하지 않는 한, 반드시 `httpBasic(Customizer.withDefaults())`를 포함하라
+  3. **인증 메커니즘**: `.addFilterBefore(JwtAuthFilter(jwtProvider), UsernamePasswordAuthenticationFilter::class.java)` ⚡ JWT 필터 등록 필수
   ```kotlin
-  @Bean
-  fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
-      http.csrf { it.disable() }                                          // 1. 보호 정책
-          .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-          .authorizeHttpRequests { auth ->                                 // 2. 인가 규칙
-              auth.requestMatchers("/api/auth/**", "/api/health").permitAll()
-                  .anyRequest().authenticated()
-          }
-          .httpBasic(Customizer.withDefaults())                            // 3. 인증 메커니즘 ⚡ 필수
-      return http.build()
+  @Configuration
+  @EnableWebSecurity
+  class SecurityConfig(private val jwtProvider: JwtProvider) {
+      @Bean
+      fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
+
+      @Bean
+      fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+          http.csrf { it.disable() }
+              .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+              .authorizeHttpRequests { auth ->
+                  auth.requestMatchers("/api/auth/**", "/api/health").permitAll()
+                      .anyRequest().authenticated()
+              }
+              .addFilterBefore(JwtAuthFilter(jwtProvider), UsernamePasswordAuthenticationFilter::class.java)
+          return http.build()
+      }
   }
+  ```
+
+## JWT 인증 구현 필수 규칙 ⚡ (jjwt 0.12.x)
+
+### JwtProvider (필수 — 아래 패턴 정확히 따를 것)
+```kotlin
+@Component
+class JwtProvider(@Value("\${'$'}{jwt.secret}") private val secret: String) {
+    private val validityMs: Long = 3600000
+    private fun signingKey() = Keys.hmacShaKeyFor(secret.toByteArray())
+
+    fun generateToken(email: String, role: String): String {
+        val now = Date()
+        return Jwts.builder()
+            .subject(email).claim("role", role)
+            .issuedAt(now).expiration(Date(now.time + validityMs))
+            .signWith(signingKey()).compact()
+    }
+    fun validateToken(token: String): Boolean = try {
+        Jwts.parser().verifyWith(signingKey()).build().parseSignedClaims(token); true
+    } catch (e: Exception) { false }
+    fun getUsername(token: String): String =
+        Jwts.parser().verifyWith(signingKey()).build().parseSignedClaims(token).payload.subject
+    fun getRole(token: String): String =
+        Jwts.parser().verifyWith(signingKey()).build().parseSignedClaims(token).payload["role"] as String
+}
+```
+- **`.body` 사용 금지** → `.payload` 사용 (jjwt 0.12.x)
+- **`.setSigningKey()` 사용 금지** → `.verifyWith()` 사용
+- **secret key는 `@Value`로 application.yml에서 주입** (하드코딩 금지)
+- application.yml에 `jwt.secret: <32바이트 이상의 문자열>` 필수 설정
+
+### JwtAuthFilter (필수 — SecurityContext 반드시 설정)
+```kotlin
+class JwtAuthFilter(private val jwtProvider: JwtProvider) : OncePerRequestFilter() {
+    override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, chain: FilterChain) {
+        val authHeader = request.getHeader("Authorization")
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            val token = authHeader.substring(7)
+            if (jwtProvider.validateToken(token)) {
+                val username = jwtProvider.getUsername(token)
+                val role = jwtProvider.getRole(token)
+                val auth = UsernamePasswordAuthenticationToken(
+                    username, null, listOf(SimpleGrantedAuthority("ROLE_${'$'}role"))
+                )
+                SecurityContextHolder.getContext().authentication = auth  // ⚡ 이것이 없으면 인증 무효!
+            }
+        }
+        chain.doFilter(request, response)
+    }
+}
+```
+- **JwtProvider를 생성자로 주입** (`JwtProvider()` 직접 생성 금지)
+- **SecurityContextHolder.getContext().authentication = auth 필수** (이것이 없으면 JWT가 있어도 403)
+
+### DataInitializer 비밀번호 규칙 ⚡
+- **PasswordEncoder를 반드시 주입**하여 `passwordEncoder.encode("password")`로 비밀번호를 저장하라
+- 평문 비밀번호 저장 금지: `password = "password"` → `password = passwordEncoder.encode("password")`
+- **중복 데이터 방지**: `if (repository.count() > 0) return` 을 run() 최상단에 추가하라
+
+### 중복 Controller 금지 ⚡
+- **같은 HTTP 메서드 + 경로 매핑이 2개 이상의 Controller에 존재하면 안 된다**
+- 예: AuthController와 RegisterController 모두 `POST /api/auth/register` 매핑 → BeanCreationException
+- /api/auth/** 관련 엔드포인트(login, register)는 **AuthController 하나에만** 정의하라
+
+### @ManyToOne 엔티티 직접 @RequestBody 사용 금지 ⚡
+- `@ManyToOne` 관계가 있는 엔티티를 `@RequestBody`로 직접 받으면 JSON 역직렬화 실패 (non-nullable 필드 누락)
+- **반드시 DTO를 만들어 ID만 받고, Service에서 findById로 조회**하라:
+  ```kotlin
+  // ❌ 틀림: fun create(@RequestBody appointment: Appointment)  // 중첩 Patient/Doctor JSON 필요
+  // ✅ 맞음: fun create(@RequestBody request: AppointmentRequest)  // patientId, doctorId만 전달
+  data class AppointmentRequest(val patientId: Long, val doctorId: Long, val date: LocalDateTime)
   ```
 
 ## Kotlin + JPA 필수 규칙 ⚡
@@ -1138,39 +1239,21 @@ class HealthController {
 - 예: `GET /api/suppliers`, `GET /api/products`, `GET /api/students`
 - Service를 주입하여 실제 DB 조회 결과를 반환
 
-### 4. SecurityConfig (필수)
+### 4. SecurityConfig + JwtProvider + JwtAuthFilter (필수)
 - Spring Security 사용 프로젝트에서 **반드시 생성**해야 한다. 없으면 모든 엔드포인트가 차단됨
-- **반드시 3요소 포함**: 보호 정책 + 인가 규칙 + 인증 메커니즘 (위 Spring Security 규칙 참조)
-```kotlin
-@Configuration
-@EnableWebSecurity
-class SecurityConfig {
-    @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
-        http.csrf { it.disable() }
-            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-            .authorizeHttpRequests { auth ->
-                auth.requestMatchers("/api/auth/**", "/api/health").permitAll()
-                    .anyRequest().authenticated()
-            }
-            .httpBasic(Customizer.withDefaults())
-        return http.build()
-    }
-}
-```
-
-### 필수 동반 파일
-- **JwtProvider**: JWT 생성/검증 유틸리티 (secret key, 만료 시간 설정)
-- **JwtAuthFilter**: OncePerRequestFilter 상속, Authorization 헤더에서 JWT 검증
+- **위 "JWT 인증 구현 필수 규칙" 섹션의 코드를 정확히 따를 것**
+- SecurityConfig에서 `httpBasic()` 사용 금지 → `addFilterBefore(JwtAuthFilter(...))` 사용
+- SecurityConfig에서 `passwordEncoder()` Bean 정의 필수
+- JwtProvider에서 `.payload` 사용 (`.body` 금지)
+- JwtAuthFilter에서 `SecurityContextHolder.getContext().authentication = auth` 필수
 
 ### 생성 우선순위 (토큰 부족 시 이 순서로 컷)
-1. build.gradle.kts + settings.gradle.kts + application.yml
+1. build.gradle.kts + settings.gradle.kts + application.yml (jwt.secret 포함)
 2. Entity + Repository
-3. **SecurityConfig + AuthController + HealthController** ← 여기까지 필수
-4. Service + 도메인 Controller
-5. JwtProvider + JwtAuthFilter
-6. DataInitializer + data.sql
-7. 추가 Controller + DTO + Test
+3. **JwtProvider + JwtAuthFilter + SecurityConfig + AuthController + HealthController** ← 여기까지 필수
+4. Service + 도메인 Controller + Request DTO (ManyToOne용)
+5. DataInitializer (PasswordEncoder 사용)
+6. 추가 Controller + DTO + Test
 
 ## 주의사항
 
@@ -1993,8 +2076,14 @@ isAbort=true일 때는 summary에 실패 사유를 포함하라.
 - **⚡ 반드시 API 스펙에 명시된 실제 계정 정보(username/password)를 사용하라.** 절대 placeholder를 사용하지 마라.
 - API 스펙의 "계정 정보" 테이블에서 username과 password를 찾아 그대로 사용하라.
 - 예: 스펙에 `| admin | admin123 | ADMIN |`이 있으면 → `{"username":"admin","password":"admin123"}`
-⚠ **POST 로그인 act 노드의 description에는 반드시 `with body {"username":"...","password":"..."}`를 포함하라.**
-body가 없는 POST 요청은 HTTP 400 에러를 유발한다. 절대 body를 생략하지 마라.
+★★★ CRITICAL — POST 로그인 act 노드 필수 형식 ★★★
+로그인 act 노드의 description은 **반드시** 아래 형식을 따라야 한다:
+```
+"description": "POST http://host:port/api/auth/login with body {\"username\":\"admin\",\"password\":\"admin123\"}"
+```
+⚠ `with body {...}` 가 **없는** POST 로그인은 HTTP 400/403 에러를 100% 유발한다.
+⚠ body에는 반드시 실제 credentials (API 스펙 또는 위 로그인 정보 테이블의 값)을 넣어라.
+⚠ placeholder (`{username}`, `{password}`) 금지 — 실제 문자열 값만 허용.
 
 ### 2. API 스펙 엔드포인트 정확히 사용
 - API 스펙 문서에 명시된 **정확한 URL**을 사용하라
@@ -2511,6 +2600,7 @@ nodes 순서:
         appendLine("- [ ] transform 노드에 hint 필드가 필요한 경우 지정했는가? (merge, extract, aggregate 등)")
         appendLine("- [ ] 로그인 ACT 노드 뒤에 토큰 추출 TRANSFORM 노드가 있는가?")
         appendLine("- [ ] ACT 노드의 output이 바로 'token' 이름이 아닌 'login_result' 형태인가?")
+        appendLine("- [ ] ★★★ 모든 POST 로그인 act 노드의 description에 `with body {\"username\":\"실제값\",\"password\":\"실제값\"}`가 포함되어 있는가? (누락 시 400/403 에러)")
         appendLine("- [ ] 모든 POST act 노드의 description에 \"with body {...}\" 가 포함되어 있는가?")
         appendLine("- [ ] 각 시스템의 login host:port와 해당 시스템 API 호출의 host:port가 일치하는가? (9091 로그인 → 9091 API, 9090 로그인 → 9090 API)")
         appendLine("- [ ] 모든 ACT 노드의 URL이 API 스펙에 실제 존재하는 엔드포인트인가? 추측한 URL이 없는가?")

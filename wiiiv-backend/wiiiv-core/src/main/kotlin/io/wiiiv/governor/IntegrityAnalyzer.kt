@@ -297,6 +297,15 @@ object IntegrityAnalyzer {
             // Check 37: 양방향 JPA 관계의 Jackson 순환참조 방지 (@JsonIgnore 자동 추가)
             current = runCheck("BidirectionalJsonSafety", current, changes) { checkBidirectionalJsonSafety(it) }
 
+            // Check 38: 중복 엔드포인트 매핑 감지 (같은 HTTP method+path가 2개 이상의 Controller에 있으면 제거)
+            current = runCheck("DuplicateEndpointMapping", current, changes) { checkDuplicateEndpointMapping(it) }
+
+            // Check 39: SecurityConfig httpBasic → JWT 필터 교체
+            current = runCheck("SecurityConfigJwtFix", current, changes) { checkSecurityConfigJwtFix(it) }
+
+            // Check 40: JwtAuthFilter SecurityContext 설정 보장
+            current = runCheck("JwtAuthFilterSecurityContext", current, changes) { checkJwtAuthFilterSecurityContext(it) }
+
             // Check 7: Placeholder 감지 (경고만)
             runWarnCheck("PlaceholderDetection", current, warnings) { checkPlaceholders(it) }
 
@@ -2955,6 +2964,177 @@ object IntegrityAnalyzer {
             } else {
                 file
             }
+        }
+
+        return updatedFiles to changes
+    }
+
+    /**
+     * Check 38: 중복 엔드포인트 매핑 감지.
+     * 같은 HTTP method + path 조합이 2개 이상의 Controller에 존재하면
+     * 두 번째 이후의 Controller 파일을 제거한다.
+     */
+    private fun checkDuplicateEndpointMapping(files: List<GeneratedFile>): Pair<List<GeneratedFile>, List<IntegrityChange>> {
+        val changes = mutableListOf<IntegrityChange>()
+        val controllerFiles = files.filter { it.path.endsWith(".kt") && it.content.contains("@RestController") }
+        if (controllerFiles.size < 2) return files to changes
+
+        // 각 Controller에서 endpoint 매핑을 추출
+        data class Endpoint(val method: String, val path: String)
+        data class ControllerEndpoints(val file: GeneratedFile, val endpoints: List<Endpoint>)
+
+        val baseMappingRegex = Regex("""@RequestMapping\("([^"]+)"\)""")
+        val methodMappingRegex = Regex("""@(Get|Post|Put|Delete|Patch)Mapping(?:\("([^"]*)"\))?""")
+
+        val controllerEndpointsList = controllerFiles.map { file ->
+            val basePath = baseMappingRegex.find(file.content)?.groupValues?.get(1) ?: ""
+            val endpoints = methodMappingRegex.findAll(file.content).map { match ->
+                val httpMethod = match.groupValues[1].uppercase()
+                val subPath = match.groupValues[2]
+                val fullPath = if (subPath.isEmpty()) basePath else "$basePath/$subPath".replace("//", "/")
+                Endpoint(httpMethod, fullPath)
+            }.toList()
+            ControllerEndpoints(file, endpoints)
+        }
+
+        // 중복 검출: 같은 (method, path) 쌍이 2개 이상의 Controller에 존재
+        val endpointOwnership = mutableMapOf<Endpoint, MutableList<GeneratedFile>>()
+        for (ce in controllerEndpointsList) {
+            for (ep in ce.endpoints) {
+                endpointOwnership.getOrPut(ep) { mutableListOf() }.add(ce.file)
+            }
+        }
+
+        val filesToRemove = mutableSetOf<String>()
+        for ((ep, ownerFiles) in endpointOwnership) {
+            if (ownerFiles.size > 1) {
+                // 첫 번째 파일은 유지, 나머지 제거 (AuthController를 우선 유지)
+                val sorted = ownerFiles.sortedBy { if (it.path.contains("AuthController", ignoreCase = true)) 0 else 1 }
+                for (i in 1 until sorted.size) {
+                    filesToRemove.add(sorted[i].path)
+                    changes.add(IntegrityChange(sorted[i].path, "DuplicateEndpointMapping",
+                        "Removed duplicate controller: ${ep.method} ${ep.path} already in ${sorted[0].path}", true))
+                }
+            }
+        }
+
+        val updatedFiles = if (filesToRemove.isNotEmpty()) {
+            files.filter { it.path !in filesToRemove }
+        } else files
+
+        return updatedFiles to changes
+    }
+
+    /**
+     * Check 39: SecurityConfig에서 httpBasic()을 사용하면 JWT 필터로 교체.
+     * JWT 관련 파일(JwtProvider, JwtAuthFilter)이 프로젝트에 존재하는 경우,
+     * SecurityConfig의 httpBasic()을 addFilterBefore()로 교체한다.
+     */
+    private fun checkSecurityConfigJwtFix(files: List<GeneratedFile>): Pair<List<GeneratedFile>, List<IntegrityChange>> {
+        val changes = mutableListOf<IntegrityChange>()
+        val hasJwtProvider = files.any { it.path.contains("JwtProvider", ignoreCase = true) && it.content.contains("class JwtProvider") }
+        val hasJwtFilter = files.any { it.path.contains("JwtAuthFilter", ignoreCase = true) && it.content.contains("class JwtAuthFilter") }
+
+        if (!hasJwtProvider || !hasJwtFilter) return files to changes
+
+        val updatedFiles = files.map { file ->
+            if (file.path.endsWith("SecurityConfig.kt") && file.content.contains("httpBasic")) {
+                var content = file.content
+
+                // httpBasic 줄을 addFilterBefore로 교체
+                content = content.replace(
+                    Regex("""\.httpBasic\([^)]*\)"""),
+                    ".addFilterBefore(JwtAuthFilter(jwtProvider), UsernamePasswordAuthenticationFilter::class.java)"
+                )
+
+                // JwtProvider 주입이 없으면 추가
+                if (!content.contains("jwtProvider") || !content.contains("private val jwtProvider")) {
+                    content = content.replace(
+                        "class SecurityConfig {",
+                        "class SecurityConfig(private val jwtProvider: JwtProvider) {"
+                    ).replace(
+                        "class SecurityConfig(",
+                        "class SecurityConfig(private val jwtProvider: JwtProvider,"
+                    )
+                }
+
+                // 필요한 import 추가
+                val importsToAdd = mutableListOf<String>()
+                if (!content.contains("import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter")) {
+                    importsToAdd.add("import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter")
+                }
+
+                if (importsToAdd.isNotEmpty()) {
+                    val insertPoint = content.indexOf("\nimport ")
+                    if (insertPoint >= 0) {
+                        content = content.substring(0, insertPoint) + "\n" +
+                            importsToAdd.joinToString("\n") + content.substring(insertPoint)
+                    }
+                }
+
+                changes.add(IntegrityChange(file.path, "SecurityConfigJwtFix",
+                    "Replaced httpBasic() with JWT filter (addFilterBefore)", true))
+                GeneratedFile(file.path, content)
+            } else file
+        }
+
+        return updatedFiles to changes
+    }
+
+    /**
+     * Check 40: JwtAuthFilter가 SecurityContext를 설정하지 않으면 경고/수정.
+     * doFilterInternal에서 SecurityContextHolder.getContext().authentication = ... 이 없으면
+     * JWT 인증이 실질적으로 무효화된다.
+     */
+    private fun checkJwtAuthFilterSecurityContext(files: List<GeneratedFile>): Pair<List<GeneratedFile>, List<IntegrityChange>> {
+        val changes = mutableListOf<IntegrityChange>()
+
+        val updatedFiles = files.map { file ->
+            if (file.path.contains("JwtAuthFilter", ignoreCase = true) &&
+                file.content.contains("class JwtAuthFilter") &&
+                file.content.contains("doFilterInternal") &&
+                !file.content.contains("SecurityContextHolder")) {
+
+                var content = file.content
+
+                // "// Set the authentication" 같은 주석이 있다면 실제 코드로 교체
+                val commentPattern = Regex("""(\s*)//\s*[Ss]et\s+the\s+authentication.*""")
+                if (commentPattern.containsMatchIn(content)) {
+                    content = commentPattern.replace(content) { match ->
+                        val indent = match.groupValues[1]
+                        """${indent}val username = jwtProvider.getUsername(token)
+${indent}val role = jwtProvider.getRole(token)
+${indent}val auth = UsernamePasswordAuthenticationToken(
+${indent}    username, null, listOf(SimpleGrantedAuthority("ROLE_${'$'}role"))
+${indent})
+${indent}SecurityContextHolder.getContext().authentication = auth"""
+                    }
+
+                    // 필요한 import 추가
+                    val importsNeeded = listOf(
+                        "org.springframework.security.authentication.UsernamePasswordAuthenticationToken",
+                        "org.springframework.security.core.authority.SimpleGrantedAuthority",
+                        "org.springframework.security.core.context.SecurityContextHolder"
+                    )
+                    for (imp in importsNeeded) {
+                        if (!content.contains("import $imp")) {
+                            val insertPoint = content.indexOf("\nimport ")
+                            if (insertPoint >= 0) {
+                                content = content.substring(0, insertPoint) + "\nimport $imp" + content.substring(insertPoint)
+                            }
+                        }
+                    }
+
+                    changes.add(IntegrityChange(file.path, "JwtAuthFilterSecurityContext",
+                        "Added SecurityContextHolder authentication setting to JwtAuthFilter", true))
+                    GeneratedFile(file.path, content)
+                } else {
+                    // 주석이 없는 경우 경고만
+                    changes.add(IntegrityChange(file.path, "JwtAuthFilterSecurityContext",
+                        "WARNING: JwtAuthFilter does not set SecurityContextHolder - JWT auth may not work", false))
+                    file
+                }
+            } else file
         }
 
         return updatedFiles to changes

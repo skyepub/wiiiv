@@ -294,6 +294,9 @@ object IntegrityAnalyzer {
             // Check 35: 빈 함수 body에 TODO() 삽입 (컴파일 에러 방지)
             current = runCheck("EmptyFunctionBody", current, changes) { checkEmptyFunctionBody(it) }
 
+            // Check 37: 양방향 JPA 관계의 Jackson 순환참조 방지 (@JsonIgnore 자동 추가)
+            current = runCheck("BidirectionalJsonSafety", current, changes) { checkBidirectionalJsonSafety(it) }
+
             // Check 7: Placeholder 감지 (경고만)
             runWarnCheck("PlaceholderDetection", current, warnings) { checkPlaceholders(it) }
 
@@ -2899,6 +2902,59 @@ object IntegrityAnalyzer {
             }
 
             GeneratedFile(file.path, newLines.joinToString("\n"))
+        }
+
+        return updatedFiles to changes
+    }
+
+    // ── Check 37: 양방향 JPA 관계의 Jackson 순환참조 방지 ──
+
+    private fun checkBidirectionalJsonSafety(files: List<GeneratedFile>): Pair<List<GeneratedFile>, List<IntegrityChange>> {
+        val changes = mutableListOf<IntegrityChange>()
+
+        // Entity 파일에서 @OneToMany 컬렉션을 찾아 @JsonIgnore가 없으면 추가
+        val updatedFiles = files.map { file ->
+            if (!file.path.endsWith(".kt")) return@map file
+            if (!file.content.contains("@OneToMany")) return@map file
+
+            var content = file.content
+            var modified = false
+
+            // @OneToMany가 있는데 @JsonIgnore가 그 위에 없는 경우
+            val oneToManyPattern = Regex("""(?<!\@JsonIgnore\n\s*)(\s*)(@OneToMany[^\n]*\n(?:\s*@[^\n]*\n)*\s*(?:var|val)\s+\w+\s*:\s*(?:MutableList|List)<)""")
+            val matches = oneToManyPattern.findAll(content).toList()
+
+            for (match in matches.reversed()) {
+                val indent = match.groupValues[1]
+                val fieldDecl = match.groupValues[2]
+
+                // 이미 @JsonIgnore가 있는지 체크 (match 직전의 라인들)
+                val beforeMatch = content.substring(0, match.range.first)
+                val lastLines = beforeMatch.trimEnd().lines().takeLast(3).joinToString("\n")
+                if (lastLines.contains("@JsonIgnore") || lastLines.contains("@JsonBackReference")) continue
+
+                // @JsonIgnore 추가
+                content = content.replaceRange(match.range, "${indent}@JsonIgnore\n$fieldDecl")
+                modified = true
+            }
+
+            if (modified) {
+                // import 추가
+                if (!content.contains("import com.fasterxml.jackson.annotation.JsonIgnore")) {
+                    val packageLine = content.lines().indexOfFirst { it.trimStart().startsWith("package ") }
+                    if (packageLine >= 0) {
+                        val lines = content.lines().toMutableList()
+                        lines.add(packageLine + 1, "")
+                        lines.add(packageLine + 2, "import com.fasterxml.jackson.annotation.JsonIgnore")
+                        content = lines.joinToString("\n")
+                    }
+                }
+                changes.add(IntegrityChange(file.path, "BidirectionalJsonSafety",
+                    "Added @JsonIgnore to @OneToMany collections to prevent Jackson circular reference", true))
+                GeneratedFile(file.path, content)
+            } else {
+                file
+            }
         }
 
         return updatedFiles to changes

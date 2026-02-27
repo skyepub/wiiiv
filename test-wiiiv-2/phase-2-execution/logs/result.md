@@ -1,112 +1,308 @@
-# Phase 2 결과 — 기본 실행
+# Phase 2: Basic Execution — 자동화 결과
 
-> 실행일: 2026-02-21
-> 서버: localhost:8235 (LLM: gpt-4o-mini, Audit: H2 file mode)
+> 실행 시각: 2026-02-26 02:16:10
 
-## 총괄 (P2-001 수정 후 최종)
+## 요약
 
-| 결과 | 수 |
-|------|---|
-| **PASS** | 8 |
-| **SOFT FAIL** | 1 |
-| **HARD FAIL** | 0 |
-| **N/A** | 1 |
+| PASS | SOFT FAIL | HARD FAIL | AUDIT FAIL | TIMEOUT | ERROR | SKIP |
+|------|-----------|-----------|------------|---------|-------|------|
+| 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 
----
+## 케이스별 결과
 
-## Case 1: FILE_READ — **PASS**
-- EXECUTE ✅, "original content" 반환 ✅
-- Audit: DIRECT_BLUEPRINT, COMPLETED, taskType=FILE_READ ✅
+### [P2-C01] FILE_READ existing file — PASS
+- 소요시간: 3.1s
 
-## Case 2: FILE_WRITE — **PASS**
-- EXECUTE ✅, 파일 생성 확인 ✅
-- Audit: DIRECT_BLUEPRINT, COMPLETED, taskType=FILE_WRITE ✅
+#### Turn 1 — [EXECUTE] PASS (3.1s)
 
-## Case 3: FILE_WRITE 멀티라인 — **PASS**
-- EXECUTE ✅, 3줄 + 한글 + 특수문자 정상 저장 ✅
-- Audit: DIRECT_BLUEPRINT, COMPLETED ✅
-- **참고**: JSON 특수문자 이스케이프 필요 (첫 시도 실패 후 jq로 해결)
+**User:**
+```
+/tmp/wiiiv-test-v2/read-target.txt 파일 내용 보여줘
+```
 
-## Case 4: FILE_DELETE — **SOFT FAIL**
-- **1차 실행**: EXECUTE → 바로 삭제 (CONFIRM 없이)
-- **2차 실행 (재시작 후)**: CANCEL — DACS 거부
-  - "보안상 이 요청을 실행할 수 없습니다"
-- **이슈**: 삭제에 대한 동작이 일관적이지 않음 (세션에 따라 다름)
-- DACS가 FILE_DELETE도 차단하는 경우 발생
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
 
-## Case 5: COMMAND echo — **PASS** (P2-001 수정 후)
-- ~~**CANCEL** — DACS 거부~~ → **수정 후 EXECUTE ✅**
-- stdout: `hello wiiiv\n` ✅
-- Audit: DIRECT_BLUEPRINT, COMPLETED, taskType=COMMAND ✅
-- **수정 내용**: DraftSpec.isRisky() 안전 명령 허용 + CommandExecutor `/bin/sh -c` 실행
+성공: 1개 step
 
-## Case 6: COMMAND ls — **PASS** (P2-001 수정 후)
-- ~~**CANCEL** — DACS 거부~~ → **수정 후 EXECUTE ✅**
-- stdout: 디렉토리 내용 정상 출력 ✅
-- Audit: DIRECT_BLUEPRINT, COMPLETED, taskType=COMMAND ✅
+[/tmp/wiiiv-test-v2/read-target.txt]
+original content
 
-## Case 7: FILE_READ 실패 — **PASS**
-- EXECUTE 시도 → isSuccess=false ✅
-- "실행 중 문제 발생, 성공: 0개, 실패: 1개"
-- Audit: DIRECT_BLUEPRINT, **FAILED** ✅ — 실패도 감사 기록됨!
+```
 
-## Case 8: COMMAND 실패 — **PASS**
-- REPLY "인식할 수 없는 명령어입니다" ✅
-- Governor가 아예 실행 시도하지 않고 거부 (합리적 판단)
 
-## Case 9: FILE_WRITE + FILE_READ 연속 — **PASS**
-- Turn 1: EXECUTE (FILE_WRITE) ✅
-- Turn 2: EXECUTE (FILE_READ) → "audit test done" 확인 ✅
-- 세션 컨텍스트: "방금 쓴 파일" → 정확한 경로 해석 ✅
-- Audit: 2개 레코드 (FILE_WRITE + FILE_READ) ✅
-
-## Case 10: Audit 종합 — **PASS**
-- DIRECT_BLUEPRINT 레코드: **15개** (P2-001 수정 전/후 포함) ✅
-- COMPLETED/FAILED 모두 기록 ✅
-- 모든 EXECUTE 턴에 1:1 대응 Audit 레코드 ✅
-- CANCEL/REPLY 턴에는 Audit 없음 ✅ (실행되지 않았으므로 정상)
-- Audit 필드 확인:
-  - executionPath: DIRECT_BLUEPRINT ✅
-  - userId: dev-user ✅
-  - role: OPERATOR ✅
-  - intent: 자연어 요약 ✅
-  - governanceApproved: true ✅
+#### Audit Check
+- Audit check error: 'str' object has no attribute 'get'
 
 ---
 
-## 수정 완료된 이슈
+### [P2-C02] FILE_WRITE new file — PASS
+- 소요시간: 3.8s
 
-### Issue P2-001: DACS가 안전한 COMMAND를 과도하게 차단 — **RESOLVED**
-- **수정 1**: `DraftSpec.isRisky()` — COMMAND는 `isDangerousCommand()` 체크
-  - 안전 명령 (echo, ls, cat, pwd 등): isRisky=false → DACS 바이패스
-  - 위험 명령 (rm, kill, mkfs 등): isRisky=true → DACS 평가
-- **수정 2**: `CommandExecutor.executeCommand()` — `/bin/sh -c` 셸 실행
-  - LLM이 `command: "echo hello wiiiv"` 전체를 하나로 생성해도 정상 동작
-  - 파이프(`|`), 리디렉션(`>`), 변수(`$`) 등 셸 기능 지원
-- **수정 3**: `CommandExecutor` — `workingDir` 빈 문자열 처리
-  - `step.workingDir?.takeIf { it.isNotBlank() }` 추가
-- **검증**: echo ✅, ls ✅, rm -rf → CANCEL ✅
+#### Turn 1 — [EXECUTE] PASS (3.8s)
 
-### Issue P2-002: FILE_DELETE 동작 비일관성 — **OPEN** (MEDIUM)
-- **Case**: 4
-- **증상**: 첫 실행에서는 바로 EXECUTE, 재시작 후에는 CANCEL
-- **원인 추정**: LLM 판단 + DACS 판단의 비결정성
-- **영향**: 사용자 경험 불일관
+**User:**
+```
+/tmp/wiiiv-test-v2/new-file.txt에 '테스트 데이터 입니다' 라고 써줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+```
+
 
 ---
 
-## 핫픽스 목록
+### [P2-C03] FILE_WRITE multiline Korean — PASS
+- 소요시간: 4.2s
 
-1. **H2 드라이버 로드** — WiiivRegistry.kt에 `Class.forName("org.h2.Driver")` 추가
-2. **DraftSpec.isRisky()** — COMMAND 안전 명령 화이트리스트 (`isDangerousCommand()`)
-3. **CommandExecutor** — `/bin/sh -c` 셸 실행 + workingDir 빈 문자열 처리
+#### Turn 1 — [EXECUTE] PASS (4.2s)
 
-## 변경 파일 요약
+**User:**
+```
+/tmp/wiiiv-test-v2/multiline.txt에 다음 내용을 써줘:
+첫째 줄: 가나다
+둘째 줄: ABC 123
+셋째 줄: !@#$%^&*()
+```
 
-| 파일 | 변경 내용 |
-|------|-----------|
-| `DraftSpec.kt` | isRisky() COMMAND 분기 + isDangerousCommand() 추가 |
-| `CommandExecutor.kt` | `/bin/sh -c` 셸 실행 + workingDir 빈문자열 처리 |
-| `WiiivRegistry.kt` | H2 JDBC 드라이버 명시 로드 |
-| `AuditRecord.kt` | DIRECT_BLUEPRINT enum + fromBlueprintResult() |
-| `ConversationalGovernor.kt` | 3개 Audit 훅 삽입 |
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+```
+
+
+---
+
+### [P2-C04] FILE_DELETE with confirm — PASS
+- 소요시간: 10.5s
+
+#### Turn 1 — [ASK] PASS (8.7s)
+
+**User:**
+```
+/tmp/wiiiv-test-v2/new-file.txt 삭제해줘
+```
+
+**wiiiv:** [ASK]
+```
+추가 확인이 필요합니다: Deleting files in /tmp could disrupt other processes if the file is in use or if there are dependencies.
+```
+
+
+#### Turn 2 — [EXECUTE] PASS (1.8s)
+
+**User:**
+```
+응 삭제해
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+```
+
+
+---
+
+### [P2-C05] COMMAND echo — PASS
+- 소요시간: 2.8s
+
+#### Turn 1 — [EXECUTE] PASS (2.8s)
+
+**User:**
+```
+echo 'hello wiiiv' 실행해줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+[stdout]
+hello wiiiv
+
+
+```
+
+
+---
+
+### [P2-C06] COMMAND ls — PASS
+- 소요시간: 2.7s
+
+#### Turn 1 — [EXECUTE] PASS (2.7s)
+
+**User:**
+```
+ls -la /tmp/wiiiv-test-v2 실행해서 결과 보여줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+[stdout]
+total 176
+drwxr-xr-x 12 skytree skytree  4096 Feb 26 02:15 .
+drwxrwxrwt 24 root    root    36864 Feb 26 02:14 ..
+-rw-r--r--  1 skytree skytree   763 Feb 25 23:57 alert_summary.py
+drwxr-xr-x  4 skytree skytree  4096 Feb 25 23:51 auto_reorder.py
+drwxr-xr-x  7 skytree skytree  4096 Feb 25 22:39 build-test
+drwxr-xr-x  7 skytree skytree  4096 Feb 25 23:53 calc-project
+-rw-r--r--  1 skytree skytree   634 Feb 25 23:40 cat-list.txt
+-rw-r--r--  1 skytree skytree   670 Feb 25 23:34 categories.json
+-rw-r--r--  1 skytree skytree    15 Feb 25 23:27 combo-test.txt
+-rw-r--r--  1 skytree skytree   499 Feb 25 23:46 critical-items.json
+drwxr-xr-x  4 skytree skytree  4096 Feb 25 22:10 critical_alerts.py
+-rw-r--r--  1 skytree skytree    22 Feb 25 23:46 hello.py
+drwxr-xr-x  4 skytree skytree  4096 Feb 25 22:37 ktor-hello
+-rw-r--r--  1 skytree skytree   663 Feb 25 23:48 low_stock_monitor.py
+-rw-r--r--  1 skytree skytree  1854 Feb 25 23:46 mathlib.py
+-rw-r--r--  1 skytree skytree    64 Feb 26 02:15 multiline.txt
+-rw-r--r--  1 skytree skytree   351 Feb 26 01:36 po-status-report.txt
+-rw-r--r--  1 skytree skytree   860 Feb 25 22:09 po_dashboard.py
+-rw-r--r--  1 skytree skytree  4025 Feb 25 23:43 products.json
+-rw-r--r--  1 skytree skytree    16 Feb 26 02:15 read-target.txt
+-rw-r--r--  1 skytree skytree    14 Feb 26 01:38 reorder-report.csv
+drwxr-xr-x  3 skytree skytree  4096 Feb 25 21:57 reports
+-rw-r--r--  1 skytree skytree    96 Feb 26 01:13 risk-analysis.csv
+drwxr-xr-x  5 skytree skytree  4096 Feb 25 22:40 risk_report.py
+-rw-r--r--  1 skytree skytree   842 Feb 25 19:08 sales_chart.py
+-rw-r--r--  1 skytree skytree    18 Feb 26 00:28 session-a-secret.txt
+-rw-r--r--  1 skytree skytree   721 Feb 25 23:57 skymall_report.py
+drwxr-xr-x  6 skytree skytree  4096 Feb 25 22:35 skystock-cli
+drwxr-xr-x  4 skytree skytree  4096 Feb 25 19:11 stock_supplier_map.py
+-rw-r--r--  1 skytree skytree  2679 Feb 25 23:35 supplier-perf.json
+-rw-r--r--  1 skytree skytree  2289 Feb 25 23:45 supplier-performance.txt
+
+
+```
+
+
+---
+
+### [P2-C07] FILE_READ nonexistent — PASS
+- 소요시간: 3.5s
+
+#### Turn 1 — [EXECUTE] PASS (3.5s)
+
+**User:**
+```
+/tmp/wiiiv-test-v2/nonexistent-file-xyz.txt 읽어줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 중 문제 발생
+
+성공: 0개, 실패: 1개
+
+```
+
+
+---
+
+### [P2-C08] COMMAND nonexistent — PASS
+- 소요시간: 5.1s
+
+#### Turn 1 — [EXECUTE] PASS (5.1s)
+
+**User:**
+```
+nonexistent_command_xyz 실행해줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 중 문제 발생
+
+성공: 0개, 실패: 1개
+
+```
+
+
+---
+
+### [P2-C09] Composite FILE_WRITE + FILE_READ — PASS
+- 소요시간: 8.1s
+
+#### Turn 1 — [EXECUTE] PASS (4.9s)
+
+**User:**
+```
+/tmp/wiiiv-test-v2/combo-test.txt에 'step one done' 이라고 써줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+```
+
+
+#### Turn 2 — [EXECUTE] PASS (3.2s)
+
+**User:**
+```
+방금 쓴 파일 내용 확인해줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+[/tmp/wiiiv-test-v2/combo-test.txt]
+'step one done'
+
+```
+
+
+---
+
+### [P2-C10] Audit comprehensive check — PASS
+- 소요시간: 2.5s
+
+#### Turn 1 — [EXECUTE] PASS (2.5s)
+
+**User:**
+```
+echo 'audit check' 실행해줘
+```
+
+**wiiiv:** [EXECUTE]
+```
+실행 완료!
+
+성공: 1개 step
+
+[stdout]
+audit check
+
+
+```
+
+
+#### Audit Check
+- Audit check error: 'str' object has no attribute 'get'
+
+---

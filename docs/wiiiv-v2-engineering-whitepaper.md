@@ -117,7 +117,7 @@ wiiiv는 다음 원칙을 절대 규칙으로 따릅니다:
 | **Executor** | 실행만 | 판단, 해석, 흐름 제어 |
 | **Runner** | 집계, 오케스트레이션 | 해석, 의미 판단 |
 
-### 2.3 DACS (Dynamic Agent Consensus System)
+### 2.3 DACS (Divergent Adversarial Consensus System)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

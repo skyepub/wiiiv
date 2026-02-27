@@ -34,7 +34,7 @@
 
 ## 1. DACS v2의 정의
 
-**DACS (Dynamic Agent Consensus System) v2**는 wiiiv에서 사용되는 **다중 페르소나 합의 엔진**이다.
+**DACS (Divergent Adversarial Consensus System) v2**는 wiiiv에서 사용되는 **다중 페르소나 합의 엔진**이다.
 
 DACS v2의 유일한 목적은 다음 질문에 답하는 것이다:
 

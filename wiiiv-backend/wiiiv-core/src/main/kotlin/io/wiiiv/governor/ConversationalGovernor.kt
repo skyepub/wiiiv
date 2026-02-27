@@ -253,14 +253,46 @@ class ConversationalGovernor(
             // → LLM이 대화 이력(PROJECT_CREATE 컨텍스트)에 의해 taskType을 PROJECT_CREATE로 설정
             // → 실제로는 WORKFLOW_CREATE가 올바름
             // 조건: (1) 이전 실행 이력 존재 (2) LLM이 PROJECT_CREATE로 설정 (3) 사용자 메시지에 워크플로우 생성 의도
-            if (session.context.hasAnyExecution()
-                && session.draftSpec.taskType == TaskType.PROJECT_CREATE) {
+            if (session.context.hasAnyExecution()) {
                 val lowerMsg = userMessage.lowercase()
-                val hasWorkflowKeyword = lowerMsg.contains("워크플로우") || lowerMsg.contains("workflow")
-                val hasCreationKeyword = listOf("만들", "생성", "구축", "자동화").any { lowerMsg.contains(it) }
-                if (hasWorkflowKeyword && hasCreationKeyword) {
-                    session.updateSpec(mapOf("taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.WORKFLOW_CREATE.name)))
-                    println("[GOVERNOR] Post-specUpdates correction: PROJECT_CREATE → WORKFLOW_CREATE (user requested workflow creation after prior execution)")
+                // PROJECT_CREATE → WORKFLOW_CREATE: 사용자가 "워크플로우 만들어줘" 의도
+                if (session.draftSpec.taskType == TaskType.PROJECT_CREATE) {
+                    val hasWorkflowKeyword = lowerMsg.contains("워크플로우") || lowerMsg.contains("workflow")
+                    val hasCreationKeyword = listOf("만들", "생성", "구축", "자동화").any { lowerMsg.contains(it) }
+                    if (hasWorkflowKeyword && hasCreationKeyword) {
+                        session.updateSpec(mapOf("taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.WORKFLOW_CREATE.name)))
+                        println("[GOVERNOR] Post-specUpdates correction: PROJECT_CREATE → WORKFLOW_CREATE (user requested workflow creation after prior execution)")
+                    }
+                }
+                // WORKFLOW_CREATE → PROJECT_CREATE: 사용자가 "백엔드/프로젝트/서버 만들어줘" 의도
+                // ⚠ "워크플로우 결과를 관리하는 백엔드를 만들어" 패턴에서 "워크플로우"는 참조용이므로
+                //    백엔드/프로젝트 + 생성 키워드가 있으면 PROJECT_CREATE로 교정
+                if (session.draftSpec.taskType == TaskType.WORKFLOW_CREATE) {
+                    val hasProjectKeyword = listOf("백엔드", "프로젝트", "서버", "앱", "어플", "웹사이트", "사이트", "프론트엔드").any { lowerMsg.contains(it) }
+                    val hasCreationKeyword = listOf("만들", "생성", "구축", "개발").any { lowerMsg.contains(it) }
+                    if (hasProjectKeyword && hasCreationKeyword) {
+                        session.updateSpec(mapOf("taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.PROJECT_CREATE.name)))
+                        println("[GOVERNOR] Post-specUpdates correction: WORKFLOW_CREATE → PROJECT_CREATE (user requested project creation with project keyword)")
+                    }
+                }
+            }
+            // FILE_READ 강제 교정: 명시적 파일 경로 + 읽기 의도인데 LLM이 다른 taskType을 설정한 경우
+            // Turn 3-4에서 "파일 읽어줘"가 "워크플로우 이미 저장됨"으로 오분류되는 문제 해결
+            if (session.draftSpec.taskType != null
+                && session.draftSpec.taskType != TaskType.FILE_READ
+                && session.draftSpec.taskType != TaskType.FILE_WRITE) {
+                val filePathPattern = Regex("""[/~][\w./\-]+\.\w+|[A-Z]:\\[\w\\.\-]+""")
+                val lowerMsg = userMessage.lowercase()
+                val hasExplicitPath = filePathPattern.containsMatchIn(userMessage)
+                val hasReadIntent = listOf("읽어", "열어", "내용을 확인", "파일을 읽", "파일 읽", "파일의 내용").any { lowerMsg.contains(it) }
+                val hasWriteIntent = listOf("저장해", "써줘", "넣어", "기록해", "만들어").any { lowerMsg.contains(it) }
+                if (hasExplicitPath && hasReadIntent && !hasWriteIntent) {
+                    val filePath = filePathPattern.find(userMessage)?.value
+                    session.updateSpec(mapOf(
+                        "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.FILE_READ.name),
+                        "targetPath" to kotlinx.serialization.json.JsonPrimitive(filePath ?: "")
+                    ))
+                    println("[GOVERNOR] Post-specUpdates FILE_READ correction: explicit path ($filePath) + read intent, overriding ${session.draftSpec.taskType}")
                 }
             }
             // intent가 null인데 taskType이 있으면 기본 intent 자동 설정
@@ -316,6 +348,30 @@ class ConversationalGovernor(
                     "intent" to kotlinx.serialization.json.JsonPrimitive("프로젝트 생성"),
                     "taskType" to kotlinx.serialization.json.JsonPrimitive("PROJECT_CREATE")
                 ))
+                governorAction.copy(action = ActionType.ASK)
+            }
+
+            // ── 복합 요청 교정: PROJECT_CREATE인데 조회/분석 의도 포함 → API_WORKFLOW로 교정 ──
+            // "시스템 파악하고 자동화 만들어" 같은 복합 요청을 PROJECT_CREATE 하나로 축소하는 것 방지
+            // 조회/분석이 먼저 필요하면 API_WORKFLOW로 시작해야 한다
+            governorAction.action in listOf(ActionType.EXECUTE, ActionType.CONFIRM, ActionType.ASK)
+                && session.draftSpec.taskType == TaskType.PROJECT_CREATE
+                && !session.context.hasAnyExecution()
+                && isCompositeRequestWithInvestigation(userMessage) -> {
+                println("[GOVERNOR] State Determinism Gate: PROJECT_CREATE → API_WORKFLOW (composite request with investigation intent)")
+                // domain 자동 추출 — 사용자 메시지에서 시스템명/키워드 추출
+                val autoUpdates = mutableMapOf<String, kotlinx.serialization.json.JsonElement>(
+                    "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.API_WORKFLOW.name)
+                )
+                val lower = userMessage.lowercase()
+                val domainParts = mutableListOf<String>()
+                if (lower.contains("쇼핑몰") || lower.contains("skymall")) domainParts.add("skymall")
+                if (lower.contains("재고") || lower.contains("skystock")) domainParts.add("skystock")
+                if (domainParts.isNotEmpty()) {
+                    autoUpdates["domain"] = kotlinx.serialization.json.JsonPrimitive(domainParts.joinToString("+"))
+                    autoUpdates["intent"] = kotlinx.serialization.json.JsonPrimitive(userMessage.take(100))
+                }
+                session.updateSpec(autoUpdates)
                 governorAction.copy(action = ActionType.ASK)
             }
 
@@ -924,19 +980,39 @@ class ConversationalGovernor(
         }
 
         // 1.5. 수정 요청 복원: 이전 완료 task의 taskType/target 복원
+        // ⚠ FILE_READ 보호: 파일 경로가 명시적이면 이전 taskType 복원 안 함 — FILE_READ로 직행
         if (hasPostExecContext && !draftSpec.requiresExecution()) {
-            val lastCompletedTask = session.context.tasks.values
-                .filter { it.context.executionHistory.isNotEmpty() }
-                .maxByOrNull { it.context.executionHistory.last().turnIndex }
-            val prevSpec = lastCompletedTask?.draftSpec
-            if (prevSpec != null && prevSpec.taskType != null) {
-                println("[GOVERNOR] Post-execution restore: taskType=${prevSpec.taskType}, targetPath=${prevSpec.targetPath}")
+            val filePathPattern = Regex("""[/~][\w./\-]+\.\w+|[A-Z]:\\[\w\\.\-]+""")
+            val hasExplicitFilePath = filePathPattern.containsMatchIn(lastUserMsg)
+            val hasFileReadIntent = listOf("읽어", "보여", "열어", "파일", "내용", "확인", "저장했", "있는지").any { lastUserMsg.contains(it) }
+            if (hasExplicitFilePath && hasFileReadIntent) {
+                // 파일 경로가 명시적 → FILE_READ로 직행, 이전 taskType 복원 안 함
+                val filePath = filePathPattern.find(lastUserMsg)?.value
+                println("[GOVERNOR] Post-execution FILE_READ guard: explicit file path detected ($filePath), skipping previous taskType restore")
                 draftSpec = draftSpec.copy(
-                    taskType = prevSpec.taskType,
-                    targetPath = draftSpec.targetPath ?: prevSpec.targetPath,
+                    taskType = TaskType.FILE_READ,
+                    targetPath = filePath ?: draftSpec.targetPath,
                     intent = draftSpec.intent ?: lastUserMsg
                 )
                 session.draftSpec = draftSpec
+            } else {
+                val lastCompletedTask = session.context.tasks.values
+                    .filter { it.context.executionHistory.isNotEmpty() }
+                    .maxByOrNull { it.context.executionHistory.last().turnIndex }
+                val prevSpec = lastCompletedTask?.draftSpec
+                if (prevSpec != null && prevSpec.taskType != null) {
+                    println("[GOVERNOR] Post-execution restore: taskType=${prevSpec.taskType}, targetPath=${prevSpec.targetPath}, domain=${prevSpec.domain}")
+                    draftSpec = draftSpec.copy(
+                        taskType = prevSpec.taskType,
+                        targetPath = draftSpec.targetPath ?: prevSpec.targetPath,
+                        intent = draftSpec.intent ?: lastUserMsg,
+                        // 수정 요청 시 이전 작업의 핵심 슬롯 복원 — domain/techStack/scale
+                        domain = draftSpec.domain ?: prevSpec.domain,
+                        techStack = draftSpec.techStack ?: prevSpec.techStack,
+                        scale = draftSpec.scale ?: prevSpec.scale
+                    )
+                    session.draftSpec = draftSpec
+                }
             }
         }
 
@@ -1284,9 +1360,7 @@ class ConversationalGovernor(
                 } catch (e: Exception) {
                     println("[AUDIT] Failed to record DIRECT_BLUEPRINT: ${e.message}")
                 }
-                session.resetSpec()
-                session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-                session.context.activeTaskId = null
+                session.completeCurrentTask()
                 return ConversationResponse(
                     action = ActionType.EXECUTE,
                     message = summary,
@@ -1335,9 +1409,7 @@ class ConversationalGovernor(
             } catch (e: Exception) {
                 println("[AUDIT] Failed to record DIRECT_BLUEPRINT: ${e.message}")
             }
-            session.resetSpec()
-            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-            session.context.activeTaskId = null
+            session.completeCurrentTask()
 
             return ConversationResponse(
                 action = ActionType.EXECUTE,
@@ -1385,10 +1457,8 @@ class ConversationalGovernor(
             println("[AUDIT] Failed to record DIRECT_BLUEPRINT: ${e.message}")
         }
 
-        // 작업 완료: Spec 초기화 + 작업 상태 전이
-        session.resetSpec()
-        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-        session.context.activeTaskId = null
+        // 작업 완료: Spec 초기화 + 작업 상태 전이 + 경계 마커
+        session.completeCurrentTask()
 
         return ConversationResponse(
             action = ActionType.EXECUTE,
@@ -1480,9 +1550,7 @@ class ConversationalGovernor(
             val summary = decision.summary.ifBlank { "API 워크플로우 완료" } + "\n\n" +
                 formatTurnExecutionSummary(session.context.executionHistory)
             session.integrateResult(null, null, "완료: ${decision.summary}")
-            session.resetSpec()
-            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-            session.context.activeTaskId = null
+            session.completeCurrentTask()
             return ConversationResponse(
                 action = ActionType.EXECUTE,
                 message = summary,
@@ -1494,9 +1562,7 @@ class ConversationalGovernor(
         if (decision.isAbort) {
             val summary = "API 워크플로우 중단: ${decision.summary}\n\n" +
                 formatTurnExecutionSummary(session.context.executionHistory)
-            session.resetSpec()
-            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-            session.context.activeTaskId = null
+            session.completeCurrentTask()
             return ConversationResponse(
                 action = ActionType.CANCEL,
                 message = summary,
@@ -1529,9 +1595,7 @@ class ConversationalGovernor(
             val summary = decision.summary.ifBlank { "API 워크플로우 완료 (호출 없음)" } + "\n\n" +
                 formatTurnExecutionSummary(session.context.executionHistory)
             session.integrateResult(null, null, "완료 (호출 없음)")
-            session.resetSpec()
-            session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-            session.context.activeTaskId = null
+            session.completeCurrentTask()
             return ConversationResponse(
                 action = ActionType.EXECUTE,
                 message = summary,
@@ -1758,9 +1822,7 @@ class ConversationalGovernor(
         // 워크플로우 영구 저장
         persistWorkflow(workflow, hlxJson, session, userId)
 
-        session.resetSpec()
-        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-        session.context.activeTaskId = null
+        session.completeCurrentTask()
 
         return ConversationResponse(
             action = ActionType.EXECUTE,
@@ -1931,9 +1993,7 @@ class ConversationalGovernor(
         // 워크플로우 영구 저장
         persistWorkflow(workflow, hlxJson, session, userId)
 
-        session.resetSpec()
-        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-        session.context.activeTaskId = null
+        session.completeCurrentTask()
 
         return ConversationResponse(
             action = ActionType.EXECUTE,
@@ -2121,9 +2181,7 @@ class ConversationalGovernor(
         // 9. 워크플로우 영구 저장
         persistWorkflow(workflow, hlxJson, session, userId)
 
-        session.resetSpec()
-        session.context.activeTask?.let { it.status = TaskStatus.COMPLETED }
-        session.context.activeTaskId = null
+        session.completeCurrentTask()
 
         return ConversationResponse(
             action = ActionType.EXECUTE,
@@ -4713,6 +4771,19 @@ class ConversationalGovernor(
                 sessionId = session.sessionId
             )
         }
+    }
+
+    /**
+     * 복합 요청 + 조회/분석 의도 — "파악하고 자동화하고 만들어" 같은 패턴
+     * 조회/분석이 먼저 필요한데 PROJECT_CREATE로 축소되는 것을 방지
+     */
+    private fun isCompositeRequestWithInvestigation(message: String): Boolean {
+        val lower = message.lowercase()
+        val hasInvestigationIntent = listOf("파악", "확인", "분석", "조회", "살펴", "알아보", "현황", "상태").any { lower.contains(it) }
+        val hasAutomationIntent = listOf("자동화", "자동으로", "워크플로우", "프로세스").any { lower.contains(it) }
+        val actionVerbs = listOf("만들", "생성", "구축", "개발", "파악", "확인", "분석", "조회", "자동화", "저장", "출력")
+        val hasMultipleVerbs = actionVerbs.count { lower.contains(it) } >= 3
+        return hasInvestigationIntent && (hasAutomationIntent || hasMultipleVerbs)
     }
 
     /**

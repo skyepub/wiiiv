@@ -767,6 +767,27 @@ class ConversationSession(
     }
 
     /**
+     * 현재 작업 완료 처리 — 파이프라인 경계 마커 추가 + 토큰 정리
+     *
+     * 완료된 task의 draftSpec은 보존 (수정 요청 복원용),
+     * 세션 레벨 spec만 초기화 + 경계 마커 + tokenStore.clear()
+     */
+    fun completeCurrentTask() {
+        // 완료된 task의 draftSpec은 보존 — 수정 요청 시 taskType/targetPath 복원에 사용
+        context.activeTask?.let { it.status = TaskStatus.COMPLETED }
+        context.activeTaskId = null
+        _fallbackDraftSpec = DraftSpec.empty()
+        confirmed = false
+        context.tokenStore.clear()
+        // 컨텍스트 경계 마커 — LLM이 이전 파이프라인과 새 요청을 구분하도록
+        // ⚠ 수정 요청은 허용하되, 완전히 다른 유형의 요청은 독립 처리 유도
+        history.add(ConversationMessage(
+            MessageRole.SYSTEM,
+            "--- 이전 작업이 완료되었습니다. 다음 요청이 이전 작업의 수정/보완이면 같은 taskType을 유지하고, 완전히 다른 작업이면 새롭게 판단하세요. ---"
+        ))
+    }
+
+    /**
      * 현재 작업만 취소 (다른 SUSPENDED 작업은 보존)
      *
      * - activeTask가 있으면 tasks에서 제거하고 activeTaskId를 null로

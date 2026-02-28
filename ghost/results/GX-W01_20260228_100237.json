@@ -1,0 +1,30 @@
+{
+  "case_id": "GX-W01",
+  "name": "신입 김사원의 URL 읽기",
+  "timestamp": "2026-02-28T10:02:37.318775",
+  "turns": 1,
+  "elapsed_sec": 26.8,
+  "verdict": "PASS",
+  "reason": "wiiiv가 '실행 완료'라고 언급했고, 실제로 페이지의 내용을 제공했기 때문에 목표가 달성되었습니다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "안녕하세요~ 이 사이트 내용 좀 봐주실 수 있나요? https://example.com",
+      "turn": 1,
+      "timestamp": "2026-02-28T10:02:12.150045"
+    },
+    {
+      "role": "wiiiv",
+      "content": "실행 완료!\n\n성공: 1개 step\n\n[https://example.com]\nExample Domain Example Domain This domain is for use in documentation examples without needing permission. Avoid use in operations. Learn more\n",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-28T10:02:33.591126"
+    },
+    {
+      "role": "ghost",
+      "content": "오, 정말 감사합니다~ 완전 간단하게 잘 설명되어 있네요. 도움 주셔서 고마워요!",
+      "turn": 2,
+      "timestamp": "2026-02-28T10:02:36.368207"
+    }
+  ]
+}

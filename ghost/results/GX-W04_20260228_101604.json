@@ -1,0 +1,43 @@
+{
+  "case_id": "GX-W04",
+  "name": "한팀장의 RAG 대체 웹 조회",
+  "timestamp": "2026-02-28T10:16:04.992591",
+  "turns": 2,
+  "elapsed_sec": 17.9,
+  "verdict": "FAIL",
+  "reason": "wiiiv가 사용자의 명시적인 웹 검색 요청에 반응하여 WEB_FETCH로 전환하려고 시도했으나, 시스템 설정 문제로 인해 실행에 실패했기 때문에 목표 2단계를 달성하지 못했습니다.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "최신 Spring Boot 버전이 몇이에요? 정확한 버전 번호를 알려주세요.",
+      "turn": 1,
+      "timestamp": "2026-02-28T10:15:46.522382"
+    },
+    {
+      "role": "wiiiv",
+      "content": "죄송합니다. 현재 Spring Boot의 최신 버전 번호에 대한 정보는 제공된 문서에 포함되어 있지 않아 확인할 수 없습니다.",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-28T10:15:49.898337"
+    },
+    {
+      "role": "ghost",
+      "content": "그러면 웹에서 검색해서 알아봐 주세요.",
+      "turn": 2,
+      "timestamp": "2026-02-28T10:15:51.657608"
+    },
+    {
+      "role": "wiiiv",
+      "content": "실행 중 문제 발생\n\n성공: 0개, 실패: 1개\n\n[오류] SEARCH_NOT_CONFIGURED: SEARCH_API_KEY not configured\n",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-28T10:16:01.598305"
+    },
+    {
+      "role": "ghost",
+      "content": "설정된 검색 API가 없는 것 같군요. 그럼 나중에 직접 찾아보도록 하겠습니다. 감사합니다.",
+      "turn": 3,
+      "timestamp": "2026-02-28T10:16:03.847851"
+    }
+  ]
+}

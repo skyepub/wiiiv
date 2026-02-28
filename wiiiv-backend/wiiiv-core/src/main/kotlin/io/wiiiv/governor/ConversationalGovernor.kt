@@ -298,21 +298,71 @@ class ConversationalGovernor(
             }
             // FILE_READ 강제 교정: 명시적 파일 경로 + 읽기 의도인데 LLM이 다른 taskType을 설정한 경우
             // Turn 3-4에서 "파일 읽어줘"가 "워크플로우 이미 저장됨"으로 오분류되는 문제 해결
+            // ⚠ URL이 포함된 경우는 제외 — URL은 WEB_FETCH 영역
+            //    프로토콜 없는 URL도 감지: www.naver.com, apple.com/developer 등
+            val webDomainTlds = """(?:com|net|org|io|dev|co\.kr|co\.jp|kr|jp|me|info|biz|edu|gov)"""
+            val bareDomainPattern = Regex("""(?:www\.)?[a-zA-Z0-9][-a-zA-Z0-9]*\.$webDomainTlds(?:/[^\s]*)?""")
             if (session.draftSpec.taskType != null
                 && session.draftSpec.taskType != TaskType.FILE_READ
                 && session.draftSpec.taskType != TaskType.FILE_WRITE) {
-                val filePathPattern = Regex("""[/~][\w./\-]+\.\w+|[A-Z]:\\[\w\\.\-]+""")
+                val hasUrl = Regex("""https?://""").containsMatchIn(userMessage) || bareDomainPattern.containsMatchIn(userMessage)
+                if (!hasUrl) {
+                    val filePathPattern = Regex("""[/~][\w./\-]+\.\w+|[A-Z]:\\[\w\\.\-]+""")
+                    val lowerMsg = userMessage.lowercase()
+                    val hasExplicitPath = filePathPattern.containsMatchIn(userMessage)
+                    val hasReadIntent = listOf("읽어", "열어", "내용을 확인", "파일을 읽", "파일 읽", "파일의 내용").any { lowerMsg.contains(it) }
+                    val hasWriteIntent = listOf("저장해", "써줘", "넣어", "기록해", "만들어").any { lowerMsg.contains(it) }
+                    if (hasExplicitPath && hasReadIntent && !hasWriteIntent) {
+                        val filePath = filePathPattern.find(userMessage)?.value
+                        session.updateSpec(mapOf(
+                            "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.FILE_READ.name),
+                            "targetPath" to kotlinx.serialization.json.JsonPrimitive(filePath ?: "")
+                        ))
+                        println("[GOVERNOR] Post-specUpdates FILE_READ correction: explicit path ($filePath) + read intent, overriding ${session.draftSpec.taskType}")
+                    }
+                }
+            }
+            // URL → WEB_FETCH 교정: 사용자 메시지에 URL이 포함되어 있으면 WEB_FETCH로 교정
+            // 프로토콜 포함 (https://...) + 프로토콜 미포함 (apple.com/dev, www.naver.com) 모두 감지
+            // LLM이 "읽어봐" 패턴을 보고 FILE_READ로 오분류하거나 CONVERSATION으로 분류하는 문제 해결
+            if (session.draftSpec.taskType != TaskType.WEB_FETCH) {
+                val fullUrlPattern = Regex("""https?://[^\s]+""")
+                val fullUrlMatch = fullUrlPattern.find(userMessage)
+                val bareDomainMatch = bareDomainPattern.find(userMessage)
+                val detectedUrl = if (fullUrlMatch != null) {
+                    fullUrlMatch.value
+                } else if (bareDomainMatch != null) {
+                    "https://${bareDomainMatch.value}"  // 프로토콜 자동 보완
+                } else null
+
+                if (detectedUrl != null) {
+                    val lowerMsg = userMessage.lowercase()
+                    val hasFetchIntent = listOf("읽어", "봐줘", "보여줘", "내용", "가져", "참고", "요약",
+                        "들어가", "확인", "열어", "fetch", "read").any { lowerMsg.contains(it) }
+                    val currentType = session.draftSpec.taskType
+                    // FILE_READ + URL → 무조건 WEB_FETCH (URL은 파일이 아님)
+                    // CONVERSATION/INFORMATION + URL + fetch intent → WEB_FETCH
+                    // null(LLM이 taskType 미설정) + URL → WEB_FETCH
+                    if (currentType == TaskType.FILE_READ ||
+                        currentType == null ||
+                        ((currentType == TaskType.CONVERSATION || currentType == TaskType.INFORMATION) && hasFetchIntent)) {
+                        session.updateSpec(mapOf(
+                            "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.WEB_FETCH.name),
+                            "targetPath" to kotlinx.serialization.json.JsonPrimitive(detectedUrl)
+                        ))
+                        println("[GOVERNOR] Post-specUpdates WEB_FETCH correction: URL detected ($detectedUrl), overriding $currentType → WEB_FETCH")
+                    }
+                }
+            }
+            // 명시적 웹 검색 요청 → WEB_FETCH 교정: "웹에서 찾아봐" 패턴
+            if (session.draftSpec.taskType != TaskType.WEB_FETCH) {
                 val lowerMsg = userMessage.lowercase()
-                val hasExplicitPath = filePathPattern.containsMatchIn(userMessage)
-                val hasReadIntent = listOf("읽어", "열어", "내용을 확인", "파일을 읽", "파일 읽", "파일의 내용").any { lowerMsg.contains(it) }
-                val hasWriteIntent = listOf("저장해", "써줘", "넣어", "기록해", "만들어").any { lowerMsg.contains(it) }
-                if (hasExplicitPath && hasReadIntent && !hasWriteIntent) {
-                    val filePath = filePathPattern.find(userMessage)?.value
+                val hasWebKeyword = listOf("웹에서", "인터넷에서", "구글링", "검색해봐", "웹으로 찾", "웹 검색").any { lowerMsg.contains(it) }
+                if (hasWebKeyword) {
                     session.updateSpec(mapOf(
-                        "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.FILE_READ.name),
-                        "targetPath" to kotlinx.serialization.json.JsonPrimitive(filePath ?: "")
+                        "taskType" to kotlinx.serialization.json.JsonPrimitive(TaskType.WEB_FETCH.name)
                     ))
-                    println("[GOVERNOR] Post-specUpdates FILE_READ correction: explicit path ($filePath) + read intent, overriding ${session.draftSpec.taskType}")
+                    println("[GOVERNOR] Post-specUpdates WEB_FETCH correction: explicit web search keyword detected, overriding ${session.draftSpec.taskType} → WEB_FETCH")
                 }
             }
             // intent가 null인데 taskType이 있으면 기본 intent 자동 설정
@@ -1336,6 +1386,9 @@ class ConversationalGovernor(
 
         // FILE_READ → DIRECT (READ only, 단일 Executor, 무부작용)
         if (taskType == TaskType.FILE_READ) return RouteMode.DIRECT
+
+        // WEB_FETCH → DIRECT (READ only, 단일 webfetch Executor, 무부작용)
+        if (taskType == TaskType.WEB_FETCH) return RouteMode.DIRECT
 
         // CONVERSATION, INFORMATION → DIRECT (실행 불필요, 응답만)
         if (taskType == TaskType.CONVERSATION || taskType == TaskType.INFORMATION) return RouteMode.DIRECT
@@ -2709,6 +2762,40 @@ class ConversationalGovernor(
                 )
             }
 
+            TaskType.WEB_FETCH -> {
+                val rawUrl = draftSpec.targetPath
+                // 프로토콜 자동 보완: apple.com/dev → https://apple.com/dev
+                val url = when {
+                    rawUrl == null -> null
+                    rawUrl.startsWith("http://") || rawUrl.startsWith("https://") -> rawUrl
+                    rawUrl.contains(".") -> "https://$rawUrl"
+                    else -> null
+                }
+                if (url != null) {
+                    // URL 페치
+                    listOf(BlueprintStep(
+                        stepId = stepId,
+                        type = BlueprintStepType.PLUGIN,
+                        params = mapOf(
+                            "pluginId" to "webfetch",
+                            "action" to "fetch",
+                            "url" to url
+                        )
+                    ))
+                } else {
+                    // 웹 검색 (URL 없이 "웹에서 찾아봐")
+                    listOf(BlueprintStep(
+                        stepId = stepId,
+                        type = BlueprintStepType.PLUGIN,
+                        params = mapOf(
+                            "pluginId" to "webfetch",
+                            "action" to "search",
+                            "query" to (draftSpec.intent ?: "")
+                        )
+                    ))
+                }
+            }
+
             TaskType.INFORMATION, TaskType.CONVERSATION, TaskType.WORKFLOW_MANAGE, null -> {
                 // 실행이 필요하지 않은 타입 (WORKFLOW_MANAGE는 Pre-LLM 인터셉터가 처리)
                 listOf(
@@ -3349,12 +3436,34 @@ class ConversationalGovernor(
                     }
                 }
 
-                // API: statusCode + body
-                output.json["statusCode"]?.let { statusCode ->
-                    val code = statusCode.jsonPrimitive.contentOrNull
-                    val body = output.json["body"]?.jsonPrimitive?.contentOrNull
+                // WEBFETCH: text (URL 페이지 텍스트)
+                output.json["text"]?.let { text ->
+                    val content = text.jsonPrimitive.contentOrNull ?: return@let
+                    val url = output.json["url"]?.jsonPrimitive?.contentOrNull ?: ""
                     appendLine()
-                    appendLine("[HTTP $code] ${body?.take(1000) ?: ""}")
+                    if (url.isNotBlank()) appendLine("[$url]")
+                    appendLine(content.take(4000))
+                }
+
+                // WEBFETCH: search result
+                if (output.json["text"] == null) {
+                    output.json["result"]?.let { result ->
+                        val resultText = result.jsonPrimitive.contentOrNull ?: return@let
+                        val query = output.json["query"]?.jsonPrimitive?.contentOrNull ?: ""
+                        appendLine()
+                        if (query.isNotBlank()) appendLine("[검색: $query]")
+                        appendLine(resultText.take(4000))
+                    }
+                }
+
+                // API: statusCode + body (webfetch는 위 핸들러에서 처리)
+                if (output.json["text"] == null && output.json["result"] == null) {
+                    output.json["statusCode"]?.let { statusCode ->
+                        val code = statusCode.jsonPrimitive.contentOrNull
+                        val body = output.json["body"]?.jsonPrimitive?.contentOrNull
+                        appendLine()
+                        appendLine("[HTTP $code] ${body?.take(1000) ?: ""}")
+                    }
                 }
 
                 // FILE_WRITE: path + action
@@ -3364,6 +3473,17 @@ class ConversationalGovernor(
                         val path = output.json["path"]?.jsonPrimitive?.contentOrNull ?: ""
                         appendLine()
                         appendLine("파일 저장 완료: $path")
+                    }
+                }
+            }
+
+            // 실패한 step의 에러 상세정보 표시
+            if (!result.isSuccess) {
+                for (stepResult in result.runnerResult.results) {
+                    if (stepResult is io.wiiiv.execution.ExecutionResult.Failure) {
+                        val err = stepResult.error
+                        appendLine()
+                        appendLine("[오류] ${err.code}: ${err.message}")
                     }
                 }
             }

@@ -1896,6 +1896,178 @@ SCENARIOS: dict[str, Scenario] = {
         ),
         first_message_hint="안녕하세요. skymall 상품을 전체 조회해주세요.",
     ),
+
+    # ============================================================
+    # Phase W: WEB_FETCH 파이프라인 검증 (W01~W05)
+    # ============================================================
+
+    "GX-W01": Scenario(
+        case_id="GX-W01",
+        name="신입 김사원의 URL 읽기",
+        persona=(
+            "마케팅팀 신입 김사원. 20대 여성. 밝고 말이 많다. "
+            "IT를 잘 모르지만 호기심이 많다. 존댓말을 쓴다. "
+            "'이거 좀 봐주세요~' 식으로 친근하게 부탁한다."
+        ),
+        goal=(
+            "https://example.com 페이지를 wiiiv에게 읽어달라고 요청하고, "
+            "페이지 내용을 실제로 받는다."
+        ),
+        constraints=[
+            "첫 메시지에 URL(https://example.com)을 직접 포함할 것",
+            "'이 사이트 좀 봐주세요' 또는 '여기 내용 읽어봐주세요' 식으로 요청",
+            "wiiiv가 페이지 내용을 보여주면 간단히 감상을 말하고 끝낸다",
+            "URL을 반드시 정확하게 포함해야 한다: https://example.com",
+        ],
+        max_turns=8,
+        judge_criteria=(
+            "wiiiv가 실제로 https://example.com 페이지를 fetch하여 내용을 보여주면 PASS. "
+            "WEB_FETCH 또는 webfetch 플러그인이 실행된 흔적이 있으면 PASS. "
+            "'기능이 없습니다' 또는 '할 수 없습니다'로 응답하면 FAIL."
+        ),
+        first_message_hint="안녕하세요~ 이 사이트 내용 좀 봐주실 수 있나요? https://example.com",
+    ),
+
+    "GX-W02": Scenario(
+        case_id="GX-W02",
+        name="이과장의 웹 검색 요청",
+        persona=(
+            "기획팀 이과장. 40대 남성. 실용적이고 직설적이다. "
+            "반말과 존댓말을 섞어 쓴다. '알아서 찾아봐' 식으로 지시한다. "
+            "검색 결과가 마음에 안 들면 '다른 걸로 찾아봐' 한다."
+        ),
+        goal=(
+            "wiiiv에게 '웹에서 찾아봐' 식으로 웹 검색을 요청하고, "
+            "URL 없이 검색어만으로 웹 검색이 실행되는 것을 확인한다."
+        ),
+        constraints=[
+            "URL을 절대 주지 않는다 — '웹에서 찾아봐' 또는 '인터넷에서 검색해봐' 식으로만 요청",
+            "검색 주제: 'Kotlin 2.0 새 기능' 또는 비슷한 기술 주제",
+            "wiiiv가 '할 수 없다'고 하면 '아니 웹에서 검색하란 말이야' 식으로 재요청",
+            "검색 결과를 받으면 (성공이든 에러든) 반응하고 끝낸다",
+        ],
+        max_turns=10,
+        judge_criteria=(
+            "wiiiv가 WEB_FETCH taskType으로 분류하고 webfetch 플러그인의 search action을 실행하면 PASS. "
+            "검색 API 키 미설정으로 에러가 나더라도 WEB_FETCH로 시도한 흔적이 있으면 PASS. "
+            "CONVERSATION으로 분류하고 '할 수 없다'고만 답하면 FAIL."
+        ),
+        first_message_hint="Kotlin 2.0에 뭐가 새로 추가됐는지 웹에서 좀 찾아봐.",
+    ),
+
+    "GX-W03": Scenario(
+        case_id="GX-W03",
+        name="정대리의 URL 읽기 + 후속 대화",
+        persona=(
+            "개발팀 정대리. 30대 남성. 꼼꼼하고 질문이 많다. "
+            "URL을 주고 읽어달라고 한 뒤, 내용에 대해 추가 질문을 한다. "
+            "'그 페이지에서 ~는 뭐야?', '거기 나온 ~를 설명해줘' 식으로 후속 질문."
+        ),
+        goal=(
+            "1단계: https://httpbin.org/html 페이지를 wiiiv에게 읽어달라고 요청 "
+            "2단계: 받은 내용에 대해 후속 질문을 1~2개 한다 "
+            "3단계: 후속 질문에 대한 대화형 답변을 받는다"
+        ),
+        constraints=[
+            "1단계: URL(https://httpbin.org/html)을 주고 '이 페이지 내용 봐줘'",
+            "2단계: wiiiv가 내용을 보여주면 '거기 나온 내용 좀 요약해줘' 또는 '어떤 내용이야?' 식으로 후속 질문",
+            "3단계: wiiiv의 답변을 듣고 자연스럽게 마무리",
+            "후속 질문은 REPLY(대화)로 처리되어야 정상 — 두 번째 fetch를 할 필요 없음",
+        ],
+        max_turns=10,
+        judge_criteria=(
+            "1단계에서 WEB_FETCH로 페이지를 실제로 fetch하고, "
+            "2단계에서 후속 질문에 대화형 답변(REPLY)을 제공하면 PASS. "
+            "fetch 자체가 실패하면 FAIL."
+        ),
+        first_message_hint="이 페이지 내용 좀 봐주세요. https://httpbin.org/html",
+    ),
+
+    "GX-W04": Scenario(
+        case_id="GX-W04",
+        name="한팀장의 RAG 대체 웹 조회",
+        persona=(
+            "연구팀 한팀장. 30대 후반 여성. 논리적이고 정확함을 추구한다. "
+            "존댓말을 쓰며, 질문이 명확하다. "
+            "처음에 일반 질문을 하고, wiiiv가 '모른다'고 하면 "
+            "'그러면 웹에서 찾아봐 주세요' 식으로 웹 검색을 요청한다."
+        ),
+        goal=(
+            "1단계: RAG에 없는 실시간 정보 질문 (예: '최신 Spring Boot 버전이 뭐야?') → wiiiv가 '확인할 수 없다'고 답변 "
+            "2단계: '그러면 웹에서 찾아봐 주세요' → WEB_FETCH 실행 "
+            "Governor가 환각 금지 원칙을 지키면서도, 명시적 웹 검색 요청에는 WEB_FETCH로 전환하는지 검증."
+        ),
+        constraints=[
+            "1단계: RAG에 없을 법한 실시간 정보를 질문한다 (최신 프레임워크 버전, 최근 뉴스 등)",
+            "wiiiv가 '확인할 수 없다'고 답하면 → '그러면 웹에서 검색해서 알아봐 주세요' 또는 '인터넷에서 찾아봐요'",
+            "wiiiv가 첫 질문에서 바로 웹 검색하면 (환각 안 하고 웹으로 가면) 그것도 OK",
+            "결과를 받으면 (성공이든 에러든) 자연스럽게 마무리",
+        ],
+        max_turns=10,
+        judge_criteria=(
+            "wiiiv가 (1) 처음에 모르는 정보를 환각하지 않고, "
+            "(2) 사용자의 명시적 웹 검색 요청에 WEB_FETCH로 전환하여 실행하면 PASS. "
+            "환각하여 거짓 정보를 답하면 FAIL. "
+            "웹 검색 요청을 무시하고 계속 '할 수 없다'고만 하면 FAIL."
+        ),
+        first_message_hint="최신 Spring Boot 버전이 몇이에요? 정확한 버전 번호를 알려주세요.",
+    ),
+
+    "GX-W05": Scenario(
+        case_id="GX-W05",
+        name="오차장의 웹+파일 복합 작업",
+        persona=(
+            "전략팀 오차장. 40대 남성. 효율적이고 결과 지향적이다. "
+            "말이 짧고, 여러 단계를 연속으로 지시한다. "
+            "'이거 하고 저거 해' 식으로 복합 요청을 한다."
+        ),
+        goal=(
+            "1단계: 특정 URL(https://example.com)을 읽게 한다 "
+            "2단계: 읽은 내용을 /tmp/web_result.txt에 저장하게 한다 "
+            "WEB_FETCH → FILE_WRITE 파이프라인 전환이 자연스럽게 이루어지는지 검증."
+        ),
+        constraints=[
+            "1단계: 'https://example.com 읽어봐' 식으로 URL 페치 요청",
+            "2단계: wiiiv가 내용을 보여주면 '그 내용을 /tmp/web_result.txt에 저장해줘'",
+            "경로 /tmp/web_result.txt를 반드시 정확히 언급",
+            "저장 확인 후 마무리",
+        ],
+        max_turns=12,
+        judge_criteria=(
+            "1단계에서 WEB_FETCH로 URL을 fetch하고, "
+            "2단계에서 FILE_WRITE로 /tmp/web_result.txt에 저장하면 PASS. "
+            "WEB_FETCH가 실행되지 않거나, 파일 저장이 이루어지지 않으면 FAIL. "
+            "두 파이프라인 중 하나만 성공해도 부분 PASS — 둘 다 성공이 완전 PASS."
+        ),
+        first_message_hint="https://example.com 내용 좀 읽어봐.",
+    ),
+    "GX-W06": Scenario(
+        case_id="GX-W06",
+        name="박대리의 프로토콜 없는 URL 요청",
+        persona=(
+            "마케팅팀 박대리. 20대 후반 여성. IT에 익숙하지 않아서 URL을 정확히 쓰지 않는다. "
+            "프로토콜(https://) 없이 도메인만 쓰거나, www.를 붙이거나, "
+            "'~사이트 참고해' 식으로 말한다. 반말 사용."
+        ),
+        goal=(
+            "1단계: 프로토콜 없는 URL(예: httpbin.org/html)로 페이지 읽기 요청 "
+            "2단계: wiiiv가 페이지 내용을 성공적으로 가져와서 보여주면 PASS. "
+            "프로토콜 없는 bare domain URL도 WEB_FETCH로 인식하는지 검증."
+        ),
+        constraints=[
+            "반드시 프로토콜(http://, https://) 없이 URL을 쓴다",
+            "예: 'httpbin.org/html 읽어봐', 'www.example.com 참고해'",
+            "절대 https://를 붙이지 않는다",
+            "wiiiv가 페이지 내용을 보여주면 만족하고 마무리",
+        ],
+        max_turns=8,
+        judge_criteria=(
+            "프로토콜 없는 bare domain URL(예: httpbin.org/html, www.example.com)로 요청했을 때 "
+            "wiiiv가 WEB_FETCH로 인식하여 페이지 내용을 가져오면 PASS. "
+            "페이지 내용이 표시되지 않거나, 파일로 오인식하면 FAIL."
+        ),
+        first_message_hint="httpbin.org/html 이 페이지 좀 읽어봐.",
+    ),
 }
 
 

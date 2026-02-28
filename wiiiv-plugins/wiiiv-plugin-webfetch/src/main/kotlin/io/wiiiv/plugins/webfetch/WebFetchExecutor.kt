@@ -40,7 +40,7 @@ class WebFetchExecutor(config: PluginConfig) : Executor {
         val ps = step as ExecutionStep.PluginStep
         val startedAt = Instant.now()
 
-        return try {
+        val result = try {
             when (ps.action) {
                 "fetch" -> executeFetch(ps, startedAt)
                 "fetch_json" -> executeFetchJson(ps, startedAt)
@@ -63,6 +63,17 @@ class WebFetchExecutor(config: PluginConfig) : Executor {
                 meta = ExecutionMeta.of(ps.stepId, startedAt, Instant.now())
             )
         }
+
+        // 성공 시 output을 context에 저장 — formatExecutionResult()에서 참조
+        if (result is ExecutionResult.Success && result.output != null) {
+            try {
+                context.addStepOutput(ps.stepId, result.output)
+            } catch (_: Exception) {
+                // append-only violation 무시 (이미 저장된 경우)
+            }
+        }
+
+        return result
     }
 
     private suspend fun executeFetch(ps: ExecutionStep.PluginStep, startedAt: Instant): ExecutionResult {

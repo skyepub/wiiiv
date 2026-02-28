@@ -32,7 +32,7 @@ fun Route.authRoutes() {
                 return@get
             }
 
-            val token = JwtConfig.generateToken("dev-user", listOf("admin"))
+            val token = JwtConfig.generateToken("admin@wiiiv.io", listOf("admin"))
             call.respond(
                 ApiResponse.success(
                     LoginResponse(accessToken = token)
@@ -40,14 +40,20 @@ fun Route.authRoutes() {
             )
         }
 
-        // Manual login
+        // Manual login (email + password)
         post("/login") {
             val request = call.receive<LoginRequest>()
 
-            // TODO: Implement actual user validation
-            // For now, simple check for demo
-            if (request.username == "admin" && request.password == "mako2122") {
-                val token = JwtConfig.generateToken(request.username, listOf("admin"))
+            // TODO: Implement actual user store with hashed passwords
+            // Built-in accounts for initial setup
+            val builtInUsers = mapOf(
+                "admin@wiiiv.io" to Pair("mako2122", listOf("admin")),
+                "test@wiiiv.io" to Pair("test1234", listOf("user")),
+            )
+
+            val account = builtInUsers[request.email]
+            if (account != null && account.first == request.password) {
+                val token = JwtConfig.generateToken(request.email, account.second)
                 call.respond(
                     ApiResponse.success(
                         LoginResponse(accessToken = token)
@@ -59,7 +65,7 @@ fun Route.authRoutes() {
                     ApiResponse.error<LoginResponse>(
                         ApiError(
                             code = "INVALID_CREDENTIALS",
-                            message = "Invalid username or password"
+                            message = "Invalid email or password"
                         )
                     )
                 )
@@ -70,11 +76,15 @@ fun Route.authRoutes() {
         authenticate("auth-jwt", "auth-apikey", strategy = AuthenticationStrategy.FirstSuccessful) {
             get("/me") {
                 val principal = call.principal<UserPrincipal>()!!
+                // userId now stores email
+                val email = principal.userId
+                val username = email.substringBefore("@")
                 call.respond(
                     ApiResponse.success(
                         UserInfo(
-                            userId = principal.userId,
-                            username = principal.userId,
+                            userId = email,
+                            username = username,
+                            email = email,
                             roles = principal.roles
                         )
                     )

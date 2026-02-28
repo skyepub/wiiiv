@@ -84,6 +84,7 @@ data class DraftSpec(
         TaskType.CONVERSATION -> emptySet() // 일반 대화는 필수 없음
         TaskType.WORKFLOW_MANAGE -> emptySet() // 워크플로우 관리는 Pre-LLM 인터셉터가 처리
         TaskType.WORKFLOW_CREATE -> setOf("domain", "scale") // 복합 워크플로우: 목적 + 상세 흐름
+        TaskType.WEB_FETCH -> setOf("intent") // 웹 페치: intent만 필수 (URL은 targetPath, 검색 모드에는 URL 없음)
         TaskType.API_WORKFLOW -> setOf("intent", "domain") // API 워크플로우
         TaskType.DB_QUERY -> setOf("intent", "domain") // DB 조회 (domain = DB명)
         null -> setOf("intent", "taskType") // 아직 유형 미정
@@ -137,6 +138,7 @@ data class DraftSpec(
             targetPath?.let { isSystemPath(it) } ?: false
         }
         TaskType.WORKFLOW_CREATE -> false  // 워크플로우 생성은 작업지시서 기반 — DACS 불필요
+        TaskType.WEB_FETCH -> false  // 웹 페이지 읽기 — DACS 불필요
         TaskType.API_WORKFLOW -> false  // API 호출은 외부 서비스 읽기 — DACS 불필요
         TaskType.DB_QUERY -> false  // DB 조회는 GateChain이 통제 — DACS 불필요
         else -> {
@@ -216,6 +218,7 @@ data class DraftSpec(
                 RequestType.FILE_MKDIR,
                 RequestType.FILE_WRITE
             )
+            TaskType.WEB_FETCH -> listOf(RequestType.CUSTOM)
             TaskType.API_WORKFLOW -> listOf(RequestType.CUSTOM)
             TaskType.DB_QUERY -> listOf(RequestType.CUSTOM)
             else -> emptyList()
@@ -229,6 +232,10 @@ data class DraftSpec(
             TaskType.DB_QUERY -> {
                 // DB 조회: domain을 DB 스코프로 사용
                 listOfNotNull(domain?.let { "db://$it" } ?: "db://default")
+            }
+            TaskType.WEB_FETCH -> {
+                // 웹 페치: targetPath(URL) 또는 기본 web://search
+                listOfNotNull(targetPath ?: "web://search")
             }
             else -> listOfNotNull(targetPath)
         }
@@ -324,7 +331,10 @@ enum class TaskType(val displayName: String) {
     WORKFLOW_MANAGE("워크플로우 관리"),
 
     /** 복합 워크플로우 생성 (인터뷰 → 작업지시서 → HLX 생성 → 실행) */
-    WORKFLOW_CREATE("워크플로우 생성")
+    WORKFLOW_CREATE("워크플로우 생성"),
+
+    /** 웹 페이지 조회/검색 (webfetch 플러그인) */
+    WEB_FETCH("웹 페이지 조회")
 }
 
 /**

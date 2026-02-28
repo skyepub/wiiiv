@@ -40,7 +40,7 @@ class AuthRoutesTest {
 
         val response = client.post("/api/v2/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody("""{"username": "admin", "password": "admin123"}""")
+            setBody("""{"email": "admin@wiiiv.io", "password": "mako2122"}""")
         }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -56,7 +56,7 @@ class AuthRoutesTest {
 
         val response = client.post("/api/v2/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody("""{"username": "admin", "password": "wrongpassword"}""")
+            setBody("""{"email": "admin@wiiiv.io", "password": "wrongpassword"}""")
         }
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)

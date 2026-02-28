@@ -1,0 +1,43 @@
+{
+  "case_id": "GX-W05",
+  "name": "오차장의 웹+파일 복합 작업",
+  "timestamp": "2026-02-28T10:16:55.359372",
+  "turns": 2,
+  "elapsed_sec": 25.9,
+  "verdict": "PASS",
+  "reason": "WEB_FETCH로 특정 URL을 성공적으로 읽었고, 그 내용을 /tmp/web_result.txt에 성공적으로 저장하여 두 파이프라인 모두 성공적으로 수행됨.",
+  "conversation": [
+    {
+      "role": "ghost",
+      "content": "https://example.com 내용 좀 읽어봐.",
+      "turn": 1,
+      "timestamp": "2026-02-28T10:16:28.815990"
+    },
+    {
+      "role": "wiiiv",
+      "content": "실행 완료!\n\n성공: 1개 step\n\n[https://example.com]\nExample Domain Example Domain This domain is for use in documentation examples without needing permission. Avoid use in operations. Learn more\n",
+      "turn": 1,
+      "action": "",
+      "timestamp": "2026-02-28T10:16:38.894492"
+    },
+    {
+      "role": "ghost",
+      "content": "그 내용을 /tmp/web_result.txt에 저장해줘.",
+      "turn": 2,
+      "timestamp": "2026-02-28T10:16:40.415222"
+    },
+    {
+      "role": "wiiiv",
+      "content": "실행 완료!\n\n성공: 1개 step\n\n파일 저장 완료: /tmp/web_result.txt\n",
+      "turn": 2,
+      "action": "",
+      "timestamp": "2026-02-28T10:16:52.377767"
+    },
+    {
+      "role": "ghost",
+      "content": "잘했어. 고마워.",
+      "turn": 3,
+      "timestamp": "2026-02-28T10:16:54.163212"
+    }
+  ]
+}

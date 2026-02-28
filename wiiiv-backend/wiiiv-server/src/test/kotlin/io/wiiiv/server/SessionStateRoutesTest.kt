@@ -32,7 +32,7 @@ class SessionStateRoutesTest {
     private suspend fun ApplicationTestBuilder.getOtherUserToken(): String {
         val loginResponse = client.post("/api/v2/auth/login") {
             contentType(ContentType.Application.Json)
-            setBody("""{"username": "admin", "password": "admin123"}""")
+            setBody("""{"email": "test@wiiiv.io", "password": "test1234"}""")
         }
         val loginBody = json.parseToJsonElement(loginResponse.bodyAsText()).jsonObject
         return loginBody["data"]?.jsonObject?.get("accessToken")?.jsonPrimitive?.content
